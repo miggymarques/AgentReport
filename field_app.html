@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Service Report</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
+        .sub-label { font-size: 0.75rem; color: #6b7280; margin-bottom: 0.1rem; }
+        input, select, textarea { 
+            width: 100%; 
+            padding: 0.625rem; 
+            border: 1px solid #d1d5db; 
+            border-radius: 0.5rem; 
+            background-color: #ffffff;
+            font-size: 1rem;
+            transition: all 0.2s;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        select {
+            -webkit-appearance: listbox;
+            appearance: auto;
+        }
+        input:focus, select:focus, textarea:focus { 
+            border-color: #3b82f6; 
+            outline: none; 
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); 
+            background-color: #fff;
+        }
+        /* Validation Styling */
+        input.invalid-asset {
+            border-color: #ef4444 !important;
+            background-color: #fef2f2 !important;
+            color: #b91c1c !important;
+        }
+        
+        .tab-btn { position: relative; }
+        .tab-btn.active { color: #3b82f6; }
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 25%;
+            right: 25%;
+            height: 3px;
+            background: #3b82f6;
+            border-radius: 3px 3px 0 0;
+        }
+        
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            height: 42px;
+        }
+        .checkbox-container input {
+            width: 1.25rem;
+            height: 1.25rem;
+            margin-right: 0.5rem;
+            cursor: pointer;
+            -webkit-appearance: checkbox;
+            appearance: checkbox;
+        }
+
+        #editor-modal { display: none; }
+        #editor-modal.open { display: flex; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-900">
+
+    <header class="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-30">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-lg">A</div>
+                <h1 class="text-xl font-bold tracking-tight">Service Report</h1>
+            </div>
+            <button id="export-btn" onclick="exportToCSV()" class="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1.0 0 01.707.293l5.414 5.414a1 1.0 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export CSV
+            </button>
+        </div>
+    </header>
+
+    <nav class="bg-white border-b flex sticky top-[68px] z-20 shadow-sm">
+        <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-4 text-center font-bold transition-colors">NEW ENTRY</button>
+        <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
+    </nav>
+
+    <main class="container mx-auto p-4 pb-24 max-w-2xl">
+        <section id="section-form" class="space-y-4">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <form id="dataForm" onsubmit="handleSave(event)">
+                    
+                    <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                        <h2 id="flight-header-label" class="text-lg font-extrabold text-slate-800 uppercase tracking-wide">Flight Details</h2>
+                        <button type="button" id="toggle-inventory-btn" onclick="toggleInventoryMode()" class="bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-[10px] font-black hover:bg-amber-100 transition-all uppercase tracking-tighter">
+                            Inventory Only Mode
+                        </button>
+                    </div>
+
+                    <div id="service-specific-sections" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label>FIN</label>
+                                <input type="text" name="FIN" id="field-fin" placeholder="e.g. AC110" pattern="^(AC|RV|QK)\d{3,4}$" class="uppercase font-mono" oninput="handleFinInput(this)" required>
+                                <div id="fin-reference" class="mt-1 flex gap-2 h-6">
+                                    <span id="ref-type" class="text-base font-black text-blue-600 uppercase"></span>
+                                    <span id="ref-body" class="text-base font-black text-slate-400 uppercase"></span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Flight #</label>
+                                <input type="text" name="Flight#" id="field-flight" placeholder="e.g. AC0123" pattern="^(AC|RV|QK)\d{4}$" class="uppercase font-mono" oninput="this.value = this.value.toUpperCase()" required>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 items-end">
+                            <div class="form-group">
+                                <label>Serviced</label>
+                                <select name="Serviced" id="serviced-field" class="font-medium">
+                                    <option value="Yes" selected>Yes</option>
+                                    <option value="No">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Priority</label>
+                                <select name="Priority" id="priority-field">
+                                    <option value="1" selected>1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <div class="checkbox-container">
+                                    <input type="checkbox" name="ServiceCall" id="service-call-check">
+                                    <label for="service-call-check" class="!mb-0 !inline cursor-pointer font-bold text-blue-600">Srvc Call</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h2 class="text-sm font-black mb-4 mt-8 text-slate-400 uppercase tracking-[0.2em] border-b pb-2">Equipment</h2>
+                        <div class="space-y-4">
+                            <div class="bg-blue-50/40 p-4 rounded-xl border border-blue-100/50">
+                                <div class="grid grid-cols-3 gap-3 mb-3">
+                                    <div class="col-span-1">
+                                        <label class="text-blue-700">Case 1</label>
+                                        <input type="text" name="Case1" maxlength="4" placeholder="000 or Msng" class="border-blue-200 text-xs">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label class="text-blue-700">HHD 1</label>
+                                        <input type="text" name="HHD1" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label class="text-blue-700">HHD 2</label>
+                                        <input type="text" name="HHD2" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="col-span-1"></div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD1(Rmvd)</div>
+                                        <input type="text" name="HD1Rmvd" id="hd1-rmvd" maxlength="7" placeholder="0000" class="border-blue-200 bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD2(Rmvd)</div>
+                                        <input type="text" name="HD2Rmvd" id="hd2-rmvd" maxlength="7" placeholder="0000" class="border-blue-200 bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                <div class="grid grid-cols-3 gap-3 mb-3">
+                                    <div class="col-span-1">
+                                        <label>Case 2</label>
+                                        <input type="text" name="Case2" maxlength="4" placeholder="000 or Msng" class="text-xs">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label>HHD 3</label>
+                                        <input type="text" name="HHD3" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label>HHD 4</label>
+                                        <input type="text" name="HHD4" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="col-span-1"></div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD3(Rmvd)</div>
+                                        <input type="text" name="HD3Rmvd" id="hd3-rmvd" maxlength="7" placeholder="0000" class="bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD4(Rmvd)</div>
+                                        <input type="text" name="HD4Rmvd" id="hd4-rmvd" maxlength="7" placeholder="0000" class="bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div class="form-group">
+                                <label>Batteries (0-10)</label>
+                                <input type="number" name="Battery" min="0" max="10" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Rolls (0-20)</label>
+                                <input type="number" name="Rolls" min="0" max="20" placeholder="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <h2 id="issues-section-label" class="text-sm font-black mb-4 mt-8 text-slate-400 uppercase tracking-[0.2em] border-b pb-2">Service Issues</h2>
+                    <div class="form-group">
+                        <label>Reported Asset# (Last 4)</label>
+                        <input type="text" name="ASST" maxlength="7" placeholder="e.g. 1234" class="asset-input" oninput="validateAssetInput(this)">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="form-group">
+                            <label>Issue Category</label>
+                            <select name="SrvcIssCAT" id="srvc-iss-cat-field" onchange="updateIssueOptions()">
+                                <option value="">-- Select --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Specific Issue</label>
+                            <select name="SrvcIss" id="srvc-iss-field">
+                                <option value="">-- Select Category --</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Issue Details</label>
+                        <textarea name="IssueDetails" rows="2" placeholder="Describe fault..."></textarea>
+                    </div>
+
+                    <h2 class="text-sm font-black mb-4 mt-8 text-slate-400 uppercase tracking-[0.2em] border-b pb-2">Identification</h2>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="form-group col-span-2">
+                            <label>Agent Name</label>
+                            <select name="Agent" id="agent-field" onchange="onAgentChange()" required>
+                                <option value="">-- Select Agent --</option>
+                                <optgroup label="YYZ - Toronto">
+                                    <option value="Michael Marques ,YYZ 905 405 4198" data-station="YYZ">Michael Marques</option>
+                                    <option value="Amar Atta ,YYZ 647 288 4509" data-station="YYZ">Amar Atta</option>
+                                    <option value="Amritheera Malhi ,YYZ 647 288 4509" data-station="YYZ">Amritheera Malhi</option>
+                                    <option value="Muqeet Alam ,YYZ 647 288 4509" data-station="YYZ">Muqeet Alam</option>
+                                    <option value="Stan Beatty ,YYZ 647 825 1214" data-station="YYZ">Stan Beatty</option>
+                                    <option value="Gurjinder Mann ,YYZ 647 288 4509" data-station="YYZ">Gurjinder Mann</option>
+                                    <option value="Abdullah Atta ,YYZ 647 288 4509" data-station="YYZ">Abdullah Atta</option>
+                                </optgroup>
+                                <optgroup label="YYC - Calgary">
+                                    <option value="Jeff Eng ,YYC 403 312 8555" data-station="YYC">Jeff Eng</option>
+                                    <option value="Kevin Joly ,YYC 403 312 8555" data-station="YYC">Kevin Joly</option>
+                                </optgroup>
+                                <optgroup label="YVR - Vancouver">
+                                    <option value="Kevin Brown ,YVR 604 830 0395" data-station="YVR">Kevin Brown</option>
+                                    <option value="Billy Yan ,YVR 604 830 0395" data-station="YVR">Billy Yan</option>
+                                </optgroup>
+                                <optgroup label="YUL - Montreal">
+                                    <option value="Ben Burgio ,YUL 514 977 5312" data-station="YUL">Ben Burgio</option>
+                                    <option value="Jean Cham ,YUL 514 977 5312" data-station="YUL">Jean Cham</option>
+                                    <option value="Joann Cortese ,YUL 514 977 5312" data-station="YUL">Joann Cortese</option>
+                                    <option value="Janine Ostaco ,YUL 514 977 5312" data-station="YUL">Janine Margaret Ostaco</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="form-group col-span-1">
+                            <label>Station</label>
+                            <select name="Service Station" id="station-field" required>
+                                <option value="">--</option>
+                                <option value="YUL">YUL</option>
+                                <option value="YYZ">YYZ</option>
+                                <option value="YYC">YYC</option>
+                                <option value="YVR">YVR</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>General Comments</label>
+                        <textarea name="GeneralComments" rows="2" placeholder="Overall notes..."></textarea>
+                    </div>
+
+                    <div class="hidden">
+                        <input type="hidden" name="Case3" value="NtRqrd">
+                        <input type="hidden" name="HHD5" value="NtRqrd">
+                        <input type="hidden" name="HHD6" value="NtRqrd">
+                        <input type="hidden" name="HD5Rmvd" value="">
+                        <input type="hidden" name="HD6Rmvd" value="">
+                    </div>
+
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-xl active:scale-95 transition-all mt-6 uppercase tracking-widest text-lg">
+                        SAVE RECORD
+                    </button>
+                </form>
+
+                <div class="mt-8 pt-4 border-t border-slate-100 flex justify-center items-center gap-2 opacity-40 hover:opacity-100 transition-opacity">
+                    <span class="text-[9px] font-black uppercase tracking-[0.2em] text-slate-500">Proprietary System &copy; Michael Marques</span>
+                    <div class="w-1 h-1 bg-slate-300 rounded-full"></div>
+                    <button onclick="openRefEditor()" class="text-[9px] font-bold text-slate-400 hover:text-blue-500 transition-colors" id="app-version-label"></button>
+                </div>
+            </div>
+        </section>
+
+        <section id="section-records" class="hidden space-y-4">
+            <div id="no-records" class="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p class="font-bold">No records found</p>
+            </div>
+            <div id="records-list" class="space-y-4"></div>
+        </section>
+    </main>
+
+    <div id="editor-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] items-center justify-center p-4">
+        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-4 bg-slate-100 border-b flex justify-between items-center">
+                <h3 class="font-black text-slate-800 uppercase tracking-tight">System Ref Editor</h3>
+                <button onclick="closeRefEditor()" class="text-slate-400 hover:text-slate-600">
+                    <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+            
+            <div class="flex border-b text-[10px] font-black uppercase tracking-widest bg-slate-50">
+                <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">Aircraft</button>
+                <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
+            </div>
+
+            <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
+            
+            <div class="p-4 bg-slate-50 border-t flex gap-2" id="add-aircraft-ui">
+                <input type="text" id="new-ref-prefix" placeholder="Prefix" class="w-24 uppercase font-mono !text-xs">
+                <input type="text" id="new-ref-type" placeholder="Type" class="flex-1 !text-xs">
+                <select id="new-ref-body" class="w-16 !text-xs">
+                    <option value="NB">NB</option>
+                    <option value="WB">WB</option>
+                </select>
+                <button onclick="addNewRef()" class="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
+            </div>
+
+            <div class="p-4 bg-slate-50 border-t flex gap-2 hidden" id="add-asset-ui">
+                <input type="text" id="new-asset-id" placeholder="Asset#" class="w-24 uppercase font-mono !text-xs">
+                <input type="text" id="new-asset-name" placeholder="Item Name" class="flex-1 !text-xs">
+                <button onclick="addNewAsset()" class="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-3 rounded-full opacity-0 pointer-events-none transition-all duration-300 shadow-2xl z-50 font-bold border border-slate-700">
+        Record Saved!
+    </div>
+
+    <script>
+        // Updated Version Number
+        const CURRENT_VERSION = "v2.2.7";
+
+        const DEFAULT_AIRCRAFT_REF = {
+            "AC10": { type: "A220", body: "NB" }, "AC11": { type: "A220", body: "NB" }, "AC12": { type: "A220", body: "NB" }, 
+            "AC13": { type: "A220", body: "NB" }, "AC14": { type: "A220", body: "NB" }, "AC22": { type: "A320", body: "NB" }, 
+            "AC23": { type: "A320", body: "NB" }, "AC24": { type: "A320", body: "NB" }, "AC25": { type: "A319", body: "NB" }, 
+            "AC40": { type: "A320", body: "NB" }, "AC41": { type: "A320", body: "NB" }, "AC42": { type: "A320", body: "NB" }, 
+            "AC45": { type: "A321", body: "NB" }, "AC46": { type: "A321", body: "NB" }, "AC47": { type: "A321", body: "NB" }, 
+            "AC48": { type: "A321", body: "NB" }, "AC50": { type: "737-8", body: "NB" }, "AC51": { type: "737-8", body: "NB" }, 
+            "AC52": { type: "737-8", body: "NB" }, "AC53": { type: "737-8", body: "NB" }, "AC54": { type: "737-8", body: "NB" }, 
+            "AC57": { type: "737-8", body: "NB" }, "AC70": { type: "777-200", body: "WB" }, "AC73": { type: "777-300", body: "WB" }, 
+            "AC74": { type: "777-300", body: "WB" }, "AC80": { type: "787-8", body: "WB" }, "AC83": { type: "787-9", body: "WB" }, 
+            "AC84": { type: "787-9", body: "WB" }, "AC85": { type: "787-9", body: "WB" }, "AC86": { type: "787-9", body: "WB" }, 
+            "AC87": { type: "787-10", body: "WB" }, "AC88": { type: "787-10", body: "WB" }, "AC89": { type: "787-10", body: "WB" }, 
+            "AC90": { type: "A330-300", body: "WB" }, "AC91": { type: "A330-300", body: "WB" }, "AC93": { type: "A330-300", body: "WB" }, 
+            "AC94": { type: "A330-300", body: "WB" }, "AC95": { type: "A330-300", body: "WB" }, "AC96": { type: "A330-300", body: "WB" }, 
+            "AC97": { type: "A330-300", body: "WB" }, "RV10": { type: "A321 Rouge", body: "NB" }, "RV11": { type: "A321 Rouge", body: "NB" }, 
+            "RV15": { type: "A319 Rouge", body: "NB" }, "RV16": { type: "A319 Rouge", body: "NB" }, "RV30": { type: "A320 Rouge", body: "NB" }, 
+            "QK10": { type: "Dash 8-400", body: "NB" }, "QK20": { type: "CRJ-900", body: "NB" }
+        };
+
+        const INITIAL_ASSETS = {
+            "2140": "Urovo", "2141": "Urovo", "2142": "Urovo", "2143": "Urovo", "2144": "Urovo", "2146": "Urovo", "2147": "Urovo", "2148": "Urovo", "2149": "Urovo", "2150": "Urovo", "2151": "Urovo", "2152": "Urovo", "2153": "Urovo", "2156": "Urovo", "2158": "Urovo", "2159": "Urovo", "2161": "Urovo", "2163": "Urovo", "2164": "Urovo", "2165": "Urovo", "2166": "Urovo", "2167": "Urovo", "2169": "Urovo", "2170": "Urovo", "2171": "Urovo", "2172": "Urovo", "2174": "Urovo", "2175": "Urovo", "2176": "Urovo", "2177": "Urovo", "2178": "Urovo", "2180": "Urovo", "2181": "Urovo", "2182": "Urovo", "2183": "Urovo", "2184": "Urovo", "2185": "Urovo", "2186": "Urovo", "2188": "Urovo", "2190": "Urovo", "2192": "Urovo", "2193": "Urovo", "3100": "Urovo", "3101": "Urovo", "3102": "Urovo", "3103": "Urovo", "3104": "Urovo", "3105": "Urovo", "3106": "Urovo", "3107": "Urovo", "3108": "Urovo", "3109": "Urovo", "3110": "Urovo", "3111": "Urovo", "3112": "Urovo", "3113": "Urovo", "3114": "Urovo", "3115": "Urovo", "3116": "Urovo", "3117": "Urovo", "3118": "Urovo", "3119": "Urovo", "3120": "Urovo", "3121": "Urovo", "3122": "Urovo", "3123": "Urovo", "3124": "Urovo", "3125": "Urovo", "3126": "Urovo", "3127": "Urovo", "3128": "Urovo", "3129": "Urovo", "3130": "Urovo", "3131": "Urovo", "3132": "Urovo", "3133": "Urovo", "3134": "Urovo", "3135": "Urovo", "3136": "Urovo", "3137": "Urovo", "3138": "Urovo", "3139": "Urovo", "3140": "Urovo", "3141": "Urovo", "3142": "Urovo", "3143": "Urovo", "3144": "Urovo", "3145": "Urovo", "3146": "Urovo", "3147": "Urovo", "3148": "Urovo", "3149": "Urovo", "3150": "Urovo", "3151": "Urovo", "3152": "Urovo", "3153": "Urovo", "3154": "Urovo", "3155": "Urovo", "3156": "Urovo", "3157": "Urovo", "3158": "Urovo", "3159": "Urovo", "3160": "Urovo", "3161": "Urovo", "3162": "Urovo", "3163": "Urovo", "3164": "Urovo", "3165": "Urovo", "3166": "Urovo", "3167": "Urovo", "3168": "Urovo", "3169": "Urovo", "3170": "Urovo", "3171": "Urovo", "3172": "Urovo", "3173": "Urovo", "3174": "Urovo", "3175": "Urovo", "3176": "Urovo", "3177": "Urovo", "3178": "Urovo", "3179": "Urovo", "3180": "Urovo", "3181": "Urovo", "3182": "Urovo", "3183": "Urovo", "3184": "Urovo", "3185": "Urovo", "3186": "Urovo", "3187": "Urovo", "3188": "Urovo", "3189": "Urovo", "3190": "Urovo", "3191": "Urovo", "3192": "Urovo", "3193": "Urovo", "3194": "Urovo", "3195": "Urovo", "3196": "Urovo", "3197": "Urovo", "3198": "Urovo", "3199": "Urovo", "3300": "Urovo", "3301": "Urovo", "3302": "Urovo", "3303": "Urovo", "3304": "Urovo", "3305": "Urovo", "3306": "Urovo", "3307": "Urovo", "3308": "Urovo", "3309": "Urovo", "3310": "Urovo", "3311": "Urovo", "3312": "Urovo", "3313": "Urovo", "3314": "Urovo", "3315": "Urovo", "3316": "Urovo", "3317": "Urovo", "3318": "Urovo", "3319": "Urovo", "3320": "Urovo", "3321": "Urovo", "3322": "Urovo", "3323": "Urovo", "3324": "Urovo", "3325": "Urovo", "3326": "Urovo", "3327": "Urovo", "3328": "Urovo", "3329": "Urovo", "3330": "Urovo", "3331": "Urovo", "3332": "Urovo", "3333": "Urovo", "3334": "Urovo", "3335": "Urovo", "3336": "Urovo", "3337": "Urovo", "3338": "Urovo", "3339": "Urovo", "3340": "Urovo", "3341": "Urovo", "3342": "Urovo", "3343": "Urovo", "3344": "Urovo", "3345": "Urovo", "3346": "Urovo", "3347": "Urovo", "3348": "Urovo", "3349": "Urovo", "3350": "Urovo", "3351": "Urovo", "3352": "Urovo", "3353": "Urovo", "3354": "Urovo", "3355": "Urovo", "3356": "Urovo", "3357": "Urovo", "3358": "Urovo", "3359": "Urovo", "3360": "Urovo", "3361": "Urovo", "3362": "Urovo", "3363": "Urovo", "3364": "Urovo", "3365": "Urovo", "3366": "Urovo", "3367": "Urovo", "3368": "Urovo", "3369": "Urovo", "3370": "Urovo", "3371": "Urovo", "3372": "Urovo", "3373": "Urovo", "3374": "Urovo", "3375": "Urovo", "3376": "Urovo", "3377": "Urovo", "3378": "Urovo", "3379": "Urovo", "3380": "Urovo", "3381": "Urovo", "3382": "Urovo", "3383": "Urovo", "3384": "Urovo", "3385": "Urovo", "3449": "Urovo", "3450": "Urovo", "3451": "Urovo", "3452": "Urovo", "3453": "Urovo", "3454": "Urovo", "3455": "Urovo", "3456": "Urovo", "3457": "Urovo", "3458": "Urovo", "3459": "Urovo", "3460": "Urovo", "3461": "Urovo", "3462": "Urovo", "3463": "Urovo", "3464": "Urovo", "3465": "Urovo", "3466": "Urovo", "3467": "Urovo", "3468": "Urovo", "3469": "Urovo", "3470": "Urovo", "3471": "Urovo", "3472": "Urovo", "3473": "Urovo", "3474": "Urovo", "3475": "Urovo", "3476": "Urovo", "3477": "Urovo", "3478": "Urovo", "3479": "Urovo", "3480": "Urovo", "3481": "Urovo", "3482": "Urovo", "3483": "Urovo", "3484": "Urovo", "3485": "Urovo", "3486": "Urovo", "3487": "Urovo", "3488": "Urovo", "3489": "Urovo", "3490": "Urovo"
+        };
+
+        // Populate new asset range 3501 to 3585
+        for (let i = 3501; i <= 3585; i++) {
+            INITIAL_ASSETS[i.toString()] = "Urovo";
+        }
+
+        let db = [];
+        let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
+        let assetRef = { ...INITIAL_ASSETS };
+        let isInventoryOnlyMode = false;
+        let activeRefTab = 'aircraft';
+
+        const APP_STORAGE_KEY = 'yul_field_data_v2';
+        const REF_STORAGE_KEY = 'yul_aircraft_ref_v2';
+        const ASSET_REF_KEY = 'yul_asset_ref_v2';
+        const AGENT_KEY = 'yul_agent_name_session';
+        const STATION_KEY = 'yul_station_id_session';
+
+        function isValidAssetId(val) {
+            if (!val) return true;
+            const normalized = val.trim().toLowerCase();
+            if (["msng", "ntrqrd", "n/a", "rmvd"].includes(normalized)) return true;
+            const num = val.replace(/\D/g, '');
+            if (num === "") return true; 
+            const padded = num.padStart(4, '0');
+            return !!assetRef[num] || !!assetRef[padded];
+        }
+
+        function validateAssetInput(el) {
+            if (!isValidAssetId(el.value)) {
+                el.classList.add('invalid-asset');
+            } else {
+                el.classList.remove('invalid-asset');
+            }
+        }
+
+        function openRefEditor() { renderRefList(); document.getElementById('editor-modal').classList.add('open'); }
+        function closeRefEditor() { document.getElementById('editor-modal').classList.remove('open'); }
+
+        function switchRefTab(tab) {
+            activeRefTab = tab;
+            document.getElementById('ref-tab-aircraft').className = `flex-1 py-3 border-b-2 ${tab === 'aircraft' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-assets').className = `flex-1 py-3 border-b-2 ${tab === 'assets' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`;
+            document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
+            document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
+            renderRefList();
+        }
+
+        function renderRefList() {
+            const container = document.getElementById('ref-editor-list');
+            container.innerHTML = '';
+            if (activeRefTab === 'aircraft') {
+                Object.keys(aircraftRef).sort().forEach(prefix => {
+                    const item = aircraftRef[prefix];
+                    const div = document.createElement('div');
+                    div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs";
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <span class="font-mono font-black text-blue-600">${prefix}</span>
+                            <span class="mx-2 text-slate-300">|</span>
+                            <span class="font-bold text-slate-700">${item.type}</span>
+                            <span class="ml-1 text-[9px] px-1 bg-slate-200 rounded text-slate-500">${item.body}</span>
+                        </div>
+                        <button onclick="removeRef('${prefix}')" class="text-red-400 hover:text-red-600 ml-2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1.0 0 01-1-1h-4a1 1.0 0 01-1 1v3M4 7h16" /></svg>
+                        </button>`;
+                    container.appendChild(div);
+                });
+            } else {
+                Object.keys(assetRef).sort((a,b) => parseInt(a) - parseInt(b)).forEach(assetId => {
+                    const name = assetRef[assetId];
+                    const div = document.createElement('div');
+                    div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs";
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <span class="font-mono font-black text-emerald-600">${assetId}</span>
+                            <span class="mx-2 text-slate-300">|</span>
+                            <span class="font-bold text-slate-700 uppercase">${name}</span>
+                        </div>
+                        <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1.0 0 01-1-1h-4a1 1.0 0 01-1 1v3M4 7h16" /></svg>
+                        </button>`;
+                    container.appendChild(div);
+                });
+            }
+        }
+
+        function addNewRef() {
+            const prefix = document.getElementById('new-ref-prefix').value.trim().toUpperCase();
+            const type = document.getElementById('new-ref-type').value.trim();
+            const body = document.getElementById('new-ref-body').value;
+            if (!prefix || !type) return showToast("Enter Prefix & Type");
+            aircraftRef[prefix] = { type, body };
+            localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef));
+            renderRefList();
+            document.getElementById('new-ref-prefix').value = '';
+            document.getElementById('new-ref-type').value = '';
+            showToast("Added Aircraft Ref");
+        }
+
+        function removeRef(prefix) {
+            delete aircraftRef[prefix];
+            localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef));
+            renderRefList();
+            showToast("Removed");
+        }
+
+        function addNewAsset() {
+            const id = document.getElementById('new-asset-id').value.trim();
+            const name = document.getElementById('new-asset-name').value.trim();
+            if (!id || !name) return showToast("Enter ID & Name");
+            assetRef[id] = name;
+            localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef));
+            renderRefList();
+            document.getElementById('new-asset-id').value = '';
+            document.getElementById('new-asset-name').value = '';
+            showToast("Added Asset");
+        }
+
+        function removeAsset(id) {
+            delete assetRef[id];
+            localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef));
+            renderRefList();
+            showToast("Removed Asset");
+        }
+
+        function getBodyType(fin) {
+            if (!fin) return "NB";
+            let match = aircraftRef[fin.substring(0,4)] || aircraftRef[fin.substring(0,2)];
+            return match ? match.body : "NB";
+        }
+
+        function handleFinInput(el) {
+            el.value = el.value.toUpperCase();
+            const val = el.value;
+            const refType = document.getElementById('ref-type');
+            const refBody = document.getElementById('ref-body');
+            refType.textContent = "";
+            refBody.textContent = "";
+            if (val.length >= 2) {
+                let match = aircraftRef[val.substring(0,4)] || aircraftRef[val.substring(0,2)];
+                if (match) {
+                    refType.textContent = match.type;
+                    refBody.textContent = match.body;
+                    refBody.className = match.body === "WB" ? "text-base font-black text-purple-600 uppercase" : "text-base font-black text-slate-400 uppercase";
+                }
+            }
+        }
+
+        function toggleInventoryMode() { isInventoryOnlyMode = !isInventoryOnlyMode; applyModeUI(); }
+
+        function applyModeUI() {
+            const btn = document.getElementById('toggle-inventory-btn');
+            const flightHeader = document.getElementById('flight-header-label');
+            const serviceSections = document.getElementById('service-specific-sections');
+            const issuesLabel = document.getElementById('issues-section-label');
+            const finField = document.getElementById('field-fin');
+            const flightField = document.getElementById('field-flight');
+            const refArea = document.getElementById('fin-reference');
+
+            if (isInventoryOnlyMode) {
+                btn.textContent = "Back to Full Service";
+                flightHeader.textContent = "Inventory Entry";
+                serviceSections.classList.add('hidden');
+                issuesLabel.textContent = "Record Movement";
+                finField.removeAttribute('required');
+                flightField.removeAttribute('required');
+                refArea.classList.add('invisible');
+            } else {
+                btn.textContent = "Inventory Only Mode";
+                flightHeader.textContent = "Flight Details";
+                serviceSections.classList.remove('hidden');
+                issuesLabel.textContent = "Service Issues";
+                finField.setAttribute('required', '');
+                flightField.setAttribute('required', '');
+                refArea.classList.remove('invisible');
+            }
+            updateCategoryOptions();
+        }
+
+        function updateCategoryOptions() {
+            const catField = document.getElementById('srvc-iss-cat-field');
+            catField.innerHTML = '<option value="">-- Select --</option>';
+            Object.keys(issueMap).forEach(cat => {
+                const lower = cat.toLowerCase();
+                const isMovement = lower.includes("rt (") || lower.includes("rm (");
+                const isFound = lower.includes("found");
+                if (isInventoryOnlyMode) {
+                    if (isFound || isMovement) {
+                        const opt = document.createElement('option');
+                        opt.value = cat; opt.textContent = cat;
+                        catField.appendChild(opt);
+                    }
+                } else {
+                    if (!isMovement) {
+                        const opt = document.createElement('option');
+                        opt.value = cat; opt.textContent = cat;
+                        catField.appendChild(opt);
+                    }
+                }
+            });
+            updateIssueOptions();
+        }
+
+        function updateIssueOptions() {
+            const catField = document.getElementById('srvc-iss-cat-field');
+            const issField = document.getElementById('srvc-iss-field');
+            const selectedCat = catField.value;
+            issField.innerHTML = '';
+            if (!selectedCat) {
+                issField.innerHTML = '<option value="">-- Select Category --</option>';
+                return;
+            }
+            let issues = [...(issueMap[selectedCat] || [])];
+            const isFoundCat = selectedCat.toLowerCase().includes("found");
+            if (isFoundCat) {
+                if (isInventoryOnlyMode) {
+                    issues = issues.filter(i => i !== "HHD Found Onboard Aircraft");
+                } else {
+                    issues = issues.filter(i => i === "HHD Found Onboard Aircraft");
+                }
+            }
+            issField.innerHTML = '<option value="">-- Select Specific --</option>';
+            issues.forEach(issue => {
+                const opt = document.createElement('option');
+                opt.value = issue; opt.textContent = issue;
+                issField.appendChild(opt);
+            });
+        }
+
+        function onAgentChange() {
+            const agentField = document.getElementById('agent-field');
+            const stationField = document.getElementById('station-field');
+            const station = agentField.options[agentField.selectedIndex]?.getAttribute('data-station');
+            if (station) stationField.value = station;
+            sessionStorage.setItem(AGENT_KEY, agentField.value);
+            sessionStorage.setItem(STATION_KEY, stationField.value);
+        }
+
+        function restoreAgent() {
+            const savedAgent = sessionStorage.getItem(AGENT_KEY);
+            const savedStation = sessionStorage.getItem(STATION_KEY);
+            if (savedAgent) document.getElementById('agent-field').value = savedAgent;
+            if (savedStation) document.getElementById('station-field').value = savedStation;
+        }
+
+        const issueMap = {
+            "Aircraft Location": ["Access Restricted", "Unable to Locate"],
+            "Asset Identification": ["Asset Number Missing From Report", "Asset Stickers Missing", "Unable to Identify HHD/Case"],
+            "Cancellations": ["Arrival Cancelled"],
+            "Case": ["Case Damaged"],
+            "Consumables": ["Batteries Depleted", "Printer Paper Depleted"],
+            "Crew Interactions": ["Crew not Trained", "Crew Refused Service", "Inapropiate Crew Behavior", "Unwillingness to Use Supplied Equipment"],
+            "Damaged": ["Abuse", "Battery", "HHD", "MCG", "Printer", "SafeMode", "Screen", "Unknown"],
+            "Found": ["Found In Commissary", "HHD Found In Commissary", "HHD Found On bridge", "HHD Found Onboard Aircraft"],
+            "Missed Service": ["Attended to Urgent Call", "B.O.B. Not Required", "Early Departure", "Flight Delayed", "Flight Towed Away", "Held Up On Flight", "Serviced Other Priority", "Spare Batteries Unavailable", "Spare Case Unavailable", "Spare HHD's Unavailable"],
+            "Missing": ["Batteries From Aircraft", "Batteries From Case", "Case From Aircraft", "Case From Storage", "HHD Frm Storage", "HHD From Aircraft", "Printer From Aircraft", "Printer From Case"],
+            "Other": ["Other"],
+            "RM ( INV REM Base )": ["For OPS Backup", "For Repair", "For Use In Service", "For Use in Training", "Transfer ( Other Station )"],
+            "RT ( INV RTN Base )": ["Damaged Hardware ( Body )", "Damaged Hardware ( LCD )", "Damaged Hardware ( Printer )", "Damaged Hardware ( Unknown )", "Damaged Hardware ( Water Damage )", "Damaged Hardware ( WIFI )", "Not Required", "Repaired In-House", "Returned From Repair", "Software", "Transfer ( Received )"],
+            "Service Calls": ["False Issue", "Short Notice"],
+            "Software Issues": ["Data Pack Doesn't Install", "Data Upload Failed", "Program Corrupt", "WIFI Not Working"]
+        };
+
+        window.onload = () => {
+            const savedDb = localStorage.getItem(APP_STORAGE_KEY);
+            if (savedDb) { db = JSON.parse(savedDb); updateUI(); }
+            const savedRef = localStorage.getItem(REF_STORAGE_KEY);
+            if (savedRef) aircraftRef = JSON.parse(savedRef);
+            const savedAssetRef = localStorage.getItem(ASSET_REF_KEY);
+            if (savedAssetRef) {
+                assetRef = JSON.parse(savedAssetRef);
+            }
+            restoreAgent();
+            updateCategoryOptions();
+            document.getElementById('app-version-label').textContent = CURRENT_VERSION;
+        };
+
+        function formatGGCId(val, isRemovalField = false) {
+            if (!val || val.trim() === "" || val.toLowerCase().includes("ntrqrd") || val.toLowerCase().includes("n/a")) return val || "";
+            if (!isRemovalField) {
+                if (val.trim().toLowerCase() === "rmvd" || val.trim().toLowerCase() === "msng") return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+            }
+            let num = val.replace(/\D/g, '');
+            if (num === "") return val.toUpperCase(); 
+            return "GGC" + num.padStart(4, '0');
+        }
+
+        function formatCaseId(val) {
+            if (!val || val.trim() === "" || val.toLowerCase().includes("ntrqrd") || val.toLowerCase().includes("n/a")) return val || "";
+            if (val.trim().toLowerCase() === "rmvd" || val.trim().toLowerCase() === "msng") return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+            let num = val.replace(/\D/g, '');
+            if (num === "") return val.toUpperCase();
+            return num.padStart(3, '0');
+        }
+
+        function switchTab(tab) {
+            document.getElementById('section-form').classList.toggle('hidden', tab !== 'form');
+            document.getElementById('section-records').classList.toggle('hidden', tab !== 'records');
+            document.getElementById('tab-form').classList.toggle('active', tab === 'form');
+            document.getElementById('tab-records').classList.toggle('active', tab === 'records');
+            if (tab === 'records') updateUI();
+        }
+
+        function handleSave(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+            const entry = Object.fromEntries(formData.entries());
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            const isInvMode = isInventoryOnlyMode || (entry.FIN && entry.FIN.toUpperCase() === "INV");
+
+            entry.Rv = CURRENT_VERSION;
+
+            let invalidAssetsFound = [];
+            const assetFieldsToCheck = ['HHD1', 'HHD2', 'HHD3', 'HHD4', 'HD1Rmvd', 'HD2Rmvd', 'HD3Rmvd', 'HD4Rmvd', 'ASST'];
+            assetFieldsToCheck.forEach(field => {
+                const val = entry[field];
+                if (val && !isValidAssetId(val)) invalidAssetsFound.push(val);
+            });
+
+            if (!isInvMode) {
+                const bodyType = getBodyType(entry.FIN);
+                const isQK = entry.FIN.toUpperCase().startsWith("QK");
+                let missingDetected = false;
+                if (!entry.Case1 || entry.Case1.trim() === "") { entry.Case1 = "Msng"; missingDetected = true; }
+                else entry.Case1 = formatCaseId(entry.Case1);
+                if (!entry.HHD1 || entry.HHD1.trim() === "") { entry.HHD1 = "Msng"; missingDetected = true; }
+                else entry.HHD1 = formatGGCId(entry.HHD1);
+                if (!entry.HHD2 || entry.HHD2.trim() === "") {
+                    if (isQK) { entry.HHD2 = "NtRqrd"; }
+                    else { entry.HHD2 = "Msng"; missingDetected = true; }
+                } else entry.HHD2 = formatGGCId(entry.HHD2);
+                if (!entry.Case2 || entry.Case2.trim() === "") {
+                    if (bodyType === "NB") { entry.Case2 = "NtRqrd"; }
+                    else { entry.Case2 = "Msng"; missingDetected = true; }
+                } else entry.Case2 = formatCaseId(entry.Case2);
+                if (!entry.HHD3 || entry.HHD3.trim() === "") {
+                    if (bodyType === "NB") { entry.HHD3 = "NtRqrd"; }
+                    else { entry.HHD3 = "Msng"; missingDetected = true; }
+                } else entry.HHD3 = formatGGCId(entry.HHD3);
+                if (!entry.HHD4 || entry.HHD4.trim() === "") {
+                    if (bodyType === "NB") { entry.HHD4 = "NtRqrd"; }
+                    else { entry.HHD4 = "Msng"; missingDetected = true; }
+                } else entry.HHD4 = formatGGCId(entry.HHD4);
+                if (missingDetected && (!entry.SrvcIssCAT || entry.SrvcIssCAT === "")) {
+                    entry.SrvcIssCAT = "Missing"; entry.SrvcIss = "HHD From Aircraft";
+                }
+                ['HD1Rmvd', 'HD2Rmvd', 'HD3Rmvd', 'HD4Rmvd'].forEach(f => entry[f] = formatGGCId(entry[f], true));
+            } else {
+                entry.FIN = "INV"; entry['Flight#'] = ""; entry.Serviced = "Yes"; 
+                entry.Case1 = "N/A"; entry.Case2 = "N/A"; entry.Case3 = "N/A";
+                entry.HHD1 = "N/A"; entry.HHD2 = "N/A"; entry.HHD3 = "N/A";
+                entry.HHD4 = "N/A"; entry.HHD5 = "N/A"; entry.HHD6 = "N/A";
+            }
+
+            if (entry.ASST) entry.ASST = formatGGCId(entry.ASST);
+            if (!entry.SrvcIssCAT || entry.SrvcIssCAT.trim() === "") entry.SrvcIssCAT = "---";
+            if (!entry.SrvcIss || entry.SrvcIss.trim() === "") entry.SrvcIss = "---";
+            
+            entry.id = Date.now();
+            entry.displayDate = now.toLocaleDateString();
+            entry.displayTime = timeStr;
+
+            const buildComments = (rec) => {
+                let parts = [];
+                if (isInvMode) parts.push("[INV]");
+                if (form.elements['ServiceCall']?.checked) parts.push("Service Call");
+                if (rec.ASST) {
+                    const rawId = rec.ASST.replace(/\D/g, '');
+                    const assetType = assetRef[rawId] || assetRef[rawId.padStart(4, '0')];
+                    if (assetType) parts.push(`Type: ${assetType}`);
+                }
+                if (rec.SrvcIssCAT !== "---") parts.push(`${rec.SrvcIssCAT}: ${rec.SrvcIss}`);
+                if (rec.IssueDetails) parts.push(`Fault: ${rec.IssueDetails}`);
+                if (rec.GeneralComments) parts.push(rec.GeneralComments);
+                if (invalidAssetsFound.length > 0) {
+                    invalidAssetsFound.forEach(val => parts.push(`GGC${val} Doesn't Exist`));
+                }
+                return parts.join(" | ");
+            };
+
+            entry.Comments = buildComments(entry);
+            db.unshift(entry);
+
+            if (!isInvMode) {
+                const removals = [{f: 'HD1Rmvd', p: 'HHD1'}, {f: 'HD2Rmvd', p: 'HHD2'}, {f: 'HD3Rmvd', p: 'HHD3'}, {f: 'HD4Rmvd', p: 'HHD4'}];
+                removals.forEach((r, idx) => {
+                    const removedId = entry[r.f];
+                    const boardedId = entry[r.p];
+                    if (removedId && removedId.trim() !== "" && !removedId.toLowerCase().includes("ntrqrd") && !removedId.toLowerCase().includes("n/a")) {
+                        db.unshift({
+                            id: Date.now() + (idx + 1), FIN: "INV", 'Flight#': entry['Flight#'] || "", displayDate: entry.displayDate, displayTime: timeStr,
+                            Priority: "1", Serviced: "Yes", Case1: "N/A", Case2: "N/A", Case3: "N/A", HHD1: "N/A", HHD2: "N/A",
+                            HHD3: "N/A", HHD4: "N/A", HHD5: "N/A", HHD6: "N/A", Battery: "", Rolls: "", ASST: removedId,
+                            SrvcIssCAT: "RM ( INV REM Base )", SrvcIss: "For Use In Service",
+                            'Service Station': entry['Service Station'], Agent: entry.Agent, Rv: CURRENT_VERSION,
+                            Comments: `${removedId} Swp Wth ${boardedId} On Fin ${entry.FIN}${!isValidAssetId(removedId) ? ' | ' + removedId + ' Doesn\'t Exist' : ''}`
+                        });
+                    }
+                });
+            }
+
+            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db));
+            updateUI();
+            showToast("Record Saved!");
+            form.reset();
+            document.querySelectorAll('.asset-input').forEach(el => el.classList.remove('invalid-asset'));
+            restoreAgent();
+            document.getElementById('ref-type').textContent = "";
+            document.getElementById('ref-body').textContent = "";
+            if (isInventoryOnlyMode) applyModeUI();
+            window.scrollTo({top: 0, behavior: 'smooth'});
+        }
+
+        function updateUI() {
+            const list = document.getElementById('records-list');
+            document.getElementById('count').innerText = db.length;
+            if (db.length === 0) { list.innerHTML = ''; document.getElementById('no-records').classList.remove('hidden'); return; }
+            document.getElementById('no-records').classList.add('hidden');
+            list.innerHTML = db.map(r => `
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative group text-sm">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-2 mb-2 font-black text-xl">
+                                <span class="${r.FIN === 'INV' ? 'text-amber-600' : 'text-blue-600'}">${r.FIN}</span>
+                                <span class="text-slate-200">/</span>
+                                <span class="text-slate-800">${r['Flight#'] || '---'}</span>
+                            </div>
+                            <div class="text-[10px] text-slate-400 font-bold uppercase mb-4">${r.displayDate} • ${r.displayTime} • ${r['Service Station']}</div>
+                            <div class="grid grid-cols-2 gap-y-2 text-xs text-slate-600 font-medium">
+                                <div><span class="text-slate-400 block text-[9px] font-black uppercase">Cases</span>${r.Case1}${r.Case2 && r.Case2 !== 'N/A' && r.Case2 !== 'NtRqrd' ? ', '+r.Case2 : ''}</div>
+                                <div><span class="text-slate-400 block text-[9px] font-black uppercase">Supplies</span>${r.Battery || r.Rolls ? 'B:'+(r.Battery||0)+'/R:'+(r.Rolls||0) : '---'}</div>
+                                ${r.ASST ? `<div class="col-span-2"><span class="text-slate-400 block text-[9px] font-black uppercase">Asset</span>${r.ASST}</div>` : ''}
+                            </div>
+                            ${r.Comments ? `<div class="mt-3 p-2 bg-slate-50 rounded text-[11px] italic text-slate-500 border-l-2 border-slate-200">${r.Comments}</div>` : ''}
+                        </div>
+                        <button onclick="deleteRecord(${r.id})" class="text-slate-200 hover:text-red-500 transition-all p-2">
+                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1.0 0 01-1-1h-4a1 1.0 0 01-1 1v3M4 7h16" /></svg>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function deleteRecord(id) { db = db.filter(r => r.id !== id); localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); updateUI(); }
+        function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.classList.add('opacity-100', '-translate-y-2'); setTimeout(() => t.classList.remove('opacity-100', '-translate-y-2'), 2000); }
+
+        function exportToCSV() {
+            if (db.length === 0) return showToast("No records");
+            const headers = ["FIN", "Flight#", "Arrival Time", "Priority", "Serviced", "Case1", "HHD1", "HHD2", "Case2", "HHD3", "HHD4", "Case3", "HHD5", "HHD6", "Battery", "Rolls", "SrvcIssCAT", "SrvcIss", "Comments", "Service Date", "Service Station", "Agent", "Rv", "ASST", "HD1Rmvd", "HD2Rmvd", "HD3Rmvd", "HD4Rmvd", "HD5Rmvd", "HD6Rmvd"];
+            const escapeCSV = (v) => v === undefined || v === null ? '""' : `"${String(v).replace(/"/g, '""')}"`;
+            const csvRows = [headers.join(",")];
+            db.forEach(r => {
+                csvRows.push(headers.map(h => {
+                    let v = r[h] !== undefined ? r[h] : "";
+                    if (h === "Arrival Time") v = r.displayTime;
+                    if (h === "Service Date") v = r.displayDate;
+                    if (h === "Rv") v = CURRENT_VERSION; 
+                    return escapeCSV(v);
+                }).join(","));
+            });
+            const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const agentVal = document.getElementById('agent-field').value;
+            const station = document.getElementById('station-field').value || "NA";
+            const dateStr = new Date().toISOString().split('T')[0];
+            const agentName = agentVal ? agentVal.split(',')[0].trim().replace(/\s+/g, '_') : "Agent";
+            a.href = url; a.download = `${agentName}_${station}_${dateStr}.csv`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+            showToast("CSV Exported!");
+        }
+    </script>
+</body>
+</html>
