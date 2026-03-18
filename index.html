@@ -1105,6 +1105,7 @@
         let p2pMyId = null;
         let p2pOfflineQueue = [];     // { entry } objects to broadcast when reconnected
         let p2pReady = false;
+        let p2pSyncInterval = null;
 
         const P2P_QUEUE_KEY = 'p2p_offline_queue_v1';
 
@@ -1335,10 +1336,8 @@
             try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify([])); } catch(e) {}
         }
 
-        let p2pSyncInterval = null;
-        const P2P_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
         function startPeriodicSync(agentValue) {
+            const P2P_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
             if (p2pSyncInterval) clearInterval(p2pSyncInterval);
             p2pSyncInterval = setInterval(() => {
                 // Re-attempt any peers not currently connected
@@ -1350,6 +1349,8 @@
                 }
             }, P2P_SYNC_INTERVAL_MS);
         }
+
+        function conn_p2p_send(peerId, msg) {
             const conn = p2pConnections[peerId];
             if (conn && conn.open) {
                 conn.send(msg);
