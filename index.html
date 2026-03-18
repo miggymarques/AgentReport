@@ -407,16 +407,49 @@
         }
 
         let db = [];
+        let finTable = {};  // persistent FIN → { type, body, assets, lastSeen, lastFlight }
         let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
         let assetRef = { ...INITIAL_ASSETS };
         let isInventoryOnlyMode = false;
         let activeRefTab = 'aircraft';
 
-        const APP_STORAGE_KEY = 'yul_field_data_v2';
-        const REF_STORAGE_KEY = 'yul_aircraft_ref_v2';
-        const ASSET_REF_KEY = 'yul_asset_ref_v2';
-        const AGENT_KEY = 'yul_agent_name_session';
-        const STATION_KEY = 'yul_station_id_session';
+        const APP_STORAGE_KEY  = 'yul_field_data_v2';
+        const REF_STORAGE_KEY  = 'yul_aircraft_ref_v2';
+        const ASSET_REF_KEY    = 'yul_asset_ref_v2';
+        const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
+        const AGENT_KEY        = 'yul_agent_name_session';
+        const STATION_KEY      = 'yul_station_id_session';
+
+        function saveFinTable() {
+            try { localStorage.setItem(SYNC_TABLE_KEY, JSON.stringify(finTable)); } catch(e) { console.warn('Could not save FIN table:', e); }
+        }
+
+        function updateFinTable(entry) {
+            if (!entry || entry.FIN === 'INV') return;
+            const fin = entry.FIN;
+            if (!finTable[fin]) {
+                finTable[fin] = { type: '', body: '', assets: [], lastSeen: '', lastFlight: '', _ts: 0 };
+            }
+            // Resolve aircraft type
+            const match = aircraftRef[fin.substring(0,4)] || aircraftRef[fin.substring(0,2)];
+            if (match) { finTable[fin].type = match.type; finTable[fin].body = match.body; }
+            // Merge assets — add any new ones not already present
+            const existing = new Set(finTable[fin].assets);
+            [entry.HHD1, entry.HHD2, entry.HHD3, entry.HHD4].forEach(a => {
+                if (a && a !== 'N/A' && a !== 'NtRqrd' && a !== 'Msng' && a !== '' && !existing.has(a)) {
+                    finTable[fin].assets.push(a);
+                    existing.add(a);
+                }
+            });
+            // Update last seen — keep the most recent by timestamp
+            const entryTs = entry.id || 0;
+            if (entryTs >= (finTable[fin]._ts || 0)) {
+                finTable[fin].lastSeen   = entry.displayDate || '';
+                finTable[fin].lastFlight = entry['Flight#']  || '';
+                finTable[fin]._ts        = entryTs;
+            }
+            saveFinTable();
+        }
 
         function isValidAssetId(val) {
             if (!val || val.trim() === "") return true;
@@ -491,43 +524,10 @@
         }
 
         function renderSyncTable(container) {
-            if (db.length === 0) {
-                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No records saved yet</div>`;
-                return;
-            }
+            const fins = Object.keys(finTable).sort();
 
-            // Group entries by FIN, collecting all unique assets seen on each FIN
-            const finMap = {};
-            db.forEach(r => {
-                if (r.FIN === 'INV') return;
-                if (!finMap[r.FIN]) {
-                    finMap[r.FIN] = {
-                        type: '',
-                        body: '',
-                        assets: new Set(),
-                        flights: new Set(),
-                        lastSeen: r.displayDate
-                    };
-                }
-                // Resolve aircraft type from ref
-                const match = aircraftRef[r.FIN.substring(0,4)] || aircraftRef[r.FIN.substring(0,2)];
-                if (match) {
-                    finMap[r.FIN].type = match.type;
-                    finMap[r.FIN].body = match.body;
-                }
-                // Collect all assets that appeared on this FIN
-                [r.HHD1, r.HHD2, r.HHD3, r.HHD4].forEach(a => {
-                    if (a && a !== 'N/A' && a !== 'NtRqrd' && a !== 'Msng' && a !== '') {
-                        finMap[r.FIN].assets.add(a);
-                    }
-                });
-                if (r['Flight#']) finMap[r.FIN].flights.add(r['Flight#']);
-                finMap[r.FIN].lastSeen = r.displayDate;
-            });
-
-            const fins = Object.keys(finMap).sort();
             if (fins.length === 0) {
-                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No flight entries found</div>`;
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No records saved yet</div>`;
                 return;
             }
 
@@ -542,8 +542,8 @@
             container.appendChild(header);
 
             fins.forEach(fin => {
-                const entry = finMap[fin];
-                const assetList = [...entry.assets].join(', ') || '—';
+                const entry = finTable[fin];
+                const assetList = (entry.assets || []).join(', ') || '—';
                 const bodyColor = entry.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
                 const div = document.createElement('div');
                 div.className = "grid grid-cols-12 gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
@@ -803,6 +803,14 @@
                 const savedAssetRef = localStorage.getItem(ASSET_REF_KEY);
                 if (savedAssetRef) assetRef = JSON.parse(savedAssetRef);
             } catch(e) { console.warn("Could not load asset ref:", e); }
+            try {
+                const savedFinTable = localStorage.getItem(SYNC_TABLE_KEY);
+                if (savedFinTable) finTable = JSON.parse(savedFinTable);
+            } catch(e) { console.warn("Could not load FIN table:", e); }
+            // Migration: if finTable is empty but db has records, rebuild it
+            if (Object.keys(finTable).length === 0 && db.length > 0) {
+                db.forEach(r => updateFinTable(r));
+            }
             restoreAgent();
             updateCategoryOptions();
             document.getElementById('app-version-label').textContent = CURRENT_VERSION;
@@ -932,6 +940,7 @@
             entry.Comments = buildComments(entry);
             db.unshift(entry);
             broadcastNewEntry(entry);
+            updateFinTable(entry);
 
             if (!isInvMode) {
                 const removals = [{f: 'HD1Rmvd', p: 'HHD1'}, {f: 'HD2Rmvd', p: 'HHD2'}, {f: 'HD3Rmvd', p: 'HHD3'}, {f: 'HD4Rmvd', p: 'HHD4'}];
@@ -1213,9 +1222,8 @@
             conn.on('open', () => {
                 p2pConnections[conn.peer] = conn;
                 updateSyncCount();
-                // Send our full DB — works for both incoming and outgoing
                 const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
-                conn.send({ type: 'FULL_SYNC', db: localDb });
+                conn.send({ type: 'FULL_SYNC', db: localDb, finTable });
                 flushP2PQueue();
             });
 
@@ -1225,7 +1233,7 @@
                 p2pConnections[conn.peer] = conn;
                 updateSyncCount();
                 const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
-                conn.send({ type: 'FULL_SYNC', db: localDb });
+                conn.send({ type: 'FULL_SYNC', db: localDb, finTable });
                 flushP2PQueue();
             }
 
@@ -1261,7 +1269,7 @@
                     if (conflictIdx === -1) {
                         // No matching record — just add it
                         const exactMatch = db.find(r => r.id === inEntry.id);
-                        if (!exactMatch) { db.unshift(inEntry); merged++; }
+                        if (!exactMatch) { db.unshift(inEntry); merged++; updateFinTable(inEntry); }
                     } else {
                         // Conflict — keep whichever has the later timestamp
                         const existing = db[conflictIdx];
@@ -1270,8 +1278,10 @@
                         if (incomingTs > existingTs) {
                             db.splice(conflictIdx, 1, inEntry);
                             replaced++;
+                            updateFinTable(inEntry);
                         }
-                        // else keep ours — it's newer
+                        // else keep ours — it's newer, but still update finTable with any new assets
+                        else { updateFinTable(existing); }
                     }
                 });
 
@@ -1284,10 +1294,38 @@
                     if (replaced > 0)  parts.push(`${replaced} updated`);
                     showToast(`↓ Synced: ${parts.join(', ')} record${merged + replaced > 1 ? 's' : ''}`);
                 }
+
+                // Merge incoming finTable — union of assets, newer metadata wins
+                if (msg.finTable && typeof msg.finTable === 'object') {
+                    let finChanged = false;
+                    Object.entries(msg.finTable).forEach(([fin, incoming]) => {
+                        if (!finTable[fin]) {
+                            finTable[fin] = { ...incoming };
+                            finChanged = true;
+                        } else {
+                            // Merge assets
+                            const existing = new Set(finTable[fin].assets || []);
+                            (incoming.assets || []).forEach(a => {
+                                if (!existing.has(a)) { finTable[fin].assets.push(a); existing.add(a); finChanged = true; }
+                            });
+                            // Keep newer metadata
+                            if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
+                                finTable[fin].lastSeen   = incoming.lastSeen;
+                                finTable[fin].lastFlight = incoming.lastFlight;
+                                finTable[fin].type       = incoming.type || finTable[fin].type;
+                                finTable[fin].body       = incoming.body || finTable[fin].body;
+                                finTable[fin]._ts        = incoming._ts;
+                                finChanged = true;
+                            }
+                        }
+                    });
+                    if (finChanged) saveFinTable();
+                }
+
                 // Send back anything they may be missing — use direct conn reference
                 const replyConn = p2pConnections[fromPeer];
                 if (replyConn && replyConn.open) {
-                    replyConn.send({ type: 'FULL_SYNC', db });
+                    replyConn.send({ type: 'FULL_SYNC', db, finTable });
                 }
             }
 
@@ -1305,6 +1343,7 @@
                     // No conflict — add if not already present
                     if (!db.find(r => r.id === inEntry.id)) {
                         db.unshift(inEntry);
+                        updateFinTable(inEntry);
                         try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
                         updateUI();
                         setSyncStatus('synced', Object.keys(p2pConnections).length);
@@ -1315,6 +1354,7 @@
                     const existing = db[conflictIdx];
                     if ((inEntry.id || 0) > (existing.id || 0)) {
                         db.splice(conflictIdx, 1, inEntry);
+                        updateFinTable(inEntry);
                         try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
                         updateUI();
                         setSyncStatus('synced', Object.keys(p2pConnections).length);
@@ -1357,7 +1397,7 @@
                 // Send a full sync to all currently connected peers
                 const peers = Object.keys(p2pConnections);
                 if (peers.length > 0) {
-                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db }));
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable }));
                 }
             }, P2P_SYNC_INTERVAL_MS);
         }
