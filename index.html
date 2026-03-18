@@ -950,10 +950,15 @@
             // Then open mailto with instructions to attach
             const subject = encodeURIComponent(`Service Report - ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"} - ${station} - ${dateStr}`);
 
-            // Collect issue details from all records that have them
-            const issueLines = db
-                .filter(r => r.IssueDetails && r.IssueDetails.trim() !== "")
-                .map(r => `  • ${r.FIN}${r['Flight#'] ? ' / ' + r['Flight#'] : ''}: ${r.IssueDetails.trim()}`);
+            // Collect issue details from all records that have them, split by Found vs other
+            const issueRecords = db.filter(r => r.IssueDetails && r.IssueDetails.trim() !== "");
+            const foundRecords = issueRecords.filter(r => r.SrvcIssCAT && r.SrvcIssCAT.toLowerCase().includes("found"));
+            const otherRecords = issueRecords.filter(r => !r.SrvcIssCAT || !r.SrvcIssCAT.toLowerCase().includes("found"));
+
+            const formatLine = r => `  • ${r.FIN}${r['Flight#'] ? ' / ' + r['Flight#'] : ''}${r.ASST ? ' [' + r.ASST + ']' : ''}: ${r.IssueDetails.trim()}`;
+
+            const issueLines = otherRecords.map(formatLine);
+            const foundLines = foundRecords.map(formatLine);
 
             const body = encodeURIComponent(
                 `Please find the service report attached.\n\n` +
@@ -963,6 +968,9 @@
                 `Records: ${db.length}\n` +
                 (issueLines.length > 0
                     ? `\nIssue Details:\n${issueLines.join('\n')}\n`
+                    : '') +
+                (foundLines.length > 0
+                    ? `\nFound Items:\n${foundLines.join('\n')}\n`
                     : '') +
                 `\n⚠️ Please attach the downloaded file: ${filename}`
             );
