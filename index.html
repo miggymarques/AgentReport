@@ -1182,12 +1182,11 @@
             });
 
             p2pPeer.on('error', (err) => {
-                // ID taken just means that agent is already online — that's fine
                 if (err.type === 'unavailable-id') {
-                    // Another instance of us is running — use a fallback ID
-                    p2pMyId = peerId + '-2';
-                    p2pPeer.destroy();
-                    setTimeout(() => initP2P(agentValue), 300);
+                    // Our saved ID is taken — clear it and connect as a listener only
+                    // The other instance will handle outgoing connections
+                    setSyncStatus('offline');
+                    console.warn('P2P: peer ID unavailable, waiting for incoming connections only');
                 }
             });
         }
@@ -1205,38 +1204,11 @@
         function attemptConnect(theirId, retries = 0) {
             if (!p2pPeer || !p2pReady || p2pConnections[theirId]) return;
             const conn = p2pPeer.connect(theirId, { reliable: true });
-
-            conn.on('open', () => {
-                setupP2PConnection(conn);
-            });
-
-            conn.on('error', () => {
-                // Peer is offline — retry quietly in the background
-                if (retries < 3) {
-                    setTimeout(() => attemptConnect(theirId, retries + 1), 15000 * (retries + 1));
-                }
-            });
+            setupP2PConnection(conn);
         }
 
         function setupP2PConnection(conn) {
-            conn.on('open', () => {
-                p2pConnections[conn.peer] = conn;
-                updateSyncCount();
-                const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
-                conn.send({ type: 'FULL_SYNC', db: localDb, finTable });
-                flushP2PQueue();
-            });
-
-            // For incoming connections the 'open' event may have already fired
-            // so also send immediately if already open
-            if (conn.open) {
-                p2pConnections[conn.peer] = conn;
-                updateSyncCount();
-                const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
-                conn.send({ type: 'FULL_SYNC', db: localDb, finTable });
-                flushP2PQueue();
-            }
-
+            // Register data/close/error handlers immediately regardless of open state
             conn.on('data', (msg) => handleP2PMessage(msg, conn.peer));
 
             conn.on('close', () => {
@@ -1249,6 +1221,22 @@
                 delete p2pConnections[conn.peer];
                 updateSyncCount();
             });
+
+            const doSync = () => {
+                p2pConnections[conn.peer] = conn;
+                updateSyncCount();
+                const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
+                conn.send({ type: 'FULL_SYNC', db: localDb, finTable });
+                flushP2PQueue();
+            };
+
+            // If already open (incoming connection), sync immediately
+            // Otherwise wait for the open event (outgoing connection)
+            if (conn.open) {
+                doSync();
+            } else {
+                conn.on('open', doSync);
+            }
         }
 
         function handleP2PMessage(msg, fromPeer) {
