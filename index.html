@@ -949,13 +949,22 @@
 
             // Then open mailto with instructions to attach
             const subject = encodeURIComponent(`Service Report - ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"} - ${station} - ${dateStr}`);
+
+            // Collect issue details from all records that have them
+            const issueLines = db
+                .filter(r => r.IssueDetails && r.IssueDetails.trim() !== "")
+                .map(r => `  • ${r.FIN}${r['Flight#'] ? ' / ' + r['Flight#'] : ''}: ${r.IssueDetails.trim()}`);
+
             const body = encodeURIComponent(
                 `Please find the service report attached.\n\n` +
                 `Agent: ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"}\n` +
                 `Station: ${station}\n` +
                 `Date: ${dateStr}\n` +
-                `Records: ${db.length}\n\n` +
-                `⚠️ Please attach the downloaded file: ${filename}`
+                `Records: ${db.length}\n` +
+                (issueLines.length > 0
+                    ? `\nIssue Details:\n${issueLines.join('\n')}\n`
+                    : '') +
+                `\n⚠️ Please attach the downloaded file: ${filename}`
             );
             setTimeout(() => { window.location.href = `mailto:hhdhq@gategourmet.com?subject=${subject}&body=${body}`; }, 500);
         }
