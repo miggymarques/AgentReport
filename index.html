@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Service Report</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         .form-group { margin-bottom: 1rem; }
         label { display: block; font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
@@ -66,6 +67,14 @@
 
         #editor-modal { display: none; }
         #editor-modal.open { display: flex; }
+
+        @keyframes pulse-sync {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .sync-dot-online { background-color: #10b981 !important; box-shadow: 0 0 6px #10b981; }
+        .sync-dot-syncing { background-color: #3b82f6 !important; animation: pulse-sync 0.8s ease-in-out infinite; }
+        .sync-dot-offline { background-color: #475569 !important; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-900">
@@ -88,6 +97,10 @@
                 </svg>
                 Email
             </button>
+            <div id="sync-status" title="P2P Sync Status" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold font-mono cursor-default select-none">
+                <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-600 inline-block"></span>
+                <span id="sync-label" class="text-slate-500">P2P</span>
+            </div>
         </div>
     </header>
 
@@ -334,6 +347,7 @@
             <div class="flex border-b text-[10px] font-black uppercase tracking-widest bg-slate-50">
                 <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">Aircraft</button>
                 <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
+                <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Sync Table</button>
             </div>
 
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
@@ -362,7 +376,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.2.8";
+        const CURRENT_VERSION = "v2.2.9";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC10": { type: "A220", body: "NB" }, "AC11": { type: "A220", body: "NB" }, "AC12": { type: "A220", body: "NB" }, 
@@ -427,8 +441,9 @@
 
         function switchRefTab(tab) {
             activeRefTab = tab;
-            document.getElementById('ref-tab-aircraft').className = `flex-1 py-3 border-b-2 ${tab === 'aircraft' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`;
-            document.getElementById('ref-tab-assets').className = `flex-1 py-3 border-b-2 ${tab === 'assets' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-aircraft').className  = `flex-1 py-3 border-b-2 ${tab === 'aircraft'  ? 'border-blue-600 text-blue-600'   : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-assets').className    = `flex-1 py-3 border-b-2 ${tab === 'assets'    ? 'border-blue-600 text-blue-600'   : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-synctable').className = `flex-1 py-3 border-b-2 ${tab === 'synctable' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-400'}`;
             document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
             document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
             renderRefList();
@@ -454,7 +469,7 @@
                         </button>`;
                     container.appendChild(div);
                 });
-            } else {
+            } else if (activeRefTab === 'assets') {
                 Object.keys(assetRef).sort((a,b) => parseInt(a) - parseInt(b)).forEach(assetId => {
                     const name = assetRef[assetId];
                     const div = document.createElement('div');
@@ -470,7 +485,84 @@
                         </button>`;
                     container.appendChild(div);
                 });
+            } else if (activeRefTab === 'synctable') {
+                renderSyncTable(container);
             }
+        }
+
+        function renderSyncTable(container) {
+            if (db.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No records saved yet</div>`;
+                return;
+            }
+
+            // Group entries by FIN, collecting all unique assets seen on each FIN
+            const finMap = {};
+            db.forEach(r => {
+                if (r.FIN === 'INV') return;
+                if (!finMap[r.FIN]) {
+                    finMap[r.FIN] = {
+                        type: '',
+                        body: '',
+                        assets: new Set(),
+                        flights: new Set(),
+                        lastSeen: r.displayDate
+                    };
+                }
+                // Resolve aircraft type from ref
+                const match = aircraftRef[r.FIN.substring(0,4)] || aircraftRef[r.FIN.substring(0,2)];
+                if (match) {
+                    finMap[r.FIN].type = match.type;
+                    finMap[r.FIN].body = match.body;
+                }
+                // Collect all assets that appeared on this FIN
+                [r.HHD1, r.HHD2, r.HHD3, r.HHD4].forEach(a => {
+                    if (a && a !== 'N/A' && a !== 'NtRqrd' && a !== 'Msng' && a !== '') {
+                        finMap[r.FIN].assets.add(a);
+                    }
+                });
+                if (r['Flight#']) finMap[r.FIN].flights.add(r['Flight#']);
+                finMap[r.FIN].lastSeen = r.displayDate;
+            });
+
+            const fins = Object.keys(finMap).sort();
+            if (fins.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No flight entries found</div>`;
+                return;
+            }
+
+            // Header row
+            const header = document.createElement('div');
+            header.className = "grid grid-cols-12 gap-1 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
+            header.innerHTML = `
+                <span class="col-span-2">FIN</span>
+                <span class="col-span-3">Type</span>
+                <span class="col-span-5">Assets on FIN</span>
+                <span class="col-span-2">Last</span>`;
+            container.appendChild(header);
+
+            fins.forEach(fin => {
+                const entry = finMap[fin];
+                const assetList = [...entry.assets].join(', ') || '—';
+                const bodyColor = entry.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
+                const div = document.createElement('div');
+                div.className = "grid grid-cols-12 gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
+                div.innerHTML = `
+                    <span class="col-span-2 font-mono font-black text-blue-600">${fin}</span>
+                    <span class="col-span-3 font-bold text-slate-700">
+                        ${entry.type || '—'}
+                        ${entry.body ? `<span class="ml-1 text-[8px] font-black ${bodyColor}">${entry.body}</span>` : ''}
+                    </span>
+                    <span class="col-span-5 font-mono text-slate-600 text-[9px] leading-relaxed">${assetList}</span>
+                    <span class="col-span-2 text-slate-400 text-[9px]">${entry.lastSeen || '—'}</span>`;
+                container.appendChild(div);
+            });
+
+            // Summary footer
+            const footer = document.createElement('div');
+            footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
+            footer.textContent = `${fins.length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries`;
+            container.appendChild(footer);
         }
 
         function addNewRef() {
@@ -667,6 +759,8 @@
             if (station) stationField.value = station;
             sessionStorage.setItem(AGENT_KEY, agentField.value);
             sessionStorage.setItem(STATION_KEY, stationField.value);
+            // Kick off P2P whenever agent is selected
+            if (agentField.value) initP2P(agentField.value);
         }
 
         function restoreAgent() {
@@ -674,6 +768,8 @@
             const savedStation = sessionStorage.getItem(STATION_KEY);
             if (savedAgent) document.getElementById('agent-field').value = savedAgent;
             if (savedStation) document.getElementById('station-field').value = savedStation;
+            // Auto-connect on restore
+            if (savedAgent) initP2P(savedAgent);
         }
 
         const issueMap = {
@@ -835,6 +931,7 @@
 
             entry.Comments = buildComments(entry);
             db.unshift(entry);
+            broadcastNewEntry(entry);
 
             if (!isInvMode) {
                 const removals = [{f: 'HD1Rmvd', p: 'HHD1'}, {f: 'HD2Rmvd', p: 'HHD2'}, {f: 'HD3Rmvd', p: 'HHD3'}, {f: 'HD4Rmvd', p: 'HHD4'}];
@@ -992,6 +1089,299 @@
             );
             setTimeout(() => { window.location.href = `mailto:hhdhq@gategourmet.com?subject=${subject}&body=${body}`; }, 500);
         }
+        // ─── P2P SYNC ENGINE ─────────────────────────────────────────────────
+
+        // All known agents — IDs are derived deterministically from their name
+        const ALL_AGENTS = [
+            "Michael Marques", "Amar Atta", "Amritheera Malhi", "Muqeet Alam",
+            "Stan Beatty", "Gurjinder Mann", "Abdullah Atta",
+            "Jeff Eng", "Kevin Joly",
+            "Kevin Brown", "Billy Yan",
+            "Ben Burgio", "Jean Cham", "Joann Cortese", "Janine Margaret Ostaco"
+        ];
+
+        let p2pPeer = null;
+        let p2pConnections = {};      // peerId → DataConnection
+        let p2pMyId = null;
+        let p2pOfflineQueue = [];     // { entry } objects to broadcast when reconnected
+        let p2pReady = false;
+
+        const P2P_QUEUE_KEY = 'p2p_offline_queue_v1';
+
+        // Derive a short stable peer ID from an agent name
+        // e.g. "Michael Marques" → "ggcsync-michael-marques"
+        function agentToPeerId(agentValue) {
+            // agentValue is the full option value e.g. "Michael Marques ,YYZ 905 405 4198"
+            const name = agentValue.split(',')[0].trim().toLowerCase().replace(/\s+/g, '-');
+            return `ggcsync-${name}`;
+        }
+
+        function initP2P(agentValue) {
+            if (!agentValue) return;
+            const peerId = agentToPeerId(agentValue);
+
+            // Already running with this ID — no need to reinit
+            if (p2pPeer && p2pMyId === peerId && !p2pPeer.destroyed) return;
+
+            // Destroy any existing peer before reinitialising
+            if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
+            if (p2pSyncInterval) { clearInterval(p2pSyncInterval); p2pSyncInterval = null; }
+            p2pPeer = null;
+            p2pConnections = {};
+            p2pReady = false;
+            p2pMyId = peerId;
+
+            setSyncStatus('connecting');
+
+            try {
+                const savedQueue = localStorage.getItem(P2P_QUEUE_KEY);
+                if (savedQueue) p2pOfflineQueue = JSON.parse(savedQueue);
+            } catch(e) {}
+
+            p2pPeer = new Peer(peerId, {
+                debug: 0,
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' }
+                    ]
+                }
+            });
+
+            p2pPeer.on('open', (id) => {
+                p2pReady = true;
+                setSyncStatus('online', 0);
+                // Attempt connections to all other known agents
+                connectToAllPeers(agentValue);
+                // Start 5-minute background sync pulse
+                startPeriodicSync(agentValue);
+            });
+
+            // Accept incoming connections from other agents
+            p2pPeer.on('connection', (conn) => {
+                setupP2PConnection(conn);
+            });
+
+            p2pPeer.on('disconnected', () => {
+                p2pReady = false;
+                setSyncStatus('offline');
+                // Auto-reconnect to signaling server
+                setTimeout(() => {
+                    if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect();
+                }, 4000);
+            });
+
+            p2pPeer.on('error', (err) => {
+                // ID taken just means that agent is already online — that's fine
+                if (err.type === 'unavailable-id') {
+                    // Another instance of us is running — use a fallback ID
+                    p2pMyId = peerId + '-2';
+                    p2pPeer.destroy();
+                    setTimeout(() => initP2P(agentValue), 300);
+                }
+            });
+        }
+
+        function connectToAllPeers(myAgentValue) {
+            const myPeerId = agentToPeerId(myAgentValue);
+            ALL_AGENTS.forEach(name => {
+                const theirId = `ggcsync-${name.toLowerCase().replace(/\s+/g, '-')}`;
+                if (theirId === myPeerId) return;              // skip self
+                if (p2pConnections[theirId]) return;           // already connected
+                attemptConnect(theirId);
+            });
+        }
+
+        function attemptConnect(theirId, retries = 0) {
+            if (!p2pPeer || !p2pReady || p2pConnections[theirId]) return;
+            const conn = p2pPeer.connect(theirId, { reliable: true });
+
+            conn.on('open', () => {
+                setupP2PConnection(conn);
+            });
+
+            conn.on('error', () => {
+                // Peer is offline — retry quietly in the background
+                if (retries < 3) {
+                    setTimeout(() => attemptConnect(theirId, retries + 1), 15000 * (retries + 1));
+                }
+            });
+        }
+
+        function setupP2PConnection(conn) {
+            p2pConnections[conn.peer] = conn;
+            updateSyncCount();
+
+            // Send our full local DB on connect so they can merge
+            conn.on('open', () => {
+                conn.send({ type: 'FULL_SYNC', db: JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]') });
+                flushP2PQueue();
+            });
+
+            conn.on('data', (msg) => handleP2PMessage(msg, conn.peer));
+
+            conn.on('close', () => {
+                delete p2pConnections[conn.peer];
+                updateSyncCount();
+                // Retry reconnection after a delay
+                setTimeout(() => attemptConnect(conn.peer), 20000);
+            });
+
+            conn.on('error', () => {
+                delete p2pConnections[conn.peer];
+                updateSyncCount();
+            });
+        }
+
+        function handleP2PMessage(msg, fromPeer) {
+            if (msg.type === 'FULL_SYNC') {
+                const incoming = msg.db;
+                if (!Array.isArray(incoming) || incoming.length === 0) return;
+                let merged = 0;
+                let replaced = 0;
+
+                incoming.forEach(inEntry => {
+                    // Conflict key: same FIN + Flight# = same logical record
+                    const conflictIdx = db.findIndex(r =>
+                        r.FIN === inEntry.FIN &&
+                        r['Flight#'] === inEntry['Flight#'] &&
+                        r.FIN !== 'INV'
+                    );
+
+                    if (conflictIdx === -1) {
+                        // No matching record — just add it
+                        const exactMatch = db.find(r => r.id === inEntry.id);
+                        if (!exactMatch) { db.unshift(inEntry); merged++; }
+                    } else {
+                        // Conflict — keep whichever has the later timestamp
+                        const existing = db[conflictIdx];
+                        const incomingTs = inEntry.id || 0;
+                        const existingTs = existing.id || 0;
+                        if (incomingTs > existingTs) {
+                            db.splice(conflictIdx, 1, inEntry);
+                            replaced++;
+                        }
+                        // else keep ours — it's newer
+                    }
+                });
+
+                if (merged > 0 || replaced > 0) {
+                    try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
+                    updateUI();
+                    setSyncStatus('synced', Object.keys(p2pConnections).length);
+                    const parts = [];
+                    if (merged > 0)    parts.push(`${merged} new`);
+                    if (replaced > 0)  parts.push(`${replaced} updated`);
+                    showToast(`↓ Synced: ${parts.join(', ')} record${merged + replaced > 1 ? 's' : ''}`);
+                }
+                // Send back anything they may be missing
+                conn_p2p_send(fromPeer, { type: 'FULL_SYNC', db });
+            }
+
+            if (msg.type === 'NEW_ENTRY') {
+                const inEntry = msg.entry;
+
+                // Check for same FIN+Flight# conflict
+                const conflictIdx = db.findIndex(r =>
+                    r.FIN === inEntry.FIN &&
+                    r['Flight#'] === inEntry['Flight#'] &&
+                    r.FIN !== 'INV'
+                );
+
+                if (conflictIdx === -1) {
+                    // No conflict — add if not already present
+                    if (!db.find(r => r.id === inEntry.id)) {
+                        db.unshift(inEntry);
+                        try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
+                        updateUI();
+                        setSyncStatus('synced', Object.keys(p2pConnections).length);
+                        showToast(`↓ New record synced from ${inEntry.Agent || 'peer'}`);
+                    }
+                } else {
+                    // Conflict — keep newer timestamp
+                    const existing = db[conflictIdx];
+                    if ((inEntry.id || 0) > (existing.id || 0)) {
+                        db.splice(conflictIdx, 1, inEntry);
+                        try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
+                        updateUI();
+                        setSyncStatus('synced', Object.keys(p2pConnections).length);
+                        showToast(`↓ Record updated from ${inEntry.Agent || 'peer'} (newer)`);
+                    }
+                    // else silently discard — ours is newer
+                }
+            }
+        }
+
+        // Called from handleSave — broadcast newly saved entry to all peers
+        function broadcastNewEntry(entry) {
+            const msg = { type: 'NEW_ENTRY', entry };
+            const peers = Object.keys(p2pConnections);
+            if (peers.length > 0) {
+                peers.forEach(pid => conn_p2p_send(pid, msg));
+                setSyncStatus('synced', peers.length);
+            } else {
+                // Queue for when a peer connects
+                p2pOfflineQueue.push(msg);
+                try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
+            }
+        }
+
+        function flushP2PQueue() {
+            if (p2pOfflineQueue.length === 0) return;
+            const peers = Object.keys(p2pConnections);
+            if (peers.length === 0) return;
+            p2pOfflineQueue.forEach(msg => peers.forEach(pid => conn_p2p_send(pid, msg)));
+            p2pOfflineQueue = [];
+            try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify([])); } catch(e) {}
+        }
+
+        let p2pSyncInterval = null;
+        const P2P_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+        function startPeriodicSync(agentValue) {
+            if (p2pSyncInterval) clearInterval(p2pSyncInterval);
+            p2pSyncInterval = setInterval(() => {
+                // Re-attempt any peers not currently connected
+                connectToAllPeers(agentValue);
+                // Send a full sync to all currently connected peers
+                const peers = Object.keys(p2pConnections);
+                if (peers.length > 0) {
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db }));
+                }
+            }, P2P_SYNC_INTERVAL_MS);
+        }
+            const conn = p2pConnections[peerId];
+            if (conn && conn.open) {
+                conn.send(msg);
+            }
+        }
+
+        // ─── Sync status indicator ────────────────────────────────────────────
+        function setSyncStatus(state, peerCount = 0) {
+            const dot   = document.getElementById('sync-dot');
+            const label = document.getElementById('sync-label');
+            if (!dot || !label) return;
+            dot.className = 'w-2 h-2 rounded-full inline-block';
+            if (state === 'online' || state === 'synced') {
+                dot.classList.add('sync-dot-online');
+                label.textContent = peerCount > 0 ? `${peerCount} peer${peerCount > 1 ? 's' : ''}` : 'Ready';
+                label.style.color = '#34d399';
+            } else if (state === 'connecting') {
+                dot.classList.add('sync-dot-syncing');
+                label.textContent = 'Connecting';
+                label.style.color = '#93c5fd';
+            } else {
+                dot.classList.add('sync-dot-offline');
+                label.textContent = 'P2P';
+                label.style.color = '#475569';
+            }
+        }
+
+        function updateSyncCount() {
+            const count = Object.keys(p2pConnections).length;
+            setSyncStatus(count > 0 ? 'online' : 'online', count);
+        }
+
     </script>
 </body>
 </html>
