@@ -125,7 +125,7 @@
                         <div class="grid grid-cols-2 gap-4">
                             <div class="form-group">
                                 <label>FIN</label>
-                                <input type="text" name="FIN" id="field-fin" placeholder="e.g. AC110" pattern="^(AC|RV|QK)\d{3,4}$" class="uppercase font-mono" oninput="handleFinInput(this)" required>
+                                <input type="text" name="FIN" id="field-fin" placeholder="e.g. AC101" pattern="^(AC|RV|QK)\d{3,4}$" class="uppercase font-mono" oninput="handleFinInput(this)" required>
                                 <div id="fin-reference" class="mt-1 flex gap-2 h-6">
                                     <span id="ref-type" class="text-base font-black text-blue-600 uppercase"></span>
                                     <span id="ref-body" class="text-base font-black text-slate-400 uppercase"></span>
@@ -379,22 +379,68 @@
         const CURRENT_VERSION = "v2.2.9";
 
         const DEFAULT_AIRCRAFT_REF = {
-            "AC10": { type: "A220", body: "NB" }, "AC11": { type: "A220", body: "NB" }, "AC12": { type: "A220", body: "NB" }, 
-            "AC13": { type: "A220", body: "NB" }, "AC14": { type: "A220", body: "NB" }, "AC22": { type: "A320", body: "NB" }, 
-            "AC23": { type: "A320", body: "NB" }, "AC24": { type: "A320", body: "NB" }, "AC25": { type: "A319", body: "NB" }, 
-            "AC40": { type: "A320", body: "NB" }, "AC41": { type: "A320", body: "NB" }, "AC42": { type: "A320", body: "NB" }, 
-            "AC45": { type: "A321", body: "NB" }, "AC46": { type: "A321", body: "NB" }, "AC47": { type: "A321", body: "NB" }, 
-            "AC48": { type: "A321", body: "NB" }, "AC50": { type: "737-8", body: "NB" }, "AC51": { type: "737-8", body: "NB" }, 
-            "AC52": { type: "737-8", body: "NB" }, "AC53": { type: "737-8", body: "NB" }, "AC54": { type: "737-8", body: "NB" }, 
-            "AC57": { type: "737-8", body: "NB" }, "AC70": { type: "777-200", body: "WB" }, "AC73": { type: "777-300", body: "WB" }, 
-            "AC74": { type: "777-300", body: "WB" }, "AC80": { type: "787-8", body: "WB" }, "AC83": { type: "787-9", body: "WB" }, 
-            "AC84": { type: "787-9", body: "WB" }, "AC85": { type: "787-9", body: "WB" }, "AC86": { type: "787-9", body: "WB" }, 
-            "AC87": { type: "787-10", body: "WB" }, "AC88": { type: "787-10", body: "WB" }, "AC89": { type: "787-10", body: "WB" }, 
-            "AC90": { type: "A330-300", body: "WB" }, "AC91": { type: "A330-300", body: "WB" }, "AC93": { type: "A330-300", body: "WB" }, 
-            "AC94": { type: "A330-300", body: "WB" }, "AC95": { type: "A330-300", body: "WB" }, "AC96": { type: "A330-300", body: "WB" }, 
-            "AC97": { type: "A330-300", body: "WB" }, "RV10": { type: "A321 Rouge", body: "NB" }, "RV11": { type: "A321 Rouge", body: "NB" }, 
-            "RV15": { type: "A319 Rouge", body: "NB" }, "RV16": { type: "A319 Rouge", body: "NB" }, "RV30": { type: "A320 Rouge", body: "NB" }, 
-            "QK10": { type: "Dash 8-400", body: "NB" }, "QK20": { type: "CRJ-900", body: "NB" }
+            "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
+            "AC106": { type: "A220", body: "NB" }, "AC107": { type: "A220", body: "NB" }, "AC108": { type: "A220", body: "NB" }, "AC109": { type: "A220", body: "NB" }, "AC110": { type: "A220", body: "NB" },
+            "AC111": { type: "A220", body: "NB" }, "AC112": { type: "A220", body: "NB" }, "AC113": { type: "A220", body: "NB" }, "AC114": { type: "A220", body: "NB" }, "AC115": { type: "A220", body: "NB" },
+            "AC116": { type: "A220", body: "NB" }, "AC117": { type: "A220", body: "NB" }, "AC118": { type: "A220", body: "NB" }, "AC119": { type: "A220", body: "NB" }, "AC120": { type: "A220", body: "NB" },
+            "AC121": { type: "A220", body: "NB" }, "AC122": { type: "A220", body: "NB" }, "AC123": { type: "A220", body: "NB" }, "AC124": { type: "A220", body: "NB" }, "AC125": { type: "A220", body: "NB" },
+            "AC126": { type: "A220", body: "NB" }, "AC127": { type: "A220", body: "NB" }, "AC128": { type: "A220", body: "NB" }, "AC129": { type: "A220", body: "NB" }, "AC130": { type: "A220", body: "NB" },
+            "AC131": { type: "A320", body: "NB" }, "AC132": { type: "A320", body: "NB" }, "AC133": { type: "A320", body: "NB" }, "AC134": { type: "A320", body: "NB" }, "AC135": { type: "A320", body: "NB" },
+            "AC136": { type: "A320", body: "NB" }, "AC137": { type: "A320", body: "NB" }, "AC138": { type: "A320", body: "NB" }, "AC139": { type: "A320", body: "NB" }, "AC140": { type: "A320", body: "NB" },
+            "AC141": { type: "A320", body: "NB" }, "AC142": { type: "A220", body: "NB" }, "AC225": { type: "A320", body: "NB" }, "AC226": { type: "A320", body: "NB" }, "AC232": { type: "A320", body: "NB" },
+            "AC235": { type: "A320", body: "NB" }, "AC236": { type: "A320", body: "NB" }, "AC237": { type: "A320", body: "NB" }, "AC238": { type: "A320", body: "NB" }, "AC239": { type: "A320", body: "NB" },
+            "AC240": { type: "A320", body: "NB" }, "AC241": { type: "A320", body: "NB" }, "AC242": { type: "A320", body: "NB" }, "AC251": { type: "A319", body: "NB" }, "AC252": { type: "A319", body: "NB" },
+            "AC402": { type: "A320", body: "NB" }, "AC405": { type: "A320", body: "NB" }, "AC416": { type: "A320", body: "NB" }, "AC417": { type: "A320", body: "NB" }, "AC418": { type: "A320", body: "NB" },
+            "AC419": { type: "A320", body: "NB" }, "AC420": { type: "A320", body: "NB" }, "AC421": { type: "A320", body: "NB" }, "AC422": { type: "A320", body: "NB" }, "AC451": { type: "A321", body: "NB" },
+            "AC452": { type: "A321", body: "NB" }, "AC453": { type: "A321", body: "NB" }, "AC454": { type: "A321", body: "NB" }, "AC455": { type: "A321", body: "NB" }, "AC456": { type: "A321", body: "NB" },
+            "AC457": { type: "A321", body: "NB" }, "AC458": { type: "A321", body: "NB" }, "AC459": { type: "A321", body: "NB" }, "AC460": { type: "A321", body: "NB" }, "AC461": { type: "A321", body: "NB" },
+            "AC462": { type: "A321", body: "NB" }, "AC463": { type: "A321", body: "NB" }, "AC464": { type: "A321", body: "NB" }, "AC465": { type: "A321", body: "NB" }, "AC466": { type: "A321", body: "NB" },
+            "AC467": { type: "A321", body: "NB" }, "AC468": { type: "A321", body: "NB" }, "AC473": { type: "A321", body: "NB" }, "AC483": { type: "A321", body: "NB" }, "AC484": { type: "A321", body: "NB" },
+            "AC503": { type: "737-8", body: "NB" }, "AC504": { type: "737-8", body: "NB" }, "AC505": { type: "737-8", body: "NB" }, "AC506": { type: "737-8", body: "NB" }, "AC507": { type: "737-8", body: "NB" },
+            "AC508": { type: "737-8", body: "NB" }, "AC509": { type: "737-8", body: "NB" }, "AC510": { type: "737-8", body: "NB" }, "AC511": { type: "737-8", body: "NB" }, "AC512": { type: "737-8", body: "NB" },
+            "AC513": { type: "737-8", body: "NB" }, "AC514": { type: "737-8", body: "NB" }, "AC515": { type: "737-8", body: "NB" }, "AC516": { type: "737-8", body: "NB" }, "AC517": { type: "737-8", body: "NB" },
+            "AC518": { type: "737-8", body: "NB" }, "AC519": { type: "737-8", body: "NB" }, "AC520": { type: "737-8", body: "NB" }, "AC521": { type: "737-8", body: "NB" }, "AC522": { type: "737-8", body: "NB" },
+            "AC523": { type: "737-8", body: "NB" }, "AC524": { type: "737-8", body: "NB" }, "AC525": { type: "737-8", body: "NB" }, "AC526": { type: "737-8", body: "NB" }, "AC527": { type: "737-8", body: "NB" },
+            "AC528": { type: "737-8", body: "NB" }, "AC529": { type: "737-8", body: "NB" }, "AC530": { type: "737-8", body: "NB" }, "AC531": { type: "737-8", body: "NB" }, "AC532": { type: "737-8", body: "NB" },
+            "AC533": { type: "737-8", body: "NB" }, "AC534": { type: "737-8", body: "NB" }, "AC535": { type: "737-8", body: "NB" }, "AC536": { type: "737-8", body: "NB" }, "AC537": { type: "737-8", body: "NB" },
+            "AC538": { type: "737-8", body: "NB" }, "AC539": { type: "737-8", body: "NB" }, "AC540": { type: "737-8", body: "NB" }, "AC541": { type: "737-8", body: "NB" }, "AC542": { type: "737-8", body: "NB" },
+            "AC543": { type: "737-8", body: "NB" }, "AC544": { type: "737-8", body: "NB" }, "AC545": { type: "737-8", body: "NB" }, "AC571": { type: "737-8", body: "NB" }, "AC573": { type: "737-8", body: "NB" },
+            "AC574": { type: "737-8", body: "NB" }, "AC575": { type: "737-8", body: "NB" }, "AC576": { type: "737-8", body: "NB" }, "AC577": { type: "737-8", body: "NB" }, "AC578": { type: "737-8", body: "NB" },
+            "AC701": { type: "777-200", body: "WB" }, "AC702": { type: "777-200", body: "WB" }, "AC703": { type: "777-200", body: "WB" }, "AC704": { type: "777-200", body: "WB" }, "AC705": { type: "777-200", body: "WB" },
+            "AC706": { type: "777-200", body: "WB" }, "AC731": { type: "777-300", body: "WB" }, "AC732": { type: "777-300", body: "WB" }, "AC733": { type: "777-300", body: "WB" }, "AC734": { type: "777-300", body: "WB" },
+            "AC735": { type: "777-300", body: "WB" }, "AC736": { type: "777-300", body: "WB" }, "AC737": { type: "777-300", body: "WB" }, "AC738": { type: "777-300", body: "WB" }, "AC739": { type: "777-300", body: "WB" },
+            "AC740": { type: "777-300", body: "WB" }, "AC741": { type: "777-300", body: "WB" }, "AC742": { type: "777-300", body: "WB" }, "AC743": { type: "777-300HD", body: "WB" }, "AC744": { type: "777-300HD", body: "WB" },
+            "AC745": { type: "777-300HD", body: "WB" }, "AC746": { type: "777-300HD", body: "WB" }, "AC747": { type: "777-300HD", body: "WB" }, "AC748": { type: "777-300HD", body: "WB" }, "AC749": { type: "777-300HD", body: "WB" },
+            "AC801": { type: "787-8", body: "WB" }, "AC802": { type: "787-8", body: "WB" }, "AC803": { type: "787-8", body: "WB" }, "AC804": { type: "787-8", body: "WB" }, "AC805": { type: "787-8", body: "WB" },
+            "AC806": { type: "787-8", body: "WB" }, "AC807": { type: "787-8", body: "WB" }, "AC808": { type: "787-8", body: "WB" }, "AC831": { type: "787-9", body: "WB" }, "AC832": { type: "787-9", body: "WB" },
+            "AC833": { type: "787-9", body: "WB" }, "AC834": { type: "787-9", body: "WB" }, "AC835": { type: "787-9", body: "WB" }, "AC836": { type: "787-9", body: "WB" }, "AC837": { type: "787-9", body: "WB" },
+            "AC838": { type: "787-9", body: "WB" }, "AC839": { type: "787-9", body: "WB" }, "AC840": { type: "787-9", body: "WB" }, "AC841": { type: "787-9", body: "WB" }, "AC842": { type: "787-9", body: "WB" },
+            "AC843": { type: "787-9", body: "WB" }, "AC844": { type: "787-9", body: "WB" }, "AC845": { type: "787-9", body: "WB" }, "AC846": { type: "787-9", body: "WB" }, "AC847": { type: "787-9", body: "WB" },
+            "AC848": { type: "787-9", body: "WB" }, "AC849": { type: "787-9", body: "WB" }, "AC850": { type: "787-9", body: "WB" }, "AC851": { type: "787-9", body: "WB" }, "AC852": { type: "787-9", body: "WB" },
+            "AC853": { type: "787-9", body: "WB" }, "AC854": { type: "787-9", body: "WB" }, "AC855": { type: "787-9", body: "WB" }, "AC856": { type: "787-9", body: "WB" }, "AC857": { type: "787-9", body: "WB" },
+            "AC858": { type: "787-9", body: "WB" }, "AC859": { type: "787-9", body: "WB" }, "AC860": { type: "787-9", body: "WB" }, "AC861": { type: "787-9", body: "WB" }, "AC862": { type: "787-9", body: "WB" },
+            "AC931": { type: "A330", body: "WB" }, "AC932": { type: "A330", body: "WB" }, "AC933": { type: "A330", body: "WB" }, "AC934": { type: "A330", body: "WB" }, "AC935": { type: "A330", body: "WB" },
+            "AC936": { type: "A330", body: "WB" }, "AC937": { type: "A330", body: "WB" }, "AC938": { type: "A330", body: "WB" }, "AC939": { type: "A330", body: "WB" }, "AC940": { type: "A330", body: "WB" },
+            "AC941": { type: "A330", body: "WB" }, "AC942": { type: "A330", body: "WB" }, "AC943": { type: "A330", body: "WB" }, "AC944": { type: "A330", body: "WB" }, "AC945": { type: "A330", body: "WB" },
+            "AC946": { type: "A330", body: "WB" }, "AC947": { type: "A330", body: "WB" }, "AC948": { type: "A330", body: "WB" }, "AC949": { type: "A330", body: "WB" }, "AC950": { type: "A330", body: "WB" },
+            "QK521": { type: "E75", body: "NB" }, "QK522": { type: "E75", body: "NB" }, "QK523": { type: "E75", body: "NB" }, "QK524": { type: "E75", body: "NB" }, "QK525": { type: "E75", body: "NB" },
+            "QK526": { type: "E75", body: "NB" }, "QK527": { type: "E75", body: "NB" }, "QK528": { type: "E75", body: "NB" }, "QK529": { type: "E75", body: "NB" }, "QK530": { type: "E75", body: "NB" },
+            "QK531": { type: "E75", body: "NB" }, "QK532": { type: "E75", body: "NB" }, "QK533": { type: "E75", body: "NB" }, "QK534": { type: "E75", body: "NB" }, "QK535": { type: "E75", body: "NB" },
+            "QK536": { type: "E75", body: "NB" }, "QK537": { type: "E75", body: "NB" }, "QK538": { type: "E75", body: "NB" }, "QK539": { type: "E75", body: "NB" }, "QK540": { type: "E75", body: "NB" },
+            "QK541": { type: "E75", body: "NB" }, "QK542": { type: "E75", body: "NB" }, "QK543": { type: "E75", body: "NB" }, "QK544": { type: "E75", body: "NB" }, "QK545": { type: "E75", body: "NB" },
+            "QK701": { type: "CRJ705", body: "NB" }, "QK702": { type: "CRJ705", body: "NB" }, "QK703": { type: "CRJ705", body: "NB" }, "QK704": { type: "CRJ705", body: "NB" }, "QK705": { type: "CRJ705", body: "NB" },
+            "QK706": { type: "CRJ705", body: "NB" }, "QK707": { type: "CRJ705", body: "NB" }, "QK708": { type: "CRJ705", body: "NB" }, "QK709": { type: "CRJ705", body: "NB" }, "QK710": { type: "CRJ705", body: "NB" },
+            "QK711": { type: "CRJ705", body: "NB" }, "QK712": { type: "CRJ705", body: "NB" }, "QK713": { type: "CRJ705", body: "NB" }, "QK714": { type: "CRJ705", body: "NB" }, "QK715": { type: "CRJ705", body: "NB" },
+            "QK716": { type: "CRJ705", body: "NB" }, "QK717": { type: "CRJ705", body: "NB" }, "QK718": { type: "CRJ705", body: "NB" }, "QK719": { type: "CRJ705", body: "NB" }, "QK720": { type: "CRJ705", body: "NB" },
+            "QK721": { type: "CRJ705", body: "NB" }, "QK722": { type: "CRJ705", body: "NB" }, "QK723": { type: "CRJ705", body: "NB" }, "QK724": { type: "CRJ705", body: "NB" }, "QK725": { type: "CRJ705", body: "NB" },
+            "QK726": { type: "CRJ705", body: "NB" }, "QK727": { type: "CRJ705", body: "NB" }, "QK728": { type: "CRJ705", body: "NB" }, "QK729": { type: "CRJ705", body: "NB" }, "QK730": { type: "CRJ705", body: "NB" },
+            "RV243": { type: "A320", body: "NB" }, "RV244": { type: "A320", body: "NB" }, "RV245": { type: "A320", body: "NB" }, "RV246": { type: "A320", body: "NB" }, "RV247": { type: "A320", body: "NB" },
+            "RV255": { type: "A319", body: "NB" }, "RV256": { type: "A319", body: "NB" }, "RV257": { type: "A319", body: "NB" }, "RV259": { type: "A319", body: "NB" }, "RV262": { type: "A319", body: "NB" },
+            "RV263": { type: "A319", body: "NB" }, "RV273": { type: "A319", body: "NB" }, "RV278": { type: "A319", body: "NB" }, "RV279": { type: "A319", body: "NB" }, "RV281": { type: "A319", body: "NB" },
+            "RV283": { type: "A319", body: "NB" }, "RV284": { type: "A319", body: "NB" }, "RV286": { type: "A319", body: "NB" }, "RV287": { type: "A319", body: "NB" }, "RV290": { type: "A319", body: "NB" },
+            "RV469": { type: "A321", body: "NB" }, "RV470": { type: "A321", body: "NB" }, "RV471": { type: "A321", body: "NB" }, "RV472": { type: "A321", body: "NB" }, "RV474": { type: "A321", body: "NB" },
+            "RV475": { type: "A321", body: "NB" }, "RV476": { type: "A321", body: "NB" }, "RV477": { type: "A321", body: "NB" }, "RV478": { type: "A321", body: "NB" }, "RV479": { type: "A321", body: "NB" },
+            "RV480": { type: "A321", body: "NB" }, "RV481": { type: "A321", body: "NB" }, "RV482": { type: "A321", body: "NB" }, "RV501": { type: "A220", body: "NB" }, "RV502": { type: "A220", body: "NB" }
         };
 
         const INITIAL_ASSETS = {
@@ -414,7 +460,7 @@
         let activeRefTab = 'aircraft';
 
         const APP_STORAGE_KEY  = 'yul_field_data_v2';
-        const REF_STORAGE_KEY  = 'yul_aircraft_ref_v2';
+        const REF_STORAGE_KEY  = 'yul_aircraft_ref_v3';
         const ASSET_REF_KEY    = 'yul_asset_ref_v2';
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
         const AGENT_KEY        = 'yul_agent_name_session';
@@ -431,7 +477,7 @@
                 finTable[fin] = { type: '', body: '', assets: [], lastSeen: '', lastFlight: '', _ts: 0 };
             }
             // Resolve aircraft type
-            const match = aircraftRef[fin.substring(0,4)] || aircraftRef[fin.substring(0,2)];
+            const match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
             if (match) { finTable[fin].type = match.type; finTable[fin].body = match.body; }
             // Merge assets — add any new ones not already present
             const existing = new Set(finTable[fin].assets);
@@ -606,7 +652,7 @@
 
         function getBodyType(fin) {
             if (!fin) return "NB";
-            let match = aircraftRef[fin.substring(0,4)] || aircraftRef[fin.substring(0,2)];
+            let match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
             return match ? match.body : "NB";
         }
 
@@ -630,7 +676,7 @@
             hhd4.placeholder  = "0000 or Msng";
 
             if (val.length >= 2) {
-                let match = aircraftRef[val.substring(0,4)] || aircraftRef[val.substring(0,2)];
+                let match = aircraftRef[val.substring(0,5)] || aircraftRef[val.substring(0,4)];
                 if (match) {
                     refType.textContent = match.type;
                     refBody.textContent = match.body;
