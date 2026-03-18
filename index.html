@@ -78,9 +78,15 @@
             </div>
             <button id="export-btn" onclick="exportToCSV()" class="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1.0 0 01.707.293l5.414 5.414a1 1.0 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 Export CSV
+            </button>
+            <button id="email-btn" onclick="emailCSV()" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                Email
             </button>
         </div>
     </header>
@@ -114,7 +120,7 @@
                             </div>
                             <div class="form-group">
                                 <label>Flight #</label>
-                                <input type="text" name="Flight#" id="field-flight" placeholder="e.g. AC0123" pattern="^(AC|RV|QK)\d{4}$" class="uppercase font-mono" oninput="this.value = this.value.toUpperCase()" required>
+                                <input type="text" name="Flight#" id="field-flight" placeholder="e.g. 0123" pattern="^\d{1,4}$" class="font-mono" inputmode="numeric" maxlength="4" oninput="this.value = this.value.replace(/\D/g, '').slice(0, 4)" required>
                             </div>
                         </div>
 
@@ -152,11 +158,11 @@
                                     </div>
                                     <div class="col-span-1">
                                         <label class="text-blue-700">HHD 1</label>
-                                        <input type="text" name="HHD1" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this)">
+                                        <input type="text" name="HHD1" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()">
                                     </div>
                                     <div class="col-span-1">
                                         <label class="text-blue-700">HHD 2</label>
-                                        <input type="text" name="HHD2" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this)">
+                                        <input type="text" name="HHD2" id="field-hhd2" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()">
                                     </div>
                                 </div>
                                 <div class="grid grid-cols-3 gap-3">
@@ -175,15 +181,15 @@
                                 <div class="grid grid-cols-3 gap-3 mb-3">
                                     <div class="col-span-1">
                                         <label>Case 2</label>
-                                        <input type="text" name="Case2" maxlength="4" placeholder="000 or Msng" class="text-xs">
+                                        <input type="text" name="Case2" id="field-case2" maxlength="4" placeholder="000 or Msng" class="text-xs">
                                     </div>
                                     <div class="col-span-1">
                                         <label>HHD 3</label>
-                                        <input type="text" name="HHD3" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this)">
+                                        <input type="text" name="HHD3" id="field-hhd3" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()">
                                     </div>
                                     <div class="col-span-1">
                                         <label>HHD 4</label>
-                                        <input type="text" name="HHD4" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this)">
+                                        <input type="text" name="HHD4" id="field-hhd4" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()">
                                     </div>
                                 </div>
                                 <div class="grid grid-cols-3 gap-3">
@@ -203,7 +209,7 @@
                         <div class="grid grid-cols-2 gap-4 mt-4">
                             <div class="form-group">
                                 <label>Batteries (0-10)</label>
-                                <input type="number" name="Battery" min="0" max="10" placeholder="0">
+                                <input type="number" name="Battery" id="field-battery" min="0" max="10" placeholder="0">
                             </div>
                             <div class="form-group">
                                 <label>Rolls (0-20)</label>
@@ -356,7 +362,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.2.7";
+        const CURRENT_VERSION = "v2.2.8";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC10": { type: "A220", body: "NB" }, "AC11": { type: "A220", body: "NB" }, "AC12": { type: "A220", body: "NB" }, 
@@ -399,11 +405,11 @@
         const STATION_KEY = 'yul_station_id_session';
 
         function isValidAssetId(val) {
-            if (!val) return true;
+            if (!val || val.trim() === "") return true;
             const normalized = val.trim().toLowerCase();
             if (["msng", "ntrqrd", "n/a", "rmvd"].includes(normalized)) return true;
             const num = val.replace(/\D/g, '');
-            if (num === "") return true; 
+            if (num === "") return false; // letters-only input is invalid
             const padded = num.padStart(4, '0');
             return !!assetRef[num] || !!assetRef[padded];
         }
@@ -444,7 +450,7 @@
                             <span class="ml-1 text-[9px] px-1 bg-slate-200 rounded text-slate-500">${item.body}</span>
                         </div>
                         <button onclick="removeRef('${prefix}')" class="text-red-400 hover:text-red-600 ml-2">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1.0 0 01-1-1h-4a1 1.0 0 01-1 1v3M4 7h16" /></svg>
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>`;
                     container.appendChild(div);
                 });
@@ -460,7 +466,7 @@
                             <span class="font-bold text-slate-700 uppercase">${name}</span>
                         </div>
                         <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1.0 0 01-1-1h-4a1 1.0 0 01-1 1v3M4 7h16" /></svg>
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>`;
                     container.appendChild(div);
                 });
@@ -473,7 +479,7 @@
             const body = document.getElementById('new-ref-body').value;
             if (!prefix || !type) return showToast("Enter Prefix & Type");
             aircraftRef[prefix] = { type, body };
-            localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef));
+            try { localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef)); } catch(e) { showToast("Storage full!"); }
             renderRefList();
             document.getElementById('new-ref-prefix').value = '';
             document.getElementById('new-ref-type').value = '';
@@ -482,7 +488,7 @@
 
         function removeRef(prefix) {
             delete aircraftRef[prefix];
-            localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef));
+            try { localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef)); } catch(e) { showToast("Storage full!"); }
             renderRefList();
             showToast("Removed");
         }
@@ -492,7 +498,7 @@
             const name = document.getElementById('new-asset-name').value.trim();
             if (!id || !name) return showToast("Enter ID & Name");
             assetRef[id] = name;
-            localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef));
+            try { localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef)); } catch(e) { showToast("Storage full!"); }
             renderRefList();
             document.getElementById('new-asset-id').value = '';
             document.getElementById('new-asset-name').value = '';
@@ -501,7 +507,7 @@
 
         function removeAsset(id) {
             delete assetRef[id];
-            localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef));
+            try { localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef)); } catch(e) { showToast("Storage full!"); }
             renderRefList();
             showToast("Removed Asset");
         }
@@ -519,18 +525,62 @@
             const refBody = document.getElementById('ref-body');
             refType.textContent = "";
             refBody.textContent = "";
+
+            const case2  = document.getElementById('field-case2');
+            const hhd2   = document.getElementById('field-hhd2');
+            const hhd3   = document.getElementById('field-hhd3');
+            const hhd4   = document.getElementById('field-hhd4');
+
+            // Reset placeholders to default
+            case2.placeholder = "000 or Msng";
+            hhd2.placeholder  = "0000 or Msng";
+            hhd3.placeholder  = "0000 or Msng";
+            hhd4.placeholder  = "0000 or Msng";
+
             if (val.length >= 2) {
                 let match = aircraftRef[val.substring(0,4)] || aircraftRef[val.substring(0,2)];
                 if (match) {
                     refType.textContent = match.type;
                     refBody.textContent = match.body;
                     refBody.className = match.body === "WB" ? "text-base font-black text-purple-600 uppercase" : "text-base font-black text-slate-400 uppercase";
+
+                    const isNB = match.body === "NB";
+                    const isQK = val.startsWith("QK");
+
+                    if (isNB) {
+                        case2.placeholder = "NtRqrd";
+                        hhd3.placeholder  = "NtRqrd";
+                        hhd4.placeholder  = "NtRqrd";
+                    }
+                    if (isQK) {
+                        hhd2.placeholder = "NtRqrd";
+                    }
                 }
             }
         }
 
-        function toggleInventoryMode() { isInventoryOnlyMode = !isInventoryOnlyMode; applyModeUI(); }
+        function updateBatteryPlaceholder() {
+            const hasHHD = (id) => {
+                const el = document.querySelector(`[name="${id}"]`);
+                const val = el ? el.value.trim().toLowerCase() : "";
+                return val !== "" && val !== "msng" && val !== "ntrqrd" && val !== "n/a";
+            };
 
+            const h1 = hasHHD('HHD1'), h2 = hasHHD('HHD2');
+            const h3 = hasHHD('HHD3'), h4 = hasHHD('HHD4');
+
+            // +1 per HHD entered
+            let count = [h1, h2, h3, h4].filter(Boolean).length;
+            // +1 if case 1 has any HHD (HHD1 or HHD2)
+            if (h1 || h2) count++;
+            // +1 if case 2 has any HHD (HHD3 or HHD4)
+            if (h3 || h4) count++;
+
+            const batteryField = document.getElementById('field-battery');
+            batteryField.placeholder = count > 0 ? String(count) : "0";
+        }
+
+        function toggleInventoryMode() { isInventoryOnlyMode = !isInventoryOnlyMode; applyModeUI(); }
         function applyModeUI() {
             const btn = document.getElementById('toggle-inventory-btn');
             const flightHeader = document.getElementById('flight-header-label');
@@ -645,14 +695,18 @@
         };
 
         window.onload = () => {
-            const savedDb = localStorage.getItem(APP_STORAGE_KEY);
-            if (savedDb) { db = JSON.parse(savedDb); updateUI(); }
-            const savedRef = localStorage.getItem(REF_STORAGE_KEY);
-            if (savedRef) aircraftRef = JSON.parse(savedRef);
-            const savedAssetRef = localStorage.getItem(ASSET_REF_KEY);
-            if (savedAssetRef) {
-                assetRef = JSON.parse(savedAssetRef);
-            }
+            try {
+                const savedDb = localStorage.getItem(APP_STORAGE_KEY);
+                if (savedDb) { db = JSON.parse(savedDb); updateUI(); }
+            } catch(e) { console.warn("Could not load saved records:", e); }
+            try {
+                const savedRef = localStorage.getItem(REF_STORAGE_KEY);
+                if (savedRef) aircraftRef = JSON.parse(savedRef);
+            } catch(e) { console.warn("Could not load aircraft ref:", e); }
+            try {
+                const savedAssetRef = localStorage.getItem(ASSET_REF_KEY);
+                if (savedAssetRef) assetRef = JSON.parse(savedAssetRef);
+            } catch(e) { console.warn("Could not load asset ref:", e); }
             restoreAgent();
             updateCategoryOptions();
             document.getElementById('app-version-label').textContent = CURRENT_VERSION;
@@ -693,7 +747,20 @@
             const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
             const isInvMode = isInventoryOnlyMode || (entry.FIN && entry.FIN.toUpperCase() === "INV");
 
+            if (!entry.Agent || entry.Agent.trim() === "") {
+                showToast("Please select your Agent name!");
+                document.getElementById('agent-field').focus();
+                return;
+            }
+
             entry.Rv = CURRENT_VERSION;
+
+            // Auto-format Flight#: prepend first 2 chars of FIN + zero-pad to 4 digits
+            if (!isInventoryOnlyMode && entry['Flight#'] && entry.FIN) {
+                const prefix = entry.FIN.substring(0, 2).toUpperCase();
+                const digits = entry['Flight#'].replace(/\D/g, '').padStart(4, '0');
+                entry['Flight#'] = prefix + digits;
+            }
 
             let invalidAssetsFound = [];
             const assetFieldsToCheck = ['HHD1', 'HHD2', 'HHD3', 'HHD4', 'HD1Rmvd', 'HD2Rmvd', 'HD3Rmvd', 'HD4Rmvd', 'ASST'];
@@ -741,7 +808,7 @@
             if (!entry.SrvcIssCAT || entry.SrvcIssCAT.trim() === "") entry.SrvcIssCAT = "---";
             if (!entry.SrvcIss || entry.SrvcIss.trim() === "") entry.SrvcIss = "---";
             
-            entry.id = Date.now();
+            entry.id = Date.now() + Math.floor(Math.random() * 1000);
             entry.displayDate = now.toLocaleDateString();
             entry.displayTime = timeStr;
 
@@ -758,7 +825,10 @@
                 if (rec.IssueDetails) parts.push(`Fault: ${rec.IssueDetails}`);
                 if (rec.GeneralComments) parts.push(rec.GeneralComments);
                 if (invalidAssetsFound.length > 0) {
-                    invalidAssetsFound.forEach(val => parts.push(`GGC${val} Doesn't Exist`));
+                    invalidAssetsFound.forEach(val => {
+                        const digits = val.replace(/\D/g, '').padStart(4, '0');
+                        parts.push(`GGC${digits} Doesn't Exist`);
+                    });
                 }
                 return parts.join(" | ");
             };
@@ -773,7 +843,7 @@
                     const boardedId = entry[r.p];
                     if (removedId && removedId.trim() !== "" && !removedId.toLowerCase().includes("ntrqrd") && !removedId.toLowerCase().includes("n/a")) {
                         db.unshift({
-                            id: Date.now() + (idx + 1), FIN: "INV", 'Flight#': entry['Flight#'] || "", displayDate: entry.displayDate, displayTime: timeStr,
+                            id: Date.now() + Math.floor(Math.random() * 1000) + (idx + 1), FIN: "INV", 'Flight#': entry['Flight#'] || "", displayDate: entry.displayDate, displayTime: timeStr,
                             Priority: "1", Serviced: "Yes", Case1: "N/A", Case2: "N/A", Case3: "N/A", HHD1: "N/A", HHD2: "N/A",
                             HHD3: "N/A", HHD4: "N/A", HHD5: "N/A", HHD6: "N/A", Battery: "", Rolls: "", ASST: removedId,
                             SrvcIssCAT: "RM ( INV REM Base )", SrvcIss: "For Use In Service",
@@ -784,7 +854,12 @@
                 });
             }
 
-            localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db));
+            try {
+                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db));
+            } catch (e) {
+                showToast("Save failed: storage full!");
+                return;
+            }
             updateUI();
             showToast("Record Saved!");
             form.reset();
@@ -792,6 +867,12 @@
             restoreAgent();
             document.getElementById('ref-type').textContent = "";
             document.getElementById('ref-body').textContent = "";
+            // Reset placeholders that may have been set by handleFinInput
+            document.getElementById('field-case2').placeholder = "000 or Msng";
+            document.getElementById('field-hhd2').placeholder  = "0000 or Msng";
+            document.getElementById('field-hhd3').placeholder  = "0000 or Msng";
+            document.getElementById('field-hhd4').placeholder  = "0000 or Msng";
+            document.getElementById('field-battery').placeholder = "0";
             if (isInventoryOnlyMode) applyModeUI();
             window.scrollTo({top: 0, behavior: 'smooth'});
         }
@@ -813,20 +894,20 @@
                             <div class="text-[10px] text-slate-400 font-bold uppercase mb-4">${r.displayDate} • ${r.displayTime} • ${r['Service Station']}</div>
                             <div class="grid grid-cols-2 gap-y-2 text-xs text-slate-600 font-medium">
                                 <div><span class="text-slate-400 block text-[9px] font-black uppercase">Cases</span>${r.Case1}${r.Case2 && r.Case2 !== 'N/A' && r.Case2 !== 'NtRqrd' ? ', '+r.Case2 : ''}</div>
-                                <div><span class="text-slate-400 block text-[9px] font-black uppercase">Supplies</span>${r.Battery || r.Rolls ? 'B:'+(r.Battery||0)+'/R:'+(r.Rolls||0) : '---'}</div>
+                                <div><span class="text-slate-400 block text-[9px] font-black uppercase">Supplies</span>${(r.Battery !== undefined && r.Battery !== "") || (r.Rolls !== undefined && r.Rolls !== "") ? 'B:'+(r.Battery||0)+'/R:'+(r.Rolls||0) : '---'}</div>
                                 ${r.ASST ? `<div class="col-span-2"><span class="text-slate-400 block text-[9px] font-black uppercase">Asset</span>${r.ASST}</div>` : ''}
                             </div>
                             ${r.Comments ? `<div class="mt-3 p-2 bg-slate-50 rounded text-[11px] italic text-slate-500 border-l-2 border-slate-200">${r.Comments}</div>` : ''}
                         </div>
                         <button onclick="deleteRecord(${r.id})" class="text-slate-200 hover:text-red-500 transition-all p-2">
-                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1.0 0 01-1-1h-4a1 1.0 0 01-1 1v3M4 7h16" /></svg>
+                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                     </div>
                 </div>
             `).join('');
         }
 
-        function deleteRecord(id) { db = db.filter(r => r.id !== id); localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); updateUI(); }
+        function deleteRecord(id) { db = db.filter(r => r.id !== id); try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); } updateUI(); }
         function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.classList.add('opacity-100', '-translate-y-2'); setTimeout(() => t.classList.remove('opacity-100', '-translate-y-2'), 2000); }
 
         function exportToCSV() {
@@ -853,6 +934,30 @@
             a.href = url; a.download = `${agentName}_${station}_${dateStr}.csv`;
             document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
             showToast("CSV Exported!");
+        }
+
+        function emailCSV() {
+            if (db.length === 0) return showToast("No records to email");
+            const agentVal = document.getElementById('agent-field').value;
+            const station = document.getElementById('station-field').value || "NA";
+            const dateStr = new Date().toISOString().split('T')[0];
+            const agentName = agentVal ? agentVal.split(',')[0].trim().replace(/\s+/g, '_') : "Agent";
+            const filename = `${agentName}_${station}_${dateStr}.csv`;
+
+            // First download the CSV
+            exportToCSV();
+
+            // Then open mailto with instructions to attach
+            const subject = encodeURIComponent(`Service Report - ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"} - ${station} - ${dateStr}`);
+            const body = encodeURIComponent(
+                `Please find the service report attached.\n\n` +
+                `Agent: ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"}\n` +
+                `Station: ${station}\n` +
+                `Date: ${dateStr}\n` +
+                `Records: ${db.length}\n\n` +
+                `⚠️ Please attach the downloaded file: ${filename}`
+            );
+            setTimeout(() => { window.location.href = `mailto:hhdhq@gategourmet.com?subject=${subject}&body=${body}`; }, 500);
         }
     </script>
 </body>
