@@ -1210,21 +1210,30 @@
         }
 
         function setupP2PConnection(conn) {
-            p2pConnections[conn.peer] = conn;
-            updateSyncCount();
-
-            // Send our full local DB on connect so they can merge
             conn.on('open', () => {
-                conn.send({ type: 'FULL_SYNC', db: JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]') });
+                p2pConnections[conn.peer] = conn;
+                updateSyncCount();
+                // Send our full DB — works for both incoming and outgoing
+                const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
+                conn.send({ type: 'FULL_SYNC', db: localDb });
                 flushP2PQueue();
             });
+
+            // For incoming connections the 'open' event may have already fired
+            // so also send immediately if already open
+            if (conn.open) {
+                p2pConnections[conn.peer] = conn;
+                updateSyncCount();
+                const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
+                conn.send({ type: 'FULL_SYNC', db: localDb });
+                flushP2PQueue();
+            }
 
             conn.on('data', (msg) => handleP2PMessage(msg, conn.peer));
 
             conn.on('close', () => {
                 delete p2pConnections[conn.peer];
                 updateSyncCount();
-                // Retry reconnection after a delay
                 setTimeout(() => attemptConnect(conn.peer), 20000);
             });
 
@@ -1275,8 +1284,11 @@
                     if (replaced > 0)  parts.push(`${replaced} updated`);
                     showToast(`↓ Synced: ${parts.join(', ')} record${merged + replaced > 1 ? 's' : ''}`);
                 }
-                // Send back anything they may be missing
-                conn_p2p_send(fromPeer, { type: 'FULL_SYNC', db });
+                // Send back anything they may be missing — use direct conn reference
+                const replyConn = p2pConnections[fromPeer];
+                if (replyConn && replyConn.open) {
+                    replyConn.send({ type: 'FULL_SYNC', db });
+                }
             }
 
             if (msg.type === 'NEW_ENTRY') {
@@ -1337,7 +1349,7 @@
         }
 
         function startPeriodicSync(agentValue) {
-            const P2P_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+            const P2P_SYNC_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
             if (p2pSyncInterval) clearInterval(p2pSyncInterval);
             p2pSyncInterval = setInterval(() => {
                 // Re-attempt any peers not currently connected
