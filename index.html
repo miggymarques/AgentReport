@@ -822,7 +822,7 @@
                     if (assetType) parts.push(`Type: ${assetType}`);
                 }
                 if (rec.SrvcIssCAT !== "---") parts.push(`${rec.SrvcIssCAT}: ${rec.SrvcIss}`);
-                if (rec.IssueDetails) parts.push(`Fault: ${rec.IssueDetails}`);
+                if (rec.IssueDetails) parts.push(`Iss: ${rec.IssueDetails}`);
                 if (rec.GeneralComments) parts.push(rec.GeneralComments);
                 if (invalidAssetsFound.length > 0) {
                     invalidAssetsFound.forEach(val => {
