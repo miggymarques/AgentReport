@@ -960,6 +960,16 @@
             const issueLines = otherRecords.map(formatLine);
             const foundLines = foundRecords.map(formatLine);
 
+            // Collect service call records (detected via Comments containing "Service Call")
+            const serviceCallLines = db
+                .filter(r => r.Comments && r.Comments.includes("Service Call") && r.FIN !== 'INV')
+                .map(r => {
+                    const parts = [`  • ${r.FIN}${r['Flight#'] ? ' / ' + r['Flight#'] : ''}`];
+                    if (r.SrvcIssCAT && r.SrvcIssCAT !== '---') parts.push(`${r.SrvcIssCAT}: ${r.SrvcIss}`);
+                    if (r.IssueDetails && r.IssueDetails.trim() !== '') parts.push(`Iss: ${r.IssueDetails.trim()}`);
+                    return parts.join(' | ');
+                });
+
             const servicedCount = db.filter(r => r.FIN !== 'INV').length;
 
             const body = encodeURIComponent(
@@ -969,6 +979,9 @@
                 `Date: ${dateStr}\n` +
                 `Records: ${db.length}\n` +
                 `Serviced: ${servicedCount}\n` +
+                (serviceCallLines.length > 0
+                    ? `\nService Calls:\n${serviceCallLines.join('\n')}\n`
+                    : '') +
                 (issueLines.length > 0
                     ? `\nIssue Details:\n${issueLines.join('\n')}\n`
                     : '') +
