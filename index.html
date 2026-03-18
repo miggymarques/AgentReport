@@ -960,12 +960,15 @@
             const issueLines = otherRecords.map(formatLine);
             const foundLines = foundRecords.map(formatLine);
 
+            const servicedCount = db.filter(r => r.FIN !== 'INV').length;
+
             const body = encodeURIComponent(
                 `Please find the service report attached.\n\n` +
                 `Agent: ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"}\n` +
                 `Station: ${station}\n` +
                 `Date: ${dateStr}\n` +
                 `Records: ${db.length}\n` +
+                `Serviced: ${servicedCount}\n` +
                 (issueLines.length > 0
                     ? `\nIssue Details:\n${issueLines.join('\n')}\n`
                     : '') +
