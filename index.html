@@ -376,7 +376,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.3.2";
+        const CURRENT_VERSION = "v2.3.7";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -515,9 +515,28 @@
 
             // Update last seen — keep the most recent by timestamp
             if (entryTs >= (finTable[fin]._ts || 0)) {
-                finTable[fin].lastSeen   = entry.displayDate || '';
-                finTable[fin].lastFlight = entry['Flight#']  || '';
-                finTable[fin]._ts        = entryTs;
+                finTable[fin].lastSeen    = entry.displayDate || '';
+                finTable[fin].lastFlight  = entry['Flight#']  || '';
+                finTable[fin]._ts         = entryTs;
+
+                const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
+
+                // Snapshot of HHDs actually onboard this visit — replaces previous
+                const onboard = [];
+                [entry.HHD1, entry.HHD2, entry.HHD3, entry.HHD4].forEach(a => {
+                    if (a && !snapSkip.has(a) && !onboard.includes(a)) onboard.push(a);
+                });
+                finTable[fin].lastOnboard = onboard;
+
+                // Snapshot of removed/flagged assets this visit — replaces previous
+                // Exclude anything also reported onboard (onboard wins)
+                const onboardSet = new Set(onboard);
+                const removed = [];
+                [entry.HD1Rmvd, entry.HD2Rmvd, entry.HD3Rmvd, entry.HD4Rmvd].forEach(a => {
+                    if (a && !snapSkip.has(a) && !onboardSet.has(a) && !removed.includes(a)) removed.push(a);
+                });
+                if (entry.ASST && !snapSkip.has(entry.ASST) && !onboardSet.has(entry.ASST) && !removed.includes(entry.ASST)) removed.push(entry.ASST);
+                finTable[fin].lastRemoved = removed;
             }
 
             const SKIP = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
@@ -529,11 +548,12 @@
             });
 
             // Assets explicitly accounted for: swapped out (HDxRmvd) or reported in ASST field
+            // — exclude any that also appear in reportedNow (onboard wins, Rmvd was a mistake)
             const accountedFor = new Set();
             [entry.HD1Rmvd, entry.HD2Rmvd, entry.HD3Rmvd, entry.HD4Rmvd].forEach(a => {
-                if (a && !SKIP.has(a)) accountedFor.add(a);
+                if (a && !SKIP.has(a) && !reportedNow.has(a)) accountedFor.add(a);
             });
-            if (entry.ASST && !SKIP.has(entry.ASST)) accountedFor.add(entry.ASST);
+            if (entry.ASST && !SKIP.has(entry.ASST) && !reportedNow.has(entry.ASST)) accountedFor.add(entry.ASST);
 
             // Check assets previously on this FIN — flag any that are unaccounted for as NRO
             Object.entries(assetIndex).forEach(([assetId, rec]) => {
@@ -557,8 +577,12 @@
                 }
             });
 
-            // Clear NRO for anything explicitly accounted for
-            accountedFor.forEach(a => { if (nroIndex[a]) delete nroIndex[a]; });
+            // Clear NRO and remove from assetIndex for anything explicitly accounted for
+            // — they are no longer expected on this FIN so future visits won't re-flag them
+            accountedFor.forEach(a => {
+                if (nroIndex[a]) delete nroIndex[a];
+                if (assetIndex[a] && assetIndex[a].fin === fin) delete assetIndex[a];
+            });
 
             saveFinTable();
             saveAssetIndex();
@@ -645,8 +669,6 @@
                 return;
             }
 
-            const finAssets = buildFinAssets();
-
             // Build a per-FIN NRO lookup: fin → [{assetId, lastSeen, ts}]
             const finNro = {};
             Object.entries(nroIndex).forEach(([assetId, rec]) => {
@@ -671,10 +693,18 @@
                 const entry = finTable[fin];
                 const bodyColor = entry.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
 
-                // Assets confirmed onboard — exclude anything currently in nroIndex for this FIN
-                const nroSet = new Set((finNro[fin] || []).map(n => n.assetId));
-                const onboardAssets = (finAssets[fin] || []).filter(a => !nroSet.has(a));
-                const assetList = onboardAssets.join(', ') || '—';
+                // Assets onboard from most recent entry only (HHD1–4 snapshot)
+                const onboardAssets = entry.lastOnboard || [];
+                const onboardHtml = onboardAssets.length > 0
+                    ? onboardAssets.map(a => `<span class="text-slate-600">${a}</span>`).join(', ')
+                    : '<span class="text-slate-300">—</span>';
+
+                // Removed/flagged assets from last visit (HDxRmvd + ASST)
+                const removedAssets = entry.lastRemoved || [];
+                const removedHtml = removedAssets.length > 0
+                    ? '<span class="text-red-500 text-[8px] font-black uppercase tracking-wide block mt-0.5">Rmvd: </span>' +
+                      removedAssets.map(a => `<span class="text-red-600 font-black">${a}</span>`).join(', ')
+                    : '';
 
                 // NRO items for this FIN, sorted newest first
                 const nroItems = (finNro[fin] || []).sort((a, b) => (b.ts || 0) - (a.ts || 0));
@@ -691,7 +721,7 @@
                         ${entry.type || '—'}
                         ${entry.body ? `<span class="block text-[8px] font-black ${bodyColor}">${entry.body}</span>` : ''}
                     </span>
-                    <span class="font-mono text-slate-600 text-[9px] leading-relaxed">${assetList}</span>
+                    <span class="font-mono text-[9px] leading-relaxed">${onboardHtml}${removedHtml}</span>
                     <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}</span>
                     <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
                 container.appendChild(div);
