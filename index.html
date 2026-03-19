@@ -6,6 +6,7 @@
     <title>Agent Service Report</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         .form-group { margin-bottom: 1rem; }
         label { display: block; font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
@@ -131,6 +132,7 @@
                                     <span id="ref-type" class="text-base font-black text-blue-600 uppercase"></span>
                                     <span id="ref-body" class="text-base font-black text-slate-400 uppercase"></span>
                                 </div>
+                                <div id="fin-rotation" class="mt-0.5 h-4 text-[10px] font-bold text-slate-400 truncate"></div>
                             </div>
                             <div class="form-group">
                                 <label>Flight #</label>
@@ -369,6 +371,7 @@
                 <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">Aircraft</button>
                 <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
                 <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Sync Table</button>
+                <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Schedule</button>
             </div>
 
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
@@ -388,6 +391,27 @@
                 <input type="text" id="new-asset-name" placeholder="Item Name" class="flex-1 !text-xs">
                 <button onclick="addNewAsset()" class="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
             </div>
+
+            <div class="p-3 bg-slate-50 border-t hidden" id="add-schedule-ui">
+                <!-- Filter bar -->
+                <div class="flex flex-wrap gap-1.5 mb-2">
+                    <input id="sf-fin"   type="text" placeholder="FIN"     oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-airline" type="text" placeholder="Airline" oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-stn"   type="text" placeholder="STN"     oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-istn"  type="text" placeholder="ISTN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-ostn"  type="text" placeholder="OSTN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <button onclick="clearScheduleFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1">✕ Clear</button>
+                </div>
+                <!-- Drop zone -->
+                <label id="schedule-drop-zone" for="schedule-file-input"
+                    class="flex items-center justify-center gap-3 border border-dashed border-blue-200 rounded-lg px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors"
+                    ondragover="event.preventDefault()" ondrop="handleScheduleDrop(event)">
+                    <svg class="w-5 h-5 text-blue-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                    <span class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Drop .xlsx or tap to import</span>
+                </label>
+                <input type="file" id="schedule-file-input" accept=".xlsx,.xls" class="hidden" onchange="handleScheduleFile(this.files[0])">
+                <div id="schedule-import-status" class="mt-1.5 text-[10px] text-center font-bold text-slate-400"></div>
+            </div>
         </div>
     </div>
 
@@ -397,7 +421,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.4.0";
+        const CURRENT_VERSION = "v2.4.6";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -486,6 +510,10 @@
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
         const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
         const NRO_INDEX_KEY    = 'yul_nro_index_v1';
+        const SCHEDULE_KEY     = 'yul_schedule_v1';
+
+        // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
+        let scheduleData = {};
         const AGENT_KEY        = 'yul_agent_name_session';
         const STATION_KEY      = 'yul_station_id_session';
 
@@ -633,11 +661,13 @@
 
         function switchRefTab(tab) {
             activeRefTab = tab;
-            document.getElementById('ref-tab-aircraft').className  = `flex-1 py-3 border-b-2 ${tab === 'aircraft'  ? 'border-blue-600 text-blue-600'   : 'border-transparent text-slate-400'}`;
-            document.getElementById('ref-tab-assets').className    = `flex-1 py-3 border-b-2 ${tab === 'assets'    ? 'border-blue-600 text-blue-600'   : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-aircraft').className  = `flex-1 py-3 border-b-2 ${tab === 'aircraft'  ? 'border-blue-600 text-blue-600'     : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-assets').className    = `flex-1 py-3 border-b-2 ${tab === 'assets'    ? 'border-blue-600 text-blue-600'     : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-synctable').className = `flex-1 py-3 border-b-2 ${tab === 'synctable' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-schedule').className  = `flex-1 py-3 border-b-2 ${tab === 'schedule'  ? 'border-violet-500 text-violet-600'  : 'border-transparent text-slate-400'}`;
             document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
             document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
+            document.getElementById('add-schedule-ui').classList.toggle('hidden', tab !== 'schedule');
             renderRefList();
         }
 
@@ -679,6 +709,8 @@
                 });
             } else if (activeRefTab === 'synctable') {
                 renderSyncTable(container);
+            } else if (activeRefTab === 'schedule') {
+                renderScheduleList(container);
             }
         }
 
@@ -803,6 +835,69 @@
             return match ? match.body : "NB";
         }
 
+        // Station → IANA timezone map
+        const STATION_TZ = {
+            'YYZ': 'America/Toronto',
+            'YUL': 'America/Toronto',
+            'YYC': 'America/Edmonton',
+            'YVR': 'America/Vancouver'
+        };
+
+        // Returns a single display line for the next/current rotation for a given FIN
+        function getNextRotationLine(fin) {
+            const rotations = scheduleData[fin];
+            if (!rotations || rotations.length === 0) return '';
+
+            const now = new Date();
+            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            const agentTz = STATION_TZ[agentStation] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+            const parseOdt = (odt) => {
+                if (!odt) return null;
+                const d = new Date(odt);
+                return isNaN(d) ? null : d;
+            };
+
+            const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', {
+                hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz
+            });
+
+            // Upcoming rotations: ODT >= now - 30min grace
+            const grace = new Date(now.getTime() - 30 * 60000);
+            const upcoming = rotations.filter(r => {
+                const d = parseOdt(r.odt);
+                return d && d >= grace;
+            }).sort((a, b) => parseOdt(a.odt) - parseOdt(b.odt));
+
+            if (upcoming.length === 0) return '';
+
+            // Prefer rotation at agent's station; fall back to next globally
+            const rot = agentStation
+                ? (upcoming.find(r => (r.stn || '').toUpperCase() === agentStation) || upcoming[0])
+                : upcoming[0];
+
+            const odtDate = parseOdt(rot.odt);
+            if (!odtDate) return '';
+
+            const rotStn    = (rot.stn || '').toUpperCase();
+            const atStation = agentStation && rotStn === agentStation;
+            const rotTz     = STATION_TZ[rotStn] || agentTz;
+            const routeStr  = `${rot.iStn || '?'}→${rotStn || '?'}→${rot.oStn || '?'}`;
+            const flightStr = rot.oflt || '';
+
+            if (atStation) {
+                // Rotation is at agent's station — show time localized to that station
+                const stnTime = fmtInTz(odtDate, agentTz);
+                return `${flightStr}  ${routeStr}  ✈ ${stnTime}`;
+            } else {
+                // Different station — show time in rotation's station tz AND agent's station tz
+                const rotTime = fmtInTz(odtDate, rotTz);
+                const localTime = fmtInTz(odtDate, agentTz);
+                const tzLabel = rotTz !== agentTz ? ` (${localTime} ${agentStation})` : '';
+                return `${flightStr}  ${routeStr}  ✈ ${rotTime} [${rotStn}]${tzLabel}`;
+            }
+        }
+
         function handleFinInput(el) {
             el.value = el.value.toUpperCase();
             const val = el.value;
@@ -824,11 +919,15 @@
 
             // Auto-set priority from computed priority list whenever FIN is long enough to match
             const priorityField = document.getElementById('priority-field');
+            const rotationEl    = document.getElementById('fin-rotation');
             if (val.length >= 5) {
                 const p = computeFinPriority(val);
                 priorityField.value = String(p);
+                // Populate next rotation line from scheduleData
+                rotationEl.textContent = getNextRotationLine(val);
             } else {
                 priorityField.value = '1';
+                rotationEl.textContent = '';
             }
 
             if (val.length >= 2) {
@@ -1017,6 +1116,10 @@
                 const savedNroIndex = localStorage.getItem(NRO_INDEX_KEY);
                 if (savedNroIndex) nroIndex = JSON.parse(savedNroIndex);
             } catch(e) { console.warn("Could not load NRO index:", e); }
+            try {
+                const savedSchedule = localStorage.getItem(SCHEDULE_KEY);
+                if (savedSchedule) scheduleData = JSON.parse(savedSchedule);
+            } catch(e) { console.warn("Could not load schedule:", e); }
 
             restoreAgent();
             updateCategoryOptions();
@@ -1050,6 +1153,210 @@
             document.getElementById('tab-priority').classList.toggle('active', tab === 'priority');
             if (tab === 'records') updateUI();
             if (tab === 'priority') renderPriorityList();
+        }
+
+
+        // ─── Schedule Import ──────────────────────────────────────────────────
+
+        function saveScheduleData() {
+            try { localStorage.setItem(SCHEDULE_KEY, JSON.stringify(scheduleData)); } catch(e) { console.warn('Could not save schedule:', e); }
+        }
+
+        function handleScheduleDrop(event) {
+            event.preventDefault();
+            const file = event.dataTransfer.files[0];
+            if (file) handleScheduleFile(file);
+        }
+
+        // Parse an Excel serial date or datetime value into a JS Date
+        function xlDateToDate(val) {
+            if (!val) return null;
+            if (val instanceof Date) return val;
+            if (typeof val === 'number') {
+                // Excel serial: days since 1900-01-00 (with Lotus bug offset)
+                const d = new Date(Math.round((val - 25569) * 86400000));
+                return d;
+            }
+            if (typeof val === 'string' && val.trim()) {
+                const d = new Date(val);
+                return isNaN(d) ? null : d;
+            }
+            return null;
+        }
+
+        function fmtTime(val) {
+            const d = xlDateToDate(val);
+            if (!d) return '';
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+
+        function fmtDate(val) {
+            const d = xlDateToDate(val);
+            if (!d) return '';
+            return d.toLocaleDateString();
+        }
+
+        function handleScheduleFile(file) {
+            if (!file) return;
+            const statusEl = document.getElementById('schedule-import-status');
+            statusEl.textContent = 'Reading file…';
+            statusEl.className = 'mt-2 text-[10px] text-center font-bold text-blue-400';
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+                    const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
+
+                    if (rows.length === 0) {
+                        statusEl.textContent = 'No rows found in file.';
+                        statusEl.className = 'mt-2 text-[10px] text-center font-bold text-red-400';
+                        return;
+                    }
+
+                    const ts = Date.now();
+                    const newSchedule = {};
+                    let rowCount = 0;
+
+                    rows.forEach((row, i) => {
+                        const fin = String(row['FIN'] || '').trim().toUpperCase();
+                        if (!fin) return;
+
+                        const rotation = {
+                            idt:     row['IDT']   || '',
+                            iflt:    String(row['IFLT']  || '').trim(),
+                            inGt:    String(row['InGt']  || '').trim(),
+                            iStn:    String(row['ISTN']  || '').trim(),
+                            stn:     String(row['STN']   || '').trim(),
+                            oStn:    String(row['OSTN']  || '').trim(),
+                            oGt:     String(row['OGT']   || '').trim(),
+                            oflt:    String(row['OFLT']  || '').trim(),
+                            odt:     row['ODT']   || '',
+                            routeDt: row['RouteDt'] || '',
+                            _ts: ts
+                        };
+
+                        if (!newSchedule[fin]) newSchedule[fin] = [];
+                        newSchedule[fin].push(rotation);
+                        rowCount++;
+                    });
+
+                    // Sort each FIN's rotations by outbound time
+                    Object.keys(newSchedule).forEach(fin => {
+                        newSchedule[fin].sort((a, b) => {
+                            const ta = a.odt ? new Date(a.odt).getTime() : 0;
+                            const tb = b.odt ? new Date(b.odt).getTime() : 0;
+                            return ta - tb;
+                        });
+                    });
+
+                    scheduleData = newSchedule;
+                    saveScheduleData();
+
+                    // Broadcast to all peers
+                    const peers = Object.keys(p2pConnections);
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex, scheduleData }));
+
+                    const finCount = Object.keys(newSchedule).length;
+                    statusEl.textContent = `✓ ${rowCount} rotations across ${finCount} aircraft imported.`;
+                    statusEl.className = 'mt-2 text-[10px] text-center font-bold text-emerald-500';
+                    renderRefList();
+                    showToast(`Schedule: ${finCount} aircraft, ${rowCount} rotations`);
+                } catch(err) {
+                    console.error(err);
+                    statusEl.textContent = 'Error: ' + err.message;
+                    statusEl.className = 'mt-2 text-[10px] text-center font-bold text-red-400';
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function clearScheduleFilters() {
+            ['sf-fin','sf-airline','sf-stn','sf-istn','sf-ostn'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            renderRefList();
+        }
+
+        function renderScheduleList(container) {
+            const finCount = Object.keys(scheduleData).length;
+            const rotCount = Object.values(scheduleData).reduce((s, arr) => s + arr.length, 0);
+            const ts = finCount > 0 ? (Object.values(scheduleData)[0][0]?._ts || null) : null;
+
+            if (finCount === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No schedule imported yet</div>`;
+                return;
+            }
+
+            // Read filter values
+            const fFin    = (document.getElementById('sf-fin')?.value     || '').trim().toUpperCase();
+            const fAirline= (document.getElementById('sf-airline')?.value || '').trim().toUpperCase();
+            const fStn    = (document.getElementById('sf-stn')?.value     || '').trim().toUpperCase();
+            const fIStn   = (document.getElementById('sf-istn')?.value    || '').trim().toUpperCase();
+            const fOStn   = (document.getElementById('sf-ostn')?.value    || '').trim().toUpperCase();
+
+            // Build filtered list: { fin, rotations[] }
+            const filtered = [];
+            Object.keys(scheduleData).sort().forEach(fin => {
+                if (fFin     && !fin.includes(fFin))           return;
+                if (fAirline && !fin.startsWith(fAirline))     return;
+                const rots = scheduleData[fin].filter(rot => {
+                    if (fStn  && (rot.stn  || '').toUpperCase()  !== fStn)  return false;
+                    if (fIStn && (rot.iStn || '').toUpperCase()  !== fIStn) return false;
+                    if (fOStn && (rot.oStn || '').toUpperCase()  !== fOStn) return false;
+                    return true;
+                });
+                if (rots.length > 0) filtered.push({ fin, rots });
+            });
+
+            const shownRots = filtered.reduce((s, r) => s + r.rots.length, 0);
+
+            // Summary bar
+            const summary = document.createElement('div');
+            summary.className = "text-center py-2 border-b border-slate-100 mb-1";
+            const isFiltered = fFin || fAirline || fStn || fIStn || fOStn;
+            summary.innerHTML = isFiltered
+                ? `<span class="text-[10px] font-black text-violet-600">${filtered.length} aircraft · ${shownRots} rotations</span> <span class="text-[9px] text-slate-300">(filtered from ${finCount} / ${rotCount})</span>`
+                : `<span class="text-[10px] font-black text-slate-500">${finCount} aircraft · ${rotCount} rotations</span>${ts ? `<span class="text-[9px] text-slate-300 ml-2">· ${new Date(ts).toLocaleString()}</span>` : ''}`;
+            container.appendChild(summary);
+
+            if (filtered.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = "text-center py-6 text-[10px] text-slate-300 font-bold uppercase tracking-widest";
+                empty.textContent = "No results";
+                container.appendChild(empty);
+                return;
+            }
+
+            // Column header
+            const colHead = document.createElement('div');
+            colHead.className = "grid gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
+            colHead.style.gridTemplateColumns = "3.2rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3.5rem 3.5rem";
+            colHead.innerHTML = `<span>FIN</span><span>OFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>IFLT</span><span>ODT</span><span>IDT</span>`;
+            container.appendChild(colHead);
+
+            filtered.forEach(({ fin, rots }) => {
+                rots.forEach((rot, idx) => {
+                    const row = document.createElement('div');
+                    row.className = `grid gap-1 px-2 py-1.5 text-[9px] items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
+                    row.style.gridTemplateColumns = "3.2rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3.5rem 3.5rem";
+                    row.innerHTML = `
+                        <span class="font-mono font-black ${idx === 0 ? 'text-blue-600' : 'text-slate-200'}">${idx === 0 ? fin : ''}</span>
+                        <span class="font-mono text-slate-600">${rot.oflt  || '—'}</span>
+                        <span class="text-slate-500">${rot.inGt  || '—'}</span>
+                        <span class="text-slate-500">${rot.iStn  || '—'}</span>
+                        <span class="font-bold text-slate-700">${rot.stn   || '—'}</span>
+                        <span class="text-slate-500">${rot.oStn  || '—'}</span>
+                        <span class="text-slate-500">${rot.oGt   || '—'}</span>
+                        <span class="font-mono text-slate-400">${rot.iflt  || '—'}</span>
+                        <span class="text-violet-600 font-bold">${rot.odt  || '—'}</span>
+                        <span class="text-slate-400">${rot.idt   || '—'}</span>`;
+                    container.appendChild(row);
+                });
+            });
         }
 
         // Filter state for priority tab
@@ -1334,6 +1641,7 @@
             restoreAgent();
             document.getElementById('ref-type').textContent = "";
             document.getElementById('ref-body').textContent = "";
+            document.getElementById('fin-rotation').textContent = "";
             // Reset placeholders that may have been set by handleFinInput
             document.getElementById('field-case2').placeholder = "000 or Msng";
             document.getElementById('field-hhd2').placeholder  = "0000 or Msng";
@@ -1703,10 +2011,21 @@
                     if (nroChanged) saveNroIndex();
                 }
 
+                // Merge incoming scheduleData — newer full import wins
+                if (msg.scheduleData && typeof msg.scheduleData === 'object') {
+                    const incomingTs = Object.values(msg.scheduleData)[0]?._ts || 0;
+                    const localTs    = Object.values(scheduleData)[0]?._ts    || 0;
+                    if (incomingTs > localTs) {
+                        scheduleData = msg.scheduleData;
+                        saveScheduleData();
+                        showToast('↓ Schedule updated from peer');
+                    }
+                }
+
                 // Send back anything they may be missing — use direct conn reference
                 const replyConn = p2pConnections[fromPeer];
                 if (replyConn && replyConn.open) {
-                    replyConn.send({ type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex });
+                    replyConn.send({ type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex, scheduleData });
                 }
             }
 
@@ -1778,7 +2097,7 @@
                 // Send a full sync to all currently connected peers
                 const peers = Object.keys(p2pConnections);
                 if (peers.length > 0) {
-                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex }));
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex, scheduleData }));
                 }
             }, P2P_SYNC_INTERVAL_MS);
         }
