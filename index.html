@@ -422,7 +422,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.5.1";
+        const CURRENT_VERSION = "v2.5.2";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1934,7 +1934,28 @@
                 config: {
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' }
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun.relay.metered.ca:80' },
+                        {
+                            urls: 'turn:global.relay.metered.ca:80',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+                        {
+                            urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+                        {
+                            urls: 'turn:global.relay.metered.ca:443',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        },
+                        {
+                            urls: 'turn:global.relay.metered.ca:443?transport=tcp',
+                            username: 'openrelayproject',
+                            credential: 'openrelayproject'
+                        }
                     ]
                 }
             });
@@ -1963,11 +1984,31 @@
             });
 
             p2pPeer.on('error', (err) => {
+                console.warn('P2P error:', err.type, err.message);
                 if (err.type === 'unavailable-id') {
-                    // Our saved ID is taken — clear it and connect as a listener only
-                    // The other instance will handle outgoing connections
+                    // ID taken (e.g. same agent on another device) — register with a suffix and still connect outward
+                    setSyncStatus('connecting');
+                    const fallbackId = peerId + '-' + Math.random().toString(36).slice(2, 6);
+                    if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
+                    p2pPeer = new Peer(fallbackId, { debug: 0, config: p2pPeer?.options?.config });
+                    p2pMyId = fallbackId;
+                    p2pPeer.on('open', () => {
+                        p2pReady = true;
+                        setSyncStatus('online', 0);
+                        connectToAllPeers(agentValue);
+                        startPeriodicSync(agentValue);
+                    });
+                    p2pPeer.on('connection', (conn) => { setupP2PConnection(conn); });
+                    p2pPeer.on('disconnected', () => {
+                        p2pReady = false;
+                        setSyncStatus('offline');
+                        setTimeout(() => { if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect(); }, 4000);
+                    });
+                } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
                     setSyncStatus('offline');
-                    console.warn('P2P: peer ID unavailable, waiting for incoming connections only');
+                    setTimeout(() => {
+                        if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect();
+                    }, 5000);
                 }
             });
         }
