@@ -421,7 +421,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.4.6";
+        const CURRENT_VERSION = "v2.4.7";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -2012,9 +2012,12 @@
                 }
 
                 // Merge incoming scheduleData — newer full import wins
-                if (msg.scheduleData && typeof msg.scheduleData === 'object') {
-                    const incomingTs = Object.values(msg.scheduleData)[0]?._ts || 0;
-                    const localTs    = Object.values(scheduleData)[0]?._ts    || 0;
+                // _ts lives on each rotation object (one level deeper than the FIN key)
+                if (msg.scheduleData && typeof msg.scheduleData === 'object' && Object.keys(msg.scheduleData).length > 0) {
+                    const firstIncoming = Object.values(msg.scheduleData)[0];
+                    const incomingTs = Array.isArray(firstIncoming) ? (firstIncoming[0]?._ts || 0) : (firstIncoming?._ts || 0);
+                    const firstLocal  = Object.keys(scheduleData).length > 0 ? Object.values(scheduleData)[0] : null;
+                    const localTs     = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
                     if (incomingTs > localTs) {
                         scheduleData = msg.scheduleData;
                         saveScheduleData();
