@@ -107,6 +107,7 @@
     <nav class="bg-white border-b flex sticky top-[68px] z-20 shadow-sm">
         <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-4 text-center font-bold transition-colors">NEW ENTRY</button>
         <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
+        <button id="tab-priority" onclick="switchTab('priority')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">PRIORITY</button>
     </nav>
 
     <main class="container mx-auto p-4 pb-24 max-w-2xl">
@@ -333,6 +334,26 @@
             </div>
             <div id="records-list" class="space-y-4"></div>
         </section>
+
+        <section id="section-priority" class="hidden space-y-3">
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-wrap gap-2 items-center">
+                <span class="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Filter</span>
+                <div class="flex gap-1 flex-wrap">
+                    <button onclick="setPriorityFilter('airline','ALL')" id="pf-airline-ALL" class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-slate-800 text-white border-slate-700">ALL</button>
+                    <button onclick="setPriorityFilter('airline','AC')"  id="pf-airline-AC"  class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-slate-500 border-slate-200 hover:bg-slate-50">AC</button>
+                    <button onclick="setPriorityFilter('airline','QK')"  id="pf-airline-QK"  class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-slate-500 border-slate-200 hover:bg-slate-50">QK</button>
+                    <button onclick="setPriorityFilter('airline','RV')"  id="pf-airline-RV"  class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-slate-500 border-slate-200 hover:bg-slate-50">RV</button>
+                </div>
+                <div class="w-px h-5 bg-slate-200 mx-1"></div>
+                <div class="flex gap-1">
+                    <button onclick="setPriorityFilter('priority','ALL')" id="pf-priority-ALL" class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-slate-800 text-white border-slate-700">ALL</button>
+                    <button onclick="setPriorityFilter('priority','1')"   id="pf-priority-1"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-red-400 border-red-200 hover:bg-red-50">P1</button>
+                    <button onclick="setPriorityFilter('priority','2')"   id="pf-priority-2"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-amber-500 border-amber-200 hover:bg-amber-50">P2</button>
+                    <button onclick="setPriorityFilter('priority','3')"   id="pf-priority-3"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-emerald-500 border-emerald-200 hover:bg-emerald-50">P3</button>
+                </div>
+            </div>
+            <div id="priority-list"></div>
+        </section>
     </main>
 
     <div id="editor-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] items-center justify-center p-4">
@@ -376,7 +397,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.3.8";
+        const CURRENT_VERSION = "v2.4.0";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -801,6 +822,15 @@
             hhd3.placeholder  = "0000 or Msng";
             hhd4.placeholder  = "0000 or Msng";
 
+            // Auto-set priority from computed priority list whenever FIN is long enough to match
+            const priorityField = document.getElementById('priority-field');
+            if (val.length >= 5) {
+                const p = computeFinPriority(val);
+                priorityField.value = String(p);
+            } else {
+                priorityField.value = '1';
+            }
+
             if (val.length >= 2) {
                 let match = aircraftRef[val.substring(0,5)] || aircraftRef[val.substring(0,4)];
                 if (match) {
@@ -1014,9 +1044,163 @@
         function switchTab(tab) {
             document.getElementById('section-form').classList.toggle('hidden', tab !== 'form');
             document.getElementById('section-records').classList.toggle('hidden', tab !== 'records');
+            document.getElementById('section-priority').classList.toggle('hidden', tab !== 'priority');
             document.getElementById('tab-form').classList.toggle('active', tab === 'form');
             document.getElementById('tab-records').classList.toggle('active', tab === 'records');
+            document.getElementById('tab-priority').classList.toggle('active', tab === 'priority');
             if (tab === 'records') updateUI();
+            if (tab === 'priority') renderPriorityList();
+        }
+
+        // Filter state for priority tab
+        let priorityFilterAirline  = 'ALL';
+        let priorityFilterPriority = 'ALL';
+
+        function setPriorityFilter(type, val) {
+            if (type === 'airline')  priorityFilterAirline  = val;
+            if (type === 'priority') priorityFilterPriority = val;
+
+            // Update button styles
+            document.querySelectorAll('.pf-airline').forEach(btn => {
+                const active = btn.id === `pf-airline-${priorityFilterAirline}`;
+                btn.className = `pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`;
+            });
+            document.querySelectorAll('.pf-priority').forEach(btn => {
+                const key = btn.id.replace('pf-priority-','');
+                const active = btn.id === `pf-priority-${priorityFilterPriority}`;
+                const colors = { '1':'text-red-400 border-red-200 hover:bg-red-50', '2':'text-amber-500 border-amber-200 hover:bg-amber-50', '3':'text-emerald-500 border-emerald-200 hover:bg-emerald-50', 'ALL':'text-slate-500 border-slate-200 hover:bg-slate-50' };
+                btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white ' + (colors[key] || colors['ALL'])}`;
+            });
+
+            renderPriorityList();
+        }
+
+        // Compute priority for a given FIN based on last service date
+        function computeFinPriority(fin) {
+            const entry = finTable[fin];
+            if (!entry || !entry.lastSeen) return 1; // never serviced = P1
+            const today = new Date(); today.setHours(0,0,0,0);
+            const parts = entry.lastSeen.split('/');
+            let lastDate;
+            if (parts.length === 3) {
+                lastDate = new Date(parts[2], parts[0]-1, parts[1]);
+                if (isNaN(lastDate)) lastDate = new Date(parts[2], parts[1]-1, parts[0]);
+            } else { lastDate = new Date(entry.lastSeen); }
+            if (isNaN(lastDate)) return 1;
+            lastDate.setHours(0,0,0,0);
+            const daysAgo = Math.round((today - lastDate) / 86400000);
+            if (daysAgo <= 1)      return 3;
+            else if (daysAgo <= 2) return 2;
+            else                   return 1;
+        }
+
+        function renderPriorityList() {
+            const container = document.getElementById('priority-list');
+            container.innerHTML = '';
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // All known FINs: union of finTable (serviced) + aircraftRef (all known aircraft)
+            const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
+
+            const rows = [...allFins].map(fin => {
+                const entry  = finTable[fin];
+                const refMatch = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)] || aircraftRef[fin];
+                const type   = (entry && entry.type) || (refMatch && refMatch.type) || '—';
+                const body   = (entry && entry.body) || (refMatch && refMatch.body) || '—';
+                const airline = fin.substring(0,2);
+
+                let lastSeen = null, daysAgo = null, priority;
+                if (entry && entry.lastSeen) {
+                    const parts = entry.lastSeen.split('/');
+                    let lastDate;
+                    if (parts.length === 3) {
+                        lastDate = new Date(parts[2], parts[0]-1, parts[1]);
+                        if (isNaN(lastDate)) lastDate = new Date(parts[2], parts[1]-1, parts[0]);
+                    } else { lastDate = new Date(entry.lastSeen); }
+                    if (!isNaN(lastDate)) {
+                        lastDate.setHours(0,0,0,0);
+                        daysAgo  = Math.round((today - lastDate) / 86400000);
+                        lastSeen = entry.lastSeen;
+                    }
+                }
+                if (daysAgo === null)     priority = 1;
+                else if (daysAgo <= 1)   priority = 3;
+                else if (daysAgo <= 2)   priority = 2;
+                else                     priority = 1;
+
+                return { fin, type, body, airline, lastSeen, daysAgo, priority };
+            });
+
+            // Apply filters
+            const filtered = rows.filter(r => {
+                if (priorityFilterAirline  !== 'ALL' && r.airline  !== priorityFilterAirline)       return false;
+                if (priorityFilterPriority !== 'ALL' && String(r.priority) !== priorityFilterPriority) return false;
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div class="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 font-bold">No aircraft match filter</div>`;
+                return;
+            }
+
+            // Sort: priority asc (1 first), then airline alpha, then FIN numeric
+            filtered.sort((a, b) =>
+                a.priority - b.priority ||
+                a.airline.localeCompare(b.airline) ||
+                parseInt(a.fin.replace(/\D/g,'')) - parseInt(b.fin.replace(/\D/g,''))
+            );
+
+            // Group by priority
+            const groups = { 1: [], 2: [], 3: [] };
+            filtered.forEach(r => groups[r.priority].push(r));
+
+            const priorityMeta = {
+                1: { label: 'Priority 1 — Overdue (3+ days)', bg: 'bg-red-50', border: 'border-red-200', headColor: 'text-red-600', badge: 'bg-red-100 text-red-700 border-red-200' },
+                2: { label: 'Priority 2 — 2 Days Ago',          bg: 'bg-amber-50', border: 'border-amber-200', headColor: 'text-amber-600', badge: 'bg-amber-100 text-amber-700 border-amber-200' },
+                3: { label: 'Priority 3 — Recent (0–1 Day)', bg: 'bg-emerald-50', border: 'border-emerald-200', headColor: 'text-emerald-600', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+            };
+
+            [1, 2, 3].forEach(p => {
+                if (groups[p].length === 0) return;
+                const meta = priorityMeta[p];
+
+                const section = document.createElement('div');
+                section.className = `bg-white rounded-2xl border ${meta.border} shadow-sm overflow-hidden mb-3`;
+
+                const groupHead = document.createElement('div');
+                groupHead.className = `${meta.bg} px-4 py-2 border-b ${meta.border} flex items-center justify-between`;
+                groupHead.innerHTML = `
+                    <span class="text-[10px] font-black uppercase tracking-widest ${meta.headColor}">${meta.label}</span>
+                    <span class="text-[10px] font-black px-2 py-0.5 rounded-full border ${meta.badge}">${groups[p].length}</span>`;
+                section.appendChild(groupHead);
+
+                const colHead = document.createElement('div');
+                colHead.className = "grid gap-2 px-4 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100";
+                colHead.style.gridTemplateColumns = "4rem 4.5rem 2.5rem 1fr 2rem";
+                colHead.innerHTML = `<span>FIN</span><span>Type</span><span>Body</span><span>Last Serviced</span><span class="text-center">P</span>`;
+                section.appendChild(colHead);
+
+                groups[p].forEach(r => {
+                    const bodyColor  = r.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
+                    const daysLabel  = r.daysAgo === null ? 'Never' : r.daysAgo === 0 ? 'Today' : r.daysAgo === 1 ? 'Yesterday' : `${r.daysAgo}d ago`;
+                    const dateStr    = r.lastSeen || '—';
+                    const pColor     = p === 1 ? 'text-red-500' : p === 2 ? 'text-amber-500' : 'text-emerald-500';
+                    const row = document.createElement('div');
+                    row.className = "grid gap-2 px-4 py-2.5 text-[11px] border-b border-slate-50 hover:bg-slate-50 items-center last:border-0";
+                    row.style.gridTemplateColumns = "4rem 4.5rem 2.5rem 1fr 2rem";
+                    row.innerHTML = `
+                        <span class="font-mono font-black text-blue-600">${r.fin}</span>
+                        <span class="font-bold text-slate-700">${r.type}</span>
+                        <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
+                        <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span></span>
+                        <span class="text-center font-black text-[13px] ${pColor}">${p}</span>`;
+                    section.appendChild(row);
+                });
+
+                container.appendChild(section);
+            });
         }
 
         function handleSave(event) {
