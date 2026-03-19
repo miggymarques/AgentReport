@@ -376,7 +376,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.2.9";
+        const CURRENT_VERSION = "v2.3.2";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -463,38 +463,106 @@
         const REF_STORAGE_KEY  = 'yul_aircraft_ref_v3';
         const ASSET_REF_KEY    = 'yul_asset_ref_v2';
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
+        const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
+        const NRO_INDEX_KEY    = 'yul_nro_index_v1';
         const AGENT_KEY        = 'yul_agent_name_session';
         const STATION_KEY      = 'yul_station_id_session';
+
+        // assetIndex: { "GGC0123": { fin: "AC101", ts: 1234567890 }, ... }
+        // Single source of truth — each asset lives on exactly one FIN.
+        let assetIndex = {};
+
+        // nroIndex: { "GGC0123": { lastFin: "AC101", lastSeen: "2025-01-01", ts: 1234567890 }, ... }
+        // Assets expected on a FIN but not reported onboard or otherwise accounted for.
+        let nroIndex = {};
 
         function saveFinTable() {
             try { localStorage.setItem(SYNC_TABLE_KEY, JSON.stringify(finTable)); } catch(e) { console.warn('Could not save FIN table:', e); }
         }
 
+        function saveAssetIndex() {
+            try { localStorage.setItem(ASSET_INDEX_KEY, JSON.stringify(assetIndex)); } catch(e) { console.warn('Could not save asset index:', e); }
+        }
+
+        function saveNroIndex() {
+            try { localStorage.setItem(NRO_INDEX_KEY, JSON.stringify(nroIndex)); } catch(e) { console.warn('Could not save NRO index:', e); }
+        }
+
+        // Derive each FIN's asset list on-the-fly from assetIndex.
+        // Returns { fin: [assetId, ...] } — each asset appears on exactly one FIN.
+        function buildFinAssets() {
+            const map = {};
+            Object.entries(assetIndex).forEach(([assetId, rec]) => {
+                if (!rec.fin || rec.fin === 'INV') return;
+                if (!map[rec.fin]) map[rec.fin] = [];
+                map[rec.fin].push(assetId);
+            });
+            return map;
+        }
+
         function updateFinTable(entry) {
             if (!entry || entry.FIN === 'INV') return;
             const fin = entry.FIN;
+            const entryTs = entry.id || 0;
+
+            // Ensure finTable row exists
             if (!finTable[fin]) {
-                finTable[fin] = { type: '', body: '', assets: [], lastSeen: '', lastFlight: '', _ts: 0 };
+                finTable[fin] = { type: '', body: '', lastSeen: '', lastFlight: '', _ts: 0 };
             }
             // Resolve aircraft type
             const match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
             if (match) { finTable[fin].type = match.type; finTable[fin].body = match.body; }
-            // Merge assets — add any new ones not already present
-            const existing = new Set(finTable[fin].assets);
-            [entry.HHD1, entry.HHD2, entry.HHD3, entry.HHD4].forEach(a => {
-                if (a && a !== 'N/A' && a !== 'NtRqrd' && a !== 'Msng' && a !== '' && !existing.has(a)) {
-                    finTable[fin].assets.push(a);
-                    existing.add(a);
-                }
-            });
+
             // Update last seen — keep the most recent by timestamp
-            const entryTs = entry.id || 0;
             if (entryTs >= (finTable[fin]._ts || 0)) {
                 finTable[fin].lastSeen   = entry.displayDate || '';
                 finTable[fin].lastFlight = entry['Flight#']  || '';
                 finTable[fin]._ts        = entryTs;
             }
+
+            const SKIP = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
+
+            // Assets reported onboard in this entry
+            const reportedNow = new Set();
+            [entry.HHD1, entry.HHD2, entry.HHD3, entry.HHD4].forEach(a => {
+                if (a && !SKIP.has(a)) reportedNow.add(a);
+            });
+
+            // Assets explicitly accounted for: swapped out (HDxRmvd) or reported in ASST field
+            const accountedFor = new Set();
+            [entry.HD1Rmvd, entry.HD2Rmvd, entry.HD3Rmvd, entry.HD4Rmvd].forEach(a => {
+                if (a && !SKIP.has(a)) accountedFor.add(a);
+            });
+            if (entry.ASST && !SKIP.has(entry.ASST)) accountedFor.add(entry.ASST);
+
+            // Check assets previously on this FIN — flag any that are unaccounted for as NRO
+            Object.entries(assetIndex).forEach(([assetId, rec]) => {
+                if (rec.fin !== fin) return;           // not previously on this FIN
+                if (reportedNow.has(assetId)) return;  // still onboard — fine
+                if (accountedFor.has(assetId)) return; // explicitly moved or flagged — fine
+                // Asset was expected but missing with no explanation
+                const existingNro = nroIndex[assetId];
+                if (!existingNro || entryTs > (existingNro.ts || 0)) {
+                    nroIndex[assetId] = { lastFin: fin, lastSeen: entry.displayDate || '', ts: entryTs };
+                }
+            });
+
+            // Update assetIndex — reported assets move to this FIN
+            reportedNow.forEach(a => {
+                const existing = assetIndex[a];
+                if (!existing || entryTs >= existing.ts) {
+                    assetIndex[a] = { fin, ts: entryTs };
+                    // Clear NRO if this asset is now confirmed somewhere
+                    if (nroIndex[a]) delete nroIndex[a];
+                }
+            });
+
+            // Clear NRO for anything explicitly accounted for
+            accountedFor.forEach(a => { if (nroIndex[a]) delete nroIndex[a]; });
+
             saveFinTable();
+            saveAssetIndex();
+            saveNroIndex();
         }
 
         function isValidAssetId(val) {
@@ -577,37 +645,64 @@
                 return;
             }
 
-            // Header row
+            const finAssets = buildFinAssets();
+
+            // Build a per-FIN NRO lookup: fin → [{assetId, lastSeen, ts}]
+            const finNro = {};
+            Object.entries(nroIndex).forEach(([assetId, rec]) => {
+                if (!rec.lastFin) return;
+                if (!finNro[rec.lastFin]) finNro[rec.lastFin] = [];
+                finNro[rec.lastFin].push({ assetId, lastSeen: rec.lastSeen, ts: rec.ts });
+            });
+
+            // Header — 5-column layout: FIN | Type | Assets on FIN | Last | NRO
             const header = document.createElement('div');
-            header.className = "grid grid-cols-12 gap-1 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
+            header.className = "grid gap-1 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
+            header.style.gridTemplateColumns = "3rem 3.5rem 1fr 3rem 1fr";
             header.innerHTML = `
-                <span class="col-span-2">FIN</span>
-                <span class="col-span-3">Type</span>
-                <span class="col-span-5">Assets on FIN</span>
-                <span class="col-span-2">Last</span>`;
+                <span>FIN</span>
+                <span>Type</span>
+                <span>Assets Onboard</span>
+                <span>Last</span>
+                <span class="text-amber-500">NRO</span>`;
             container.appendChild(header);
 
             fins.forEach(fin => {
                 const entry = finTable[fin];
-                const assetList = (entry.assets || []).join(', ') || '—';
                 const bodyColor = entry.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
+
+                // Assets confirmed onboard — exclude anything currently in nroIndex for this FIN
+                const nroSet = new Set((finNro[fin] || []).map(n => n.assetId));
+                const onboardAssets = (finAssets[fin] || []).filter(a => !nroSet.has(a));
+                const assetList = onboardAssets.join(', ') || '—';
+
+                // NRO items for this FIN, sorted newest first
+                const nroItems = (finNro[fin] || []).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+                const nroCell = nroItems.length > 0
+                    ? nroItems.map(n => `<span class="text-amber-600 font-black">${n.assetId}</span><span class="text-amber-600 ml-0.5 text-[8px]">${n.lastSeen || ''}</span>`).join('<br>')
+                    : '<span class="text-slate-200">—</span>';
+
                 const div = document.createElement('div');
-                div.className = "grid grid-cols-12 gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
+                div.className = "grid gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
+                div.style.gridTemplateColumns = "3rem 3.5rem 1fr 3rem 1fr";
                 div.innerHTML = `
-                    <span class="col-span-2 font-mono font-black text-blue-600">${fin}</span>
-                    <span class="col-span-3 font-bold text-slate-700">
+                    <span class="font-mono font-black text-blue-600">${fin}</span>
+                    <span class="font-bold text-slate-700">
                         ${entry.type || '—'}
-                        ${entry.body ? `<span class="ml-1 text-[8px] font-black ${bodyColor}">${entry.body}</span>` : ''}
+                        ${entry.body ? `<span class="block text-[8px] font-black ${bodyColor}">${entry.body}</span>` : ''}
                     </span>
-                    <span class="col-span-5 font-mono text-slate-600 text-[9px] leading-relaxed">${assetList}</span>
-                    <span class="col-span-2 text-slate-400 text-[9px]">${entry.lastSeen || '—'}</span>`;
+                    <span class="font-mono text-slate-600 text-[9px] leading-relaxed">${assetList}</span>
+                    <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}</span>
+                    <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
                 container.appendChild(div);
             });
 
             // Summary footer
+            const nroTotal = Object.keys(nroIndex).length;
             const footer = document.createElement('div');
             footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
-            footer.textContent = `${fins.length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries`;
+            footer.innerHTML = `${fins.length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries · ${Object.keys(assetIndex).length} assets tracked` +
+                (nroTotal > 0 ? ` · <span class="text-amber-500">${nroTotal} NRO</span>` : '');
             container.appendChild(footer);
         }
 
@@ -853,10 +948,15 @@
                 const savedFinTable = localStorage.getItem(SYNC_TABLE_KEY);
                 if (savedFinTable) finTable = JSON.parse(savedFinTable);
             } catch(e) { console.warn("Could not load FIN table:", e); }
-            // Migration: if finTable is empty but db has records, rebuild it
-            if (Object.keys(finTable).length === 0 && db.length > 0) {
-                db.forEach(r => updateFinTable(r));
-            }
+            try {
+                const savedAssetIndex = localStorage.getItem(ASSET_INDEX_KEY);
+                if (savedAssetIndex) assetIndex = JSON.parse(savedAssetIndex);
+            } catch(e) { console.warn("Could not load asset index:", e); }
+            try {
+                const savedNroIndex = localStorage.getItem(NRO_INDEX_KEY);
+                if (savedNroIndex) nroIndex = JSON.parse(savedNroIndex);
+            } catch(e) { console.warn("Could not load NRO index:", e); }
+
             restoreAgent();
             updateCategoryOptions();
             document.getElementById('app-version-label').textContent = CURRENT_VERSION;
@@ -1329,7 +1429,7 @@
                     showToast(`↓ Synced: ${parts.join(', ')} record${merged + replaced > 1 ? 's' : ''}`);
                 }
 
-                // Merge incoming finTable — union of assets, newer metadata wins
+                // Merge incoming finTable — union of FINs, newer metadata wins
                 if (msg.finTable && typeof msg.finTable === 'object') {
                     let finChanged = false;
                     Object.entries(msg.finTable).forEach(([fin, incoming]) => {
@@ -1337,11 +1437,6 @@
                             finTable[fin] = { ...incoming };
                             finChanged = true;
                         } else {
-                            // Merge assets
-                            const existing = new Set(finTable[fin].assets || []);
-                            (incoming.assets || []).forEach(a => {
-                                if (!existing.has(a)) { finTable[fin].assets.push(a); existing.add(a); finChanged = true; }
-                            });
                             // Keep newer metadata
                             if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
                                 finTable[fin].lastSeen   = incoming.lastSeen;
@@ -1356,10 +1451,47 @@
                     if (finChanged) saveFinTable();
                 }
 
+                // Merge incoming assetIndex — newer timestamp wins per asset
+                if (msg.assetIndex && typeof msg.assetIndex === 'object') {
+                    let indexChanged = false;
+                    Object.entries(msg.assetIndex).forEach(([assetId, incoming]) => {
+                        const existing = assetIndex[assetId];
+                        if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
+                            assetIndex[assetId] = incoming;
+                            indexChanged = true;
+                        }
+                    });
+                    if (indexChanged) saveAssetIndex();
+                }
+
+                // Merge incoming nroIndex — newer timestamp wins; clear if assetIndex shows it's been found
+                if (msg.nroIndex && typeof msg.nroIndex === 'object') {
+                    let nroChanged = false;
+                    Object.entries(msg.nroIndex).forEach(([assetId, incoming]) => {
+                        // Skip if assetIndex already has a newer record for this asset (it was found)
+                        const inAsset = assetIndex[assetId];
+                        if (inAsset && (inAsset.ts || 0) >= (incoming.ts || 0)) return;
+                        const existing = nroIndex[assetId];
+                        if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
+                            nroIndex[assetId] = incoming;
+                            nroChanged = true;
+                        }
+                    });
+                    // Also clear any NRO entries that our assetIndex supersedes
+                    Object.keys(nroIndex).forEach(assetId => {
+                        const inAsset = assetIndex[assetId];
+                        if (inAsset && (inAsset.ts || 0) >= (nroIndex[assetId].ts || 0)) {
+                            delete nroIndex[assetId];
+                            nroChanged = true;
+                        }
+                    });
+                    if (nroChanged) saveNroIndex();
+                }
+
                 // Send back anything they may be missing — use direct conn reference
                 const replyConn = p2pConnections[fromPeer];
                 if (replyConn && replyConn.open) {
-                    replyConn.send({ type: 'FULL_SYNC', db, finTable });
+                    replyConn.send({ type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex });
                 }
             }
 
@@ -1431,7 +1563,7 @@
                 // Send a full sync to all currently connected peers
                 const peers = Object.keys(p2pConnections);
                 if (peers.length > 0) {
-                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable }));
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex }));
                 }
             }, P2P_SYNC_INTERVAL_MS);
         }
