@@ -422,7 +422,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.6.3";
+        const CURRENT_VERSION = "v2.6.6";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1043,6 +1043,18 @@
             // Auto-set priority from computed priority list whenever FIN is long enough to match
             const priorityField = document.getElementById('priority-field');
             const rotationEl    = document.getElementById('fin-rotation');
+
+            // If field cleared, release any claim and restore placeholder suggestions
+            if (val.length === 0) {
+                priorityField.value = '1';
+                if (updateFinPlaceholder._lastSuggested) {
+                    releaseFin(updateFinPlaceholder._lastSuggested);
+                    updateFinPlaceholder._lastSuggested = null;
+                }
+                updateFinPlaceholder();
+                return;
+            }
+
             if (val.length >= 5) {
                 const p = computeFinPriority(val);
                 priorityField.value = String(p);
@@ -1191,68 +1203,141 @@
             });
         }
 
-        // Returns the FIN of the next P1 aircraft with an upcoming rotation at the agent's station
+        // ─── FIN Claim System ────────────────────────────────────────────────
+        const CLAIM_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+        function claimFin(fin) {
+            if (!fin) return;
+            const agentVal = document.getElementById('agent-field')?.value || '';
+            const agentName = agentVal.split(',')[0].trim();
+            finClaims[fin] = { agent: agentName, ts: Date.now() };
+            // Broadcast to peers
+            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+        }
+
+        function releaseFin(fin) {
+            if (!fin || !finClaims[fin]) return;
+            delete finClaims[fin];
+            const msg = { type: 'RELEASE_FIN', fin };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+        }
+
+        function isFinClaimed(fin) {
+            const claim = finClaims[fin];
+            if (!claim) return false;
+            // Expire stale claims
+            if (Date.now() - claim.ts > CLAIM_TTL_MS) { delete finClaims[fin]; return false; }
+            // Don't block our own claim
+            const agentVal = document.getElementById('agent-field')?.value || '';
+            const myName = agentVal.split(',')[0].trim();
+            return claim.agent !== myName;
+        }
+
+        // Returns the FIN of the highest-priority P1 aircraft with an upcoming rotation at the agent's station
+        // Priority: 1) most days since last serviced (never = highest), 2) airline AC > RV > QK, 3) earliest ODT
         function getNextP1Fin() {
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
             if (!agentStation) return null;
 
-            const now   = new Date();
-            const grace = new Date(now.getTime() - 30 * 60000);
+            const now    = new Date();
+            const today  = new Date(now); today.setHours(0,0,0,0);
+            const grace  = new Date(now.getTime() - 30 * 60000);
             const parseT = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
 
-            let best = null, bestOdt = Infinity;
+            const AIRLINE_RANK = { 'AC': 0, 'RV': 1, 'QK': 2 };
 
-            // Check all known FINs — union of finTable and aircraftRef
+            // Days since last serviced — higher = more overdue; never serviced = 9999
+            const daysOverdue = (fin) => {
+                const entry = finTable[fin];
+                if (!entry || !entry.lastSeen) return 9999;
+                const parts = entry.lastSeen.split('/');
+                let d;
+                if (parts.length === 3) {
+                    d = new Date(parts[2], parts[0]-1, parts[1]);
+                    if (isNaN(d)) d = new Date(parts[2], parts[1]-1, parts[0]);
+                } else { d = new Date(entry.lastSeen); }
+                if (isNaN(d)) return 9999;
+                d.setHours(0,0,0,0);
+                return Math.round((today - d) / 86400000);
+            };
+
             const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
+            const candidates = [];
 
             allFins.forEach(fin => {
                 if (computeFinPriority(fin) !== 1) return;
-
-                // Must have an upcoming rotation at the agent's station
                 const rotations = scheduleData[fin];
                 if (!rotations || rotations.length === 0) return;
 
-                const upcoming = rotations.filter(r => {
-                    const d = parseT(r.odt);
-                    return d && d >= grace && (r.stn || '').toUpperCase() === agentStation;
-                });
+                const upcoming = rotations
+                    .filter(r => { const d = parseT(r.odt); return d && d >= grace && (r.stn || '').toUpperCase() === agentStation; })
+                    .sort((a, b) => parseT(a.odt) - parseT(b.odt));
                 if (upcoming.length === 0) return;
 
-                // Pick earliest ODT among station rotations
-                upcoming.forEach(r => {
-                    const d = parseT(r.odt);
-                    if (d && d.getTime() < bestOdt) {
-                        bestOdt = d.getTime();
-                        best = fin;
-                    }
+                const airline = fin.substring(0, 2).toUpperCase();
+                // Skip FINs claimed by another active agent
+                if (isFinClaimed(fin)) return;
+
+                candidates.push({
+                    fin,
+                    days:        daysOverdue(fin),
+                    airlineRank: AIRLINE_RANK[airline] !== undefined ? AIRLINE_RANK[airline] : 99,
+                    odt:         parseT(upcoming[0].odt).getTime()
                 });
             });
 
-            return best;
+            if (candidates.length === 0) return null;
+
+            // Sort: most overdue first, then airline rank, then earliest ODT
+            candidates.sort((a, b) =>
+                b.days - a.days ||
+                a.airlineRank - b.airlineRank ||
+                a.odt - b.odt
+            );
+
+            return candidates[0].fin;
         }
 
-        // Set FIN placeholder to next P1 aircraft at agent's station
-        // Also updates Flight# placeholder with IFLT (fallback OFLT if IFLT is 0000)
+        // Set FIN and Flight# placeholders to next P1 aircraft at agent's station
+        // Also shows rotation info under the FIN field until the user types
         function updateFinPlaceholder() {
             const finField    = document.getElementById('field-fin');
             const flightField = document.getElementById('field-flight');
+            const rotationEl  = document.getElementById('fin-rotation');
+
             if (!finField || finField.value) return; // don't overwrite if user has typed something
 
             const p1Fin = getNextP1Fin();
             finField.placeholder = p1Fin ? p1Fin : 'e.g. AC101';
 
-            if (!flightField || flightField.value) return;
-            if (!p1Fin) { flightField.placeholder = 'e.g. 0123'; return; }
-
-            const rot = getNextRotation(p1Fin);
-            if (rot) {
-                const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '');
-                const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '');
-                const useNum  = (!ifltNum || ifltNum === '0') ? ofltNum : ifltNum;
-                flightField.placeholder = useNum ? useNum.padStart(4, '0') : 'e.g. 0123';
-            } else {
-                flightField.placeholder = 'e.g. 0123';
+            if (!p1Fin) {
+                if (flightField && !flightField.value) flightField.placeholder = 'e.g. 0123';
+                if (rotationEl) rotationEl.textContent = '';
+                return;
             }
+
+            // Flight# placeholder
+            if (flightField && !flightField.value) {
+                const rot = getNextRotation(p1Fin);
+                if (rot) {
+                    const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                    const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                    const useNum  = (!ifltNum || ifltNum === '0') ? ofltNum : ifltNum;
+                    flightField.placeholder = useNum ? useNum.padStart(4, '0') : 'e.g. 0123';
+                } else {
+                    flightField.placeholder = 'e.g. 0123';
+                }
+            }
+
+            // Rotation info line — show for the suggested P1 FIN
+            if (rotationEl) {
+                rotationEl.textContent = getNextRotationLine(p1Fin);
+            }
+
+            // Claim this FIN so other agents skip it
+            claimFin(p1Fin);
+            updateFinPlaceholder._lastSuggested = p1Fin;
         }
 
         function onAgentChange() {
@@ -1847,6 +1932,11 @@
             document.getElementById('ref-body').textContent = "";
             document.getElementById('fin-rotation').textContent = "";
             document.getElementById('field-flight').placeholder = 'e.g. 0123';
+            // Release claim for the FIN that was just saved
+            const savedFin = document.getElementById('field-fin');
+            if (savedFin && savedFin.value) releaseFin(savedFin.value);
+            else if (updateFinPlaceholder._lastSuggested) releaseFin(updateFinPlaceholder._lastSuggested);
+            updateFinPlaceholder._lastSuggested = null;
             updateFinPlaceholder();
             hideTypoHint(); // clears all hint boxes
             // Reset placeholders that may have been set by handleFinInput
@@ -2021,6 +2111,7 @@
         let p2pReady = false;
         let p2pSyncInterval = null;
         let lastSyncTs = {};          // peerId → timestamp of last successful sync with that peer
+        let finClaims  = {};          // fin → { agent, ts } — in-memory only, not persisted
 
         const P2P_QUEUE_KEY = 'p2p_offline_queue_v1';
 
@@ -2312,6 +2403,31 @@
                 // Only update backend tables — do NOT add to db or history tab
                 updateFinTable(inEntry);
                 setSyncStatus('synced', Object.keys(p2pConnections).length);
+            }
+
+            if (msg.type === 'CLAIM_FIN') {
+                if (msg.fin && msg.agent && msg.ts) {
+                    // Only store if newer than existing claim
+                    const existing = finClaims[msg.fin];
+                    if (!existing || msg.ts > existing.ts) {
+                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts };
+                        // If this FIN is our current suggestion, re-suggest
+                        if (updateFinPlaceholder._lastSuggested === msg.fin) {
+                            updateFinPlaceholder._lastSuggested = null;
+                            updateFinPlaceholder();
+                        }
+                    }
+                }
+            }
+
+            if (msg.type === 'RELEASE_FIN') {
+                if (msg.fin && finClaims[msg.fin]) {
+                    delete finClaims[msg.fin];
+                    // Re-run suggestion in case this FIN was blocking ours
+                    if (!document.getElementById('field-fin')?.value) {
+                        updateFinPlaceholder();
+                    }
+                }
             }
         }
 
