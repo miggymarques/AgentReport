@@ -422,7 +422,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.5.3";
+        const CURRENT_VERSION = "v2.5.9";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1368,7 +1368,7 @@
 
                     // Broadcast to all peers
                     const peers = Object.keys(p2pConnections);
-                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex, scheduleData }));
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', finTable, assetIndex, nroIndex, scheduleData }));
 
                     const finCount = Object.keys(newSchedule).length;
                     statusEl.textContent = `✓ ${rowCount} rotations across ${finCount} aircraft imported.`;
@@ -1769,29 +1769,58 @@
             document.getElementById('count').innerText = db.length;
             if (db.length === 0) { list.innerHTML = ''; document.getElementById('no-records').classList.remove('hidden'); return; }
             document.getElementById('no-records').classList.add('hidden');
-            list.innerHTML = db.map(r => `
-                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative group text-sm">
-                    <div class="flex justify-between items-start">
-                        <div class="flex-1">
-                            <div class="flex items-center gap-2 mb-2 font-black text-xl">
-                                <span class="${r.FIN === 'INV' ? 'text-amber-600' : 'text-blue-600'}">${r.FIN}</span>
-                                <span class="text-slate-200">/</span>
-                                <span class="text-slate-800">${r['Flight#'] || '---'}</span>
-                            </div>
-                            <div class="text-[10px] text-slate-400 font-bold uppercase mb-4">${r.displayDate} • ${r.displayTime} • ${r['Service Station']}</div>
-                            <div class="grid grid-cols-2 gap-y-2 text-xs text-slate-600 font-medium">
-                                <div><span class="text-slate-400 block text-[9px] font-black uppercase">Cases</span>${r.Case1}${r.Case2 && r.Case2 !== 'N/A' && r.Case2 !== 'NtRqrd' ? ', '+r.Case2 : ''}</div>
-                                <div><span class="text-slate-400 block text-[9px] font-black uppercase">Supplies</span>${(r.Battery !== undefined && r.Battery !== "") || (r.Rolls !== undefined && r.Rolls !== "") ? 'B:'+(r.Battery||0)+'/R:'+(r.Rolls||0) : '---'}</div>
-                                ${r.ASST ? `<div class="col-span-2"><span class="text-slate-400 block text-[9px] font-black uppercase">Asset</span>${r.ASST}</div>` : ''}
-                            </div>
-                            ${r.Comments ? `<div class="mt-3 p-2 bg-slate-50 rounded text-[11px] italic text-slate-500 border-l-2 border-slate-200">${r.Comments}</div>` : ''}
-                        </div>
-                        <button onclick="deleteRecord(${r.id})" class="text-slate-200 hover:text-red-500 transition-all p-2">
-                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                    </div>
-                </div>
-            `).join('');
+
+            const skip = new Set(['N/A', 'NtRqrd', 'Msng', '', undefined, null]);
+            const fmtA = (...vals) => vals.filter(v => !skip.has(v)).join(', ') || '---';
+            const fmtR = (...vals) => vals.filter(v => !skip.has(v)).join(', ');
+
+            list.innerHTML = db.map(r => {
+                const cases  = fmtA(r.Case1, r.Case2);
+                const hhds1  = fmtA(r.HHD1, r.HHD2);
+                const hhds2  = fmtA(r.HHD3, r.HHD4);
+                const rmvd   = fmtR(r.HD1Rmvd, r.HD2Rmvd, r.HD3Rmvd, r.HD4Rmvd);
+                const suppl  = (r.Battery !== undefined && r.Battery !== '') || (r.Rolls !== undefined && r.Rolls !== '')
+                    ? 'B:' + (r.Battery || 0) + ' / R:' + (r.Rolls || 0) : '---';
+                const agent  = r.Agent ? r.Agent.split(',')[0].trim() : '';
+                const isInv  = r.FIN === 'INV';
+                const finCls = isInv ? 'text-amber-600' : 'text-blue-600';
+                const notSvc  = r.Serviced === 'No' ? '<span class="text-[9px] font-black text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full ml-1">NOT SVC</span>' : '';
+                const svcCall = (r.ServiceCall || (r.Comments && r.Comments.includes('Service Call'))) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
+
+                let equip = '';
+                if (!isInv) {
+                    equip += '<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600 font-medium mb-2">';
+                    equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Cases</span>' + cases + '</div>';
+                    equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Supplies</span>' + suppl + '</div>';
+                    if (hhds1 !== '---') equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Case 1 HHDs</span>' + hhds1 + '</div>';
+                    if (hhds2 !== '---') equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Case 2 HHDs</span>' + hhds2 + '</div>';
+                    if (rmvd) equip += '<div class="col-span-2"><span class="text-red-400 block text-[9px] font-black uppercase">Removed</span><span class="text-red-500">' + rmvd + '</span></div>';
+                    if (r.ASST) equip += '<div class="col-span-2"><span class="text-slate-400 block text-[9px] font-black uppercase">Reported Asset</span>' + r.ASST + '</div>';
+                    equip += '</div>';
+                }
+
+                const issueHtml = (r.SrvcIssCAT && r.SrvcIssCAT !== '---')
+                    ? '<div class="text-[10px] text-slate-500 font-bold mb-1">' + r.SrvcIssCAT + ': ' + (r.SrvcIss || '') + '</div>' : '';
+                const commentHtml = r.Comments
+                    ? '<div class="mt-2 p-2 bg-slate-50 rounded text-[11px] italic text-slate-500 border-l-2 border-slate-200">' + r.Comments + '</div>' : '';
+
+                return '<div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative group text-sm">'
+                    + '<div class="flex justify-between items-start">'
+                    + '<div class="flex-1">'
+                    + '<div class="flex items-center gap-1 mb-1 font-black text-xl flex-wrap">'
+                    + '<span class="' + finCls + '">' + r.FIN + '</span>'
+                    + '<span class="text-slate-200 mx-1">/</span>'
+                    + '<span class="text-slate-800">' + (r['Flight#'] || '---') + '</span>'
+                    + notSvc + svcCall
+                    + '</div>'
+                    + '<div class="text-[10px] text-slate-400 font-bold uppercase mb-3">' + r.displayDate + ' • ' + r.displayTime + ' • ' + r['Service Station'] + ' • ' + agent + '</div>'
+                    + equip + issueHtml + commentHtml
+                    + '</div>'
+                    + '<button onclick="deleteRecord(' + r.id + ')" class="text-slate-200 hover:text-red-500 transition-all p-2 shrink-0">'
+                    + '<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>'
+                    + '</button>'
+                    + '</div></div>';
+            }).join('');
         }
 
         function deleteRecord(id) { db = db.filter(r => r.id !== id); try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); } updateUI(); }
@@ -1896,8 +1925,33 @@
         let p2pOfflineQueue = [];     // { entry } objects to broadcast when reconnected
         let p2pReady = false;
         let p2pSyncInterval = null;
+        let lastSyncTs = {};          // peerId → timestamp of last successful sync with that peer
 
         const P2P_QUEUE_KEY = 'p2p_offline_queue_v1';
+
+        // Build a delta of only records changed since a given timestamp
+        function buildDelta(sinceTs) {
+            const fin   = {};
+            const asset = {};
+            const nro   = {};
+
+            Object.entries(finTable).forEach(([k, v]) => {
+                if ((v._ts || 0) > sinceTs) fin[k] = v;
+            });
+            Object.entries(assetIndex).forEach(([k, v]) => {
+                if ((v.ts || 0) > sinceTs) asset[k] = v;
+            });
+            Object.entries(nroIndex).forEach(([k, v]) => {
+                if ((v.ts || 0) > sinceTs) nro[k] = v;
+            });
+
+            // Schedule: include only if imported after sinceTs
+            const firstLocal = Object.keys(scheduleData).length > 0 ? Object.values(scheduleData)[0] : null;
+            const schedTs = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
+            const sched = schedTs > sinceTs ? scheduleData : {};
+
+            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched };
+        }
 
         // Derive a short stable peer ID from an agent name
         // e.g. "Michael Marques" → "ggcsync-michael-marques"
@@ -1940,26 +1994,15 @@
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun.relay.metered.ca:80' },
                         {
-                            urls: 'turn:global.relay.metered.ca:80',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
+                            urls: 'turn:free.expressturn.com:3478',
+                            username: '000000002089362952',
+                            credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0='
                         },
                         {
-                            urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        },
-                        {
-                            urls: 'turn:global.relay.metered.ca:443',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        },
-                        {
-                            urls: 'turn:global.relay.metered.ca:443?transport=tcp',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
+                            urls: 'turn:free.expressturn.com:3478?transport=tcp',
+                            username: '000000002089362952',
+                            credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0='
                         }
                     ]
                 }
@@ -1995,7 +2038,7 @@
                     setSyncStatus('connecting');
                     const fallbackId = peerId + '-' + Math.random().toString(36).slice(2, 6);
                     if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
-                    p2pPeer = new Peer(fallbackId, { debug: 0, host: '0.peerjs.com', port: 443, path: '/', secure: true, pingInterval: 5000, config: { iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:global.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' } ] } });
+                    p2pPeer = new Peer(fallbackId, { debug: 0, host: '0.peerjs.com', port: 443, path: '/', secure: true, pingInterval: 5000, config: { iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:free.expressturn.com:3478', username: '000000002089362952', credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0=' }, { urls: 'turn:free.expressturn.com:3478?transport=tcp', username: '000000002089362952', credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0=' } ] } });
                     p2pMyId = fallbackId;
                     p2pPeer.on('open', () => {
                         p2pReady = true;
@@ -2052,8 +2095,10 @@
             const doSync = () => {
                 p2pConnections[conn.peer] = conn;
                 updateSyncCount();
-                const localDb = JSON.parse(localStorage.getItem(APP_STORAGE_KEY) || '[]');
-                conn.send({ type: 'FULL_SYNC', db: localDb, finTable });
+                const sinceTs = lastSyncTs[conn.peer] || 0;
+                const delta = buildDelta(sinceTs);
+                const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
+                conn.send({ type: msgType, sinceTs, ...delta });
                 flushP2PQueue();
             };
 
@@ -2066,163 +2111,112 @@
             }
         }
 
-        function handleP2PMessage(msg, fromPeer) {
-            if (msg.type === 'FULL_SYNC') {
-                const incoming = msg.db;
-                if (!Array.isArray(incoming) || incoming.length === 0) return;
-                let merged = 0;
-                let replaced = 0;
+        function applyIncomingSyncMsg(msg, fromPeer) {
+            let anyChanged = false;
 
-                incoming.forEach(inEntry => {
-                    // Conflict key: same FIN + Flight# = same logical record
-                    const conflictIdx = db.findIndex(r =>
-                        r.FIN === inEntry.FIN &&
-                        r['Flight#'] === inEntry['Flight#'] &&
-                        r.FIN !== 'INV'
-                    );
-
-                    if (conflictIdx === -1) {
-                        // No matching record — just add it
-                        const exactMatch = db.find(r => r.id === inEntry.id);
-                        if (!exactMatch) { db.unshift(inEntry); merged++; updateFinTable(inEntry); }
-                    } else {
-                        // Conflict — keep whichever has the later timestamp
-                        const existing = db[conflictIdx];
-                        const incomingTs = inEntry.id || 0;
-                        const existingTs = existing.id || 0;
-                        if (incomingTs > existingTs) {
-                            db.splice(conflictIdx, 1, inEntry);
-                            replaced++;
-                            updateFinTable(inEntry);
-                        }
-                        // else keep ours — it's newer, but still update finTable with any new assets
-                        else { updateFinTable(existing); }
+            // Merge finTable
+            if (msg.finTable && typeof msg.finTable === 'object') {
+                let changed = false;
+                Object.entries(msg.finTable).forEach(([fin, incoming]) => {
+                    if (!finTable[fin]) {
+                        finTable[fin] = { ...incoming };
+                        changed = true;
+                    } else if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
+                        finTable[fin].lastSeen      = incoming.lastSeen;
+                        finTable[fin].lastFlight    = incoming.lastFlight;
+                        finTable[fin].lastOnboard   = incoming.lastOnboard;
+                        finTable[fin].lastRemoved   = incoming.lastRemoved;
+                        finTable[fin].type          = incoming.type || finTable[fin].type;
+                        finTable[fin].body          = incoming.body || finTable[fin].body;
+                        finTable[fin]._ts           = incoming._ts;
+                        changed = true;
                     }
                 });
+                if (changed) { saveFinTable(); anyChanged = true; }
+            }
 
-                if (merged > 0 || replaced > 0) {
-                    try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
-                    updateUI();
-                    setSyncStatus('synced', Object.keys(p2pConnections).length);
-                    const parts = [];
-                    if (merged > 0)    parts.push(`${merged} new`);
-                    if (replaced > 0)  parts.push(`${replaced} updated`);
-                    showToast(`↓ Synced: ${parts.join(', ')} record${merged + replaced > 1 ? 's' : ''}`);
-                }
-
-                // Merge incoming finTable — union of FINs, newer metadata wins
-                if (msg.finTable && typeof msg.finTable === 'object') {
-                    let finChanged = false;
-                    Object.entries(msg.finTable).forEach(([fin, incoming]) => {
-                        if (!finTable[fin]) {
-                            finTable[fin] = { ...incoming };
-                            finChanged = true;
-                        } else {
-                            // Keep newer metadata
-                            if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
-                                finTable[fin].lastSeen   = incoming.lastSeen;
-                                finTable[fin].lastFlight = incoming.lastFlight;
-                                finTable[fin].type       = incoming.type || finTable[fin].type;
-                                finTable[fin].body       = incoming.body || finTable[fin].body;
-                                finTable[fin]._ts        = incoming._ts;
-                                finChanged = true;
-                            }
-                        }
-                    });
-                    if (finChanged) saveFinTable();
-                }
-
-                // Merge incoming assetIndex — newer timestamp wins per asset
-                if (msg.assetIndex && typeof msg.assetIndex === 'object') {
-                    let indexChanged = false;
-                    Object.entries(msg.assetIndex).forEach(([assetId, incoming]) => {
-                        const existing = assetIndex[assetId];
-                        if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
-                            assetIndex[assetId] = incoming;
-                            indexChanged = true;
-                        }
-                    });
-                    if (indexChanged) saveAssetIndex();
-                }
-
-                // Merge incoming nroIndex — newer timestamp wins; clear if assetIndex shows it's been found
-                if (msg.nroIndex && typeof msg.nroIndex === 'object') {
-                    let nroChanged = false;
-                    Object.entries(msg.nroIndex).forEach(([assetId, incoming]) => {
-                        // Skip if assetIndex already has a newer record for this asset (it was found)
-                        const inAsset = assetIndex[assetId];
-                        if (inAsset && (inAsset.ts || 0) >= (incoming.ts || 0)) return;
-                        const existing = nroIndex[assetId];
-                        if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
-                            nroIndex[assetId] = incoming;
-                            nroChanged = true;
-                        }
-                    });
-                    // Also clear any NRO entries that our assetIndex supersedes
-                    Object.keys(nroIndex).forEach(assetId => {
-                        const inAsset = assetIndex[assetId];
-                        if (inAsset && (inAsset.ts || 0) >= (nroIndex[assetId].ts || 0)) {
-                            delete nroIndex[assetId];
-                            nroChanged = true;
-                        }
-                    });
-                    if (nroChanged) saveNroIndex();
-                }
-
-                // Merge incoming scheduleData — newer full import wins
-                // _ts lives on each rotation object (one level deeper than the FIN key)
-                if (msg.scheduleData && typeof msg.scheduleData === 'object' && Object.keys(msg.scheduleData).length > 0) {
-                    const firstIncoming = Object.values(msg.scheduleData)[0];
-                    const incomingTs = Array.isArray(firstIncoming) ? (firstIncoming[0]?._ts || 0) : (firstIncoming?._ts || 0);
-                    const firstLocal  = Object.keys(scheduleData).length > 0 ? Object.values(scheduleData)[0] : null;
-                    const localTs     = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
-                    if (incomingTs > localTs) {
-                        scheduleData = msg.scheduleData;
-                        saveScheduleData();
-                        showToast('↓ Schedule updated from peer');
+            // Merge assetIndex
+            if (msg.assetIndex && typeof msg.assetIndex === 'object') {
+                let changed = false;
+                Object.entries(msg.assetIndex).forEach(([assetId, incoming]) => {
+                    const existing = assetIndex[assetId];
+                    if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
+                        assetIndex[assetId] = incoming;
+                        changed = true;
                     }
-                }
+                });
+                if (changed) { saveAssetIndex(); anyChanged = true; }
+            }
 
-                // Send back anything they may be missing — use direct conn reference
+            // Merge nroIndex
+            if (msg.nroIndex && typeof msg.nroIndex === 'object') {
+                let changed = false;
+                Object.entries(msg.nroIndex).forEach(([assetId, incoming]) => {
+                    const inAsset = assetIndex[assetId];
+                    if (inAsset && (inAsset.ts || 0) >= (incoming.ts || 0)) return;
+                    const existing = nroIndex[assetId];
+                    if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
+                        nroIndex[assetId] = incoming;
+                        changed = true;
+                    }
+                });
+                Object.keys(nroIndex).forEach(assetId => {
+                    const inAsset = assetIndex[assetId];
+                    if (inAsset && (inAsset.ts || 0) >= (nroIndex[assetId].ts || 0)) {
+                        delete nroIndex[assetId]; changed = true;
+                    }
+                });
+                if (changed) { saveNroIndex(); anyChanged = true; }
+            }
+
+            // Merge scheduleData — full replace only if newer
+            if (msg.scheduleData && typeof msg.scheduleData === 'object' && Object.keys(msg.scheduleData).length > 0) {
+                const firstIncoming = Object.values(msg.scheduleData)[0];
+                const incomingTs = Array.isArray(firstIncoming) ? (firstIncoming[0]?._ts || 0) : (firstIncoming?._ts || 0);
+                const firstLocal  = Object.keys(scheduleData).length > 0 ? Object.values(scheduleData)[0] : null;
+                const localTs     = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
+                if (incomingTs > localTs) {
+                    scheduleData = msg.scheduleData;
+                    saveScheduleData();
+                    anyChanged = true;
+                    showToast('↓ Schedule updated from peer');
+                }
+            }
+
+            return anyChanged;
+        }
+
+        function handleP2PMessage(msg, fromPeer) {
+            if (msg.type === 'FULL_SYNC' || msg.type === 'DELTA_SYNC') {
+                const changed = applyIncomingSyncMsg(msg, fromPeer);
+
+                // Record when we last synced with this peer
+                const nowTs = Date.now();
+                lastSyncTs[fromPeer] = nowTs;
+
+                if (changed) setSyncStatus('synced', Object.keys(p2pConnections).length);
+
+                // Reply with our own delta of anything newer than what they told us they had
                 const replyConn = p2pConnections[fromPeer];
                 if (replyConn && replyConn.open) {
-                    replyConn.send({ type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex, scheduleData });
+                    const theirSinceTs = msg.sinceTs || 0;
+                    const replyDelta = buildDelta(theirSinceTs);
+                    const hasData = Object.keys(replyDelta.finTable).length > 0 ||
+                                    Object.keys(replyDelta.assetIndex).length > 0 ||
+                                    Object.keys(replyDelta.nroIndex).length > 0 ||
+                                    Object.keys(replyDelta.scheduleData).length > 0;
+                    if (hasData || theirSinceTs === 0) {
+                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, ...replyDelta });
+                    }
                 }
+                return;
             }
 
             if (msg.type === 'NEW_ENTRY') {
                 const inEntry = msg.entry;
-
-                // Check for same FIN+Flight# conflict
-                const conflictIdx = db.findIndex(r =>
-                    r.FIN === inEntry.FIN &&
-                    r['Flight#'] === inEntry['Flight#'] &&
-                    r.FIN !== 'INV'
-                );
-
-                if (conflictIdx === -1) {
-                    // No conflict — add if not already present
-                    if (!db.find(r => r.id === inEntry.id)) {
-                        db.unshift(inEntry);
-                        updateFinTable(inEntry);
-                        try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
-                        updateUI();
-                        setSyncStatus('synced', Object.keys(p2pConnections).length);
-                        showToast(`↓ New record synced from ${inEntry.Agent || 'peer'}`);
-                    }
-                } else {
-                    // Conflict — keep newer timestamp
-                    const existing = db[conflictIdx];
-                    if ((inEntry.id || 0) > (existing.id || 0)) {
-                        db.splice(conflictIdx, 1, inEntry);
-                        updateFinTable(inEntry);
-                        try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
-                        updateUI();
-                        setSyncStatus('synced', Object.keys(p2pConnections).length);
-                        showToast(`↓ Record updated from ${inEntry.Agent || 'peer'} (newer)`);
-                    }
-                    // else silently discard — ours is newer
-                }
+                // Only update backend tables — do NOT add to db or history tab
+                updateFinTable(inEntry);
+                setSyncStatus('synced', Object.keys(p2pConnections).length);
             }
         }
 
@@ -2258,7 +2252,12 @@
                 // Send a full sync to all currently connected peers
                 const peers = Object.keys(p2pConnections);
                 if (peers.length > 0) {
-                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', db, finTable, assetIndex, nroIndex, scheduleData }));
+                    peers.forEach(pid => {
+                        const sinceTs = lastSyncTs[pid] || 0;
+                        const delta = buildDelta(sinceTs);
+                        const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
+                        conn_p2p_send(pid, { type: msgType, sinceTs, ...delta });
+                    });
                 }
             }, P2P_SYNC_INTERVAL_MS);
         }
