@@ -398,11 +398,11 @@
             <div class="p-3 bg-slate-50 border-t hidden" id="add-schedule-ui">
                 <!-- Filter bar -->
                 <div class="flex flex-wrap gap-1.5 mb-2">
-                    <input id="sf-fin"   type="text" placeholder="FIN"     oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-fin"    type="text" placeholder="FIN"    oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
                     <input id="sf-airline" type="text" placeholder="Airline" oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-stn"   type="text" placeholder="STN"     oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-istn"  type="text" placeholder="ISTN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-ostn"  type="text" placeholder="OSTN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-istn"   type="text" placeholder="ISTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-stn"    type="text" placeholder="STN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-ostn"   type="text" placeholder="OSTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
                     <button onclick="clearScheduleFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1">✕ Clear</button>
                 </div>
                 <!-- Drop zone -->
@@ -425,7 +425,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.7.1";
+        const CURRENT_VERSION = "v2.7.2";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1648,26 +1648,26 @@
             // Column header
             const colHead = document.createElement('div');
             colHead.className = "grid gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
-            colHead.style.gridTemplateColumns = "3.2rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3.5rem 3.5rem";
-            colHead.innerHTML = `<span>FIN</span><span>OFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>IFLT</span><span>ODT</span><span>IDT</span>`;
+            colHead.style.gridTemplateColumns = "3.2rem 3.5rem 3.5rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3rem";
+            colHead.innerHTML = `<span>FIN</span><span>IDT</span><span>ODT</span><span>IFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>OFLT</span>`;
             container.appendChild(colHead);
 
             filtered.forEach(({ fin, rots }) => {
                 rots.forEach((rot, idx) => {
                     const row = document.createElement('div');
                     row.className = `grid gap-1 px-2 py-1.5 text-[9px] items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
-                    row.style.gridTemplateColumns = "3.2rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3.5rem 3.5rem";
+                    row.style.gridTemplateColumns = "3.2rem 3.5rem 3.5rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3rem";
                     row.innerHTML = `
                         <span class="font-mono font-black ${idx === 0 ? 'text-blue-600' : 'text-slate-200'}">${idx === 0 ? fin : ''}</span>
-                        <span class="font-mono text-slate-600">${rot.oflt  || '—'}</span>
+                        <span class="text-slate-400">${rot.idt   || '—'}</span>
+                        <span class="text-violet-600 font-bold">${rot.odt  || '—'}</span>
+                        <span class="font-mono text-slate-400">${rot.iflt  || '—'}</span>
                         <span class="text-slate-500">${rot.inGt  || '—'}</span>
                         <span class="text-slate-500">${rot.iStn  || '—'}</span>
                         <span class="font-bold text-slate-700">${rot.stn   || '—'}</span>
                         <span class="text-slate-500">${rot.oStn  || '—'}</span>
                         <span class="text-slate-500">${rot.oGt   || '—'}</span>
-                        <span class="font-mono text-slate-400">${rot.iflt  || '—'}</span>
-                        <span class="text-violet-600 font-bold">${rot.odt  || '—'}</span>
-                        <span class="text-slate-400">${rot.idt   || '—'}</span>`;
+                        <span class="font-mono text-slate-600">${rot.oflt  || '—'}</span>`;
                     container.appendChild(row);
                 });
             });
