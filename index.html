@@ -422,7 +422,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.5.9";
+        const CURRENT_VERSION = "v2.6.3";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -954,59 +954,71 @@
             'YVR': 'America/Vancouver'
         };
 
-        // Returns a single display line for the next/current rotation for a given FIN
-        function getNextRotationLine(fin) {
+        // Returns the best upcoming rotation object for a FIN, or null
+        function getNextRotation(fin) {
             const rotations = scheduleData[fin];
-            if (!rotations || rotations.length === 0) return '';
-
+            if (!rotations || rotations.length === 0) return null;
             const now = new Date();
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
-            const agentTz = STATION_TZ[agentStation] || Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-            const parseOdt = (odt) => {
-                if (!odt) return null;
-                const d = new Date(odt);
-                return isNaN(d) ? null : d;
-            };
-
-            const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', {
-                hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz
-            });
-
-            // Upcoming rotations: ODT >= now - 30min grace
             const grace = new Date(now.getTime() - 30 * 60000);
-            const upcoming = rotations.filter(r => {
-                const d = parseOdt(r.odt);
-                return d && d >= grace;
-            }).sort((a, b) => parseOdt(a.odt) - parseOdt(b.odt));
-
-            if (upcoming.length === 0) return '';
-
-            // Prefer rotation at agent's station; fall back to next globally
-            const rot = agentStation
+            const parseOdt = (odt) => { if (!odt) return null; const d = new Date(odt); return isNaN(d) ? null : d; };
+            const upcoming = rotations.filter(r => { const d = parseOdt(r.odt); return d && d >= grace; })
+                .sort((a, b) => parseOdt(a.odt) - parseOdt(b.odt));
+            if (upcoming.length === 0) return null;
+            return agentStation
                 ? (upcoming.find(r => (r.stn || '').toUpperCase() === agentStation) || upcoming[0])
                 : upcoming[0];
+        }
 
-            const odtDate = parseOdt(rot.odt);
+        // Returns a single display line for the next/current rotation for a given FIN
+        function getNextRotationLine(fin) {
+            const rot = getNextRotation(fin);
+            if (!rot) return '';
+
+            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            const agentTz = STATION_TZ[agentStation] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+            const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
+
+            const odtDate = parseT(rot.odt);
+            const idtDate = parseT(rot.idt);
             if (!odtDate) return '';
 
-            const rotStn    = (rot.stn || '').toUpperCase();
+            const rotStn = (rot.stn  || '').toUpperCase();
+            const iStn   = (rot.iStn || '').toUpperCase();
+            const oStn   = (rot.oStn || '').toUpperCase();
+            const rotTz  = STATION_TZ[rotStn] || agentTz;
+            const iStnTz = STATION_TZ[iStn]   || agentTz;
             const atStation = agentStation && rotStn === agentStation;
-            const rotTz     = STATION_TZ[rotStn] || agentTz;
-            const routeStr  = `${rot.iStn || '?'}→${rotStn || '?'}→${rot.oStn || '?'}`;
-            const flightStr = rot.oflt || '';
 
-            if (atStation) {
-                // Rotation is at agent's station — show time localized to that station
-                const stnTime = fmtInTz(odtDate, agentTz);
-                return `${flightStr}  ${routeStr}  ✈ ${stnTime}`;
-            } else {
-                // Different station — show time in rotation's station tz AND agent's station tz
-                const rotTime = fmtInTz(odtDate, rotTz);
-                const localTime = fmtInTz(odtDate, agentTz);
-                const tzLabel = rotTz !== agentTz ? ` (${localTime} ${agentStation})` : '';
-                return `${flightStr}  ${routeStr}  ✈ ${rotTime} [${rotStn}]${tzLabel}`;
+            // ODT: show in rotation's station tz, with agent-local equivalent if different
+            const odtRot   = fmtInTz(odtDate, rotTz);
+            const odtLocal = (rotTz !== agentTz) ? ' (' + fmtInTz(odtDate, agentTz) + ' ' + agentStation + ')' : '';
+
+            // IDT: only show if it has a meaningful time (non-midnight UTC)
+            let idtStr = '';
+            if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
+                idtStr = fmtInTz(idtDate, iStnTz);
+                if (iStnTz !== agentTz) idtStr += ' (' + fmtInTz(idtDate, agentTz) + ' ' + agentStation + ')';
             }
+
+            const iflt = (rot.iflt || '');
+            const oflt = (rot.oflt || '');
+            const inGt = (rot.inGt || '');
+            const oGt  = (rot.oGt  || '');
+
+            // Format: IFLT G(InGt) ISTN → STN → OSTN G(OGT)  OFLT  ✈in IDT  ✈out ODT [STN if not at station]
+            let parts = [];
+            if (iflt && iflt !== 'AC0000') parts.push(iflt);
+            if (inGt) parts.push('G' + inGt);
+            parts.push(iStn + ' → ' + rotStn + ' → ' + oStn);
+            if (oGt)  parts.push('G' + oGt);
+            if (oflt) parts.push(oflt);
+            if (idtStr) parts.push('✈in ' + idtStr);
+            parts.push('✈out ' + odtRot + odtLocal);
+            if (!atStation) parts.push('[' + rotStn + ']');
+
+            return parts.join('  ');
         }
 
         function handleFinInput(el) {
@@ -1036,9 +1048,24 @@
                 priorityField.value = String(p);
                 // Populate next rotation line from scheduleData
                 rotationEl.textContent = getNextRotationLine(val);
+
+                // Prepopulate Flight# placeholder from inbound flight number (numeric portion)
+                // Fall back to outbound if inbound is 0000
+                const flightField = document.getElementById('field-flight');
+                const rot = getNextRotation(val);
+                if (rot && flightField && !flightField.value) {
+                    const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '') || '0000';
+                    const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '') || '0000';
+                    const useNum  = (ifltNum === '0' || ifltNum === '0000' || ifltNum === '') ? ofltNum : ifltNum;
+                    flightField.placeholder = useNum.padStart(4, '0');
+                } else if (!rot && flightField) {
+                    flightField.placeholder = 'e.g. 0123';
+                }
             } else {
                 priorityField.value = '1';
                 rotationEl.textContent = '';
+                const flightField = document.getElementById('field-flight');
+                if (flightField) flightField.placeholder = 'e.g. 0123';
             }
 
             if (val.length >= 2) {
@@ -1164,6 +1191,70 @@
             });
         }
 
+        // Returns the FIN of the next P1 aircraft with an upcoming rotation at the agent's station
+        function getNextP1Fin() {
+            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            if (!agentStation) return null;
+
+            const now   = new Date();
+            const grace = new Date(now.getTime() - 30 * 60000);
+            const parseT = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+
+            let best = null, bestOdt = Infinity;
+
+            // Check all known FINs — union of finTable and aircraftRef
+            const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
+
+            allFins.forEach(fin => {
+                if (computeFinPriority(fin) !== 1) return;
+
+                // Must have an upcoming rotation at the agent's station
+                const rotations = scheduleData[fin];
+                if (!rotations || rotations.length === 0) return;
+
+                const upcoming = rotations.filter(r => {
+                    const d = parseT(r.odt);
+                    return d && d >= grace && (r.stn || '').toUpperCase() === agentStation;
+                });
+                if (upcoming.length === 0) return;
+
+                // Pick earliest ODT among station rotations
+                upcoming.forEach(r => {
+                    const d = parseT(r.odt);
+                    if (d && d.getTime() < bestOdt) {
+                        bestOdt = d.getTime();
+                        best = fin;
+                    }
+                });
+            });
+
+            return best;
+        }
+
+        // Set FIN placeholder to next P1 aircraft at agent's station
+        // Also updates Flight# placeholder with IFLT (fallback OFLT if IFLT is 0000)
+        function updateFinPlaceholder() {
+            const finField    = document.getElementById('field-fin');
+            const flightField = document.getElementById('field-flight');
+            if (!finField || finField.value) return; // don't overwrite if user has typed something
+
+            const p1Fin = getNextP1Fin();
+            finField.placeholder = p1Fin ? p1Fin : 'e.g. AC101';
+
+            if (!flightField || flightField.value) return;
+            if (!p1Fin) { flightField.placeholder = 'e.g. 0123'; return; }
+
+            const rot = getNextRotation(p1Fin);
+            if (rot) {
+                const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                const useNum  = (!ifltNum || ifltNum === '0') ? ofltNum : ifltNum;
+                flightField.placeholder = useNum ? useNum.padStart(4, '0') : 'e.g. 0123';
+            } else {
+                flightField.placeholder = 'e.g. 0123';
+            }
+        }
+
         function onAgentChange() {
             const agentField = document.getElementById('agent-field');
             const stationField = document.getElementById('station-field');
@@ -1173,6 +1264,7 @@
             sessionStorage.setItem(STATION_KEY, stationField.value);
             // Kick off P2P whenever agent is selected
             if (agentField.value) initP2P(agentField.value);
+            updateFinPlaceholder();
         }
 
         function restoreAgent() {
@@ -1182,6 +1274,7 @@
             if (savedStation) document.getElementById('station-field').value = savedStation;
             // Auto-connect on restore
             if (savedAgent) initP2P(savedAgent);
+            updateFinPlaceholder();
         }
 
         const issueMap = {
@@ -1753,6 +1846,8 @@
             document.getElementById('ref-type').textContent = "";
             document.getElementById('ref-body').textContent = "";
             document.getElementById('fin-rotation').textContent = "";
+            document.getElementById('field-flight').placeholder = 'e.g. 0123';
+            updateFinPlaceholder();
             hideTypoHint(); // clears all hint boxes
             // Reset placeholders that may have been set by handleFinInput
             document.getElementById('field-case2').placeholder = "000 or Msng";
