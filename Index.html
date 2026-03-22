@@ -1,0 +1,2626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Service Report</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Service Report">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; font-size: 0.875rem; font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
+        .sub-label { font-size: 0.75rem; color: #6b7280; margin-bottom: 0.1rem; }
+        input, select, textarea { 
+            width: 100%; 
+            padding: 0.625rem; 
+            border: 1px solid #d1d5db; 
+            border-radius: 0.5rem; 
+            background-color: #ffffff;
+            font-size: 1rem;
+            transition: all 0.2s;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        select {
+            -webkit-appearance: listbox;
+            appearance: auto;
+        }
+        input:focus, select:focus, textarea:focus { 
+            border-color: #3b82f6; 
+            outline: none; 
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); 
+            background-color: #fff;
+        }
+        /* Validation Styling */
+        input.invalid-asset {
+            border-color: #ef4444 !important;
+            background-color: #fef2f2 !important;
+            color: #b91c1c !important;
+        }
+        
+        .tab-btn { position: relative; }
+        .tab-btn.active { color: #3b82f6; }
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 25%;
+            right: 25%;
+            height: 3px;
+            background: #3b82f6;
+            border-radius: 3px 3px 0 0;
+        }
+        
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            height: 42px;
+        }
+        .checkbox-container input {
+            width: 1.25rem;
+            height: 1.25rem;
+            margin-right: 0.5rem;
+            cursor: pointer;
+            -webkit-appearance: checkbox;
+            appearance: checkbox;
+        }
+
+        #editor-modal { display: none; }
+        #editor-modal.open { display: flex; }
+
+        @keyframes pulse-sync {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .sync-dot-online { background-color: #10b981 !important; box-shadow: 0 0 6px #10b981; }
+        .sync-dot-syncing { background-color: #3b82f6 !important; animation: pulse-sync 0.8s ease-in-out infinite; }
+        .sync-dot-offline { background-color: #475569 !important; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-900">
+
+    <header class="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-30">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-lg">A</div>
+                <h1 class="text-xl font-bold tracking-tight">Service Report</h1>
+            </div>
+            <button id="export-btn" onclick="exportToCSV()" class="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export CSV
+            </button>
+            <button id="email-btn" onclick="emailCSV()" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                Email
+            </button>
+            <div id="sync-status" title="P2P Sync Status" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold font-mono cursor-default select-none">
+                <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-600 inline-block shrink-0"></span>
+                <div class="flex flex-col leading-tight">
+                    <span id="sync-label" class="text-slate-500">P2P</span>
+                    <span id="sync-peers" class="text-[9px] font-bold text-slate-500 leading-tight"></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <nav class="bg-white border-b flex sticky top-[68px] z-20 shadow-sm">
+        <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-4 text-center font-bold transition-colors">NEW ENTRY</button>
+        <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
+        <button id="tab-priority" onclick="switchTab('priority')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">PRIORITY</button>
+    </nav>
+
+    <main class="container mx-auto p-4 pb-24 max-w-2xl">
+        <section id="section-form" class="space-y-4">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <form id="dataForm" onsubmit="handleSave(event)">
+                    
+                    <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                        <h2 id="flight-header-label" class="text-lg font-extrabold text-slate-800 uppercase tracking-wide">Flight Details</h2>
+                        <button type="button" id="toggle-inventory-btn" onclick="toggleInventoryMode()" class="bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-[10px] font-black hover:bg-amber-100 transition-all uppercase tracking-tighter">
+                            Inventory Only Mode
+                        </button>
+                    </div>
+
+                    <div id="service-specific-sections" class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-group">
+                                <label>FIN</label>
+                                <input type="text" name="FIN" id="field-fin" placeholder="e.g. AC101" pattern="^(AC|RV|QK)\d{3,4}$" class="uppercase font-mono" oninput="handleFinInput(this)" required>
+                                <div id="fin-reference" class="mt-1 flex gap-2 h-6">
+                                    <span id="ref-type" class="text-base font-black text-blue-600 uppercase"></span>
+                                    <span id="ref-body" class="text-base font-black text-slate-400 uppercase"></span>
+                                </div>
+                                <div id="fin-rotation" class="mt-0.5 h-4 text-[10px] font-bold text-slate-400 truncate"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Flight #</label>
+                                <input type="text" name="Flight#" id="field-flight" placeholder="e.g. 0123" pattern="^\d{1,4}$" class="font-mono" inputmode="numeric" maxlength="4" oninput="this.value = this.value.replace(/\D/g, '').slice(0, 4)" required>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 items-end">
+                            <div class="form-group">
+                                <label>Serviced</label>
+                                <select name="Serviced" id="serviced-field" class="font-medium">
+                                    <option value="Yes" selected>Yes</option>
+                                    <option value="No">No</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Priority</label>
+                                <select name="Priority" id="priority-field">
+                                    <option value="1" selected>1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <div class="checkbox-container">
+                                    <input type="checkbox" name="ServiceCall" id="service-call-check">
+                                    <label for="service-call-check" class="!mb-0 !inline cursor-pointer font-bold text-blue-600">Srvc Call</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h2 class="text-sm font-black mb-4 mt-8 text-slate-400 uppercase tracking-[0.2em] border-b pb-2">Equipment</h2>
+                        <div class="space-y-4">
+                            <div class="bg-blue-50/40 p-4 rounded-xl border border-blue-100/50">
+                                <div class="grid grid-cols-3 gap-3 mb-3">
+                                    <div class="col-span-1">
+                                        <label class="text-blue-700">Case 1</label>
+                                        <input type="text" name="Case1" maxlength="4" placeholder="000 or Msng" class="border-blue-200 text-xs">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label class="text-blue-700">HHD 1</label>
+                                        <input type="text" name="HHD1" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label class="text-blue-700">HHD 2</label>
+                                        <input type="text" name="HHD2" id="field-hhd2" maxlength="7" placeholder="0000 or Msng" class="border-blue-200 text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="col-span-1"></div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD1(Rmvd)</div>
+                                        <input type="text" name="HD1Rmvd" id="hd1-rmvd" maxlength="7" placeholder="0000" class="border-blue-200 bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD2(Rmvd)</div>
+                                        <input type="text" name="HD2Rmvd" id="hd2-rmvd" maxlength="7" placeholder="0000" class="border-blue-200 bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                <div class="grid grid-cols-3 gap-3 mb-3">
+                                    <div class="col-span-1">
+                                        <label>Case 2</label>
+                                        <input type="text" name="Case2" id="field-case2" maxlength="4" placeholder="000 or Msng" class="text-xs">
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label>HHD 3</label>
+                                        <input type="text" name="HHD3" id="field-hhd3" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                    <div class="col-span-1">
+                                        <label>HHD 4</label>
+                                        <input type="text" name="HHD4" id="field-hhd4" maxlength="7" placeholder="0000 or Msng" class="text-xs asset-input" oninput="validateAssetInput(this); updateBatteryPlaceholder()"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="col-span-1"></div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD3(Rmvd)</div>
+                                        <input type="text" name="HD3Rmvd" id="hd3-rmvd" maxlength="7" placeholder="0000" class="bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                    <div class="col-span-1">
+                                        <div class="sub-label">HD4(Rmvd)</div>
+                                        <input type="text" name="HD4Rmvd" id="hd4-rmvd" maxlength="7" placeholder="0000" class="bg-white/50 text-xs asset-input" oninput="validateAssetInput(this)"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            <div class="form-group">
+                                <label>Batteries (0-10)</label>
+                                <input type="number" name="Battery" id="field-battery" min="0" max="10" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Rolls (0-20)</label>
+                                <input type="number" name="Rolls" min="0" max="20" placeholder="0">
+                            </div>
+                        </div>
+                    </div>
+
+                    <h2 id="issues-section-label" class="text-sm font-black mb-4 mt-8 text-slate-400 uppercase tracking-[0.2em] border-b pb-2">Service Issues</h2>
+                    <div class="form-group">
+                        <label>Reported Asset# (Last 4)</label>
+                        <input type="text" name="ASST" maxlength="7" placeholder="e.g. 1234" class="asset-input" oninput="validateAssetInput(this)"><div class="typo-hint-box text-[9px] font-bold text-amber-600 mt-0.5 min-h-[12px]"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="form-group">
+                            <label>Issue Category</label>
+                            <select name="SrvcIssCAT" id="srvc-iss-cat-field" onchange="updateIssueOptions()">
+                                <option value="">-- Select --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Specific Issue</label>
+                            <select name="SrvcIss" id="srvc-iss-field">
+                                <option value="">-- Select Category --</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Issue Details</label>
+                        <textarea name="IssueDetails" rows="2" placeholder="Describe fault..."></textarea>
+                    </div>
+
+                    <h2 class="text-sm font-black mb-4 mt-8 text-slate-400 uppercase tracking-[0.2em] border-b pb-2">Identification</h2>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="form-group col-span-2">
+                            <label>Agent Name</label>
+                            <select name="Agent" id="agent-field" onchange="onAgentChange()" required>
+                                <option value="">-- Select Agent --</option>
+                                <optgroup label="YYZ - Toronto">
+                                    <option value="Michael Marques ,YYZ 905 405 4198" data-station="YYZ">Michael Marques</option>
+                                    <option value="Amar Atta ,YYZ 647 288 4509" data-station="YYZ">Amar Atta</option>
+                                    <option value="Amritheera Malhi ,YYZ 647 288 4509" data-station="YYZ">Amritheera Malhi</option>
+                                    <option value="Muqeet Alam ,YYZ 647 288 4509" data-station="YYZ">Muqeet Alam</option>
+                                    <option value="Stan Beatty ,YYZ 647 825 1214" data-station="YYZ">Stan Beatty</option>
+                                    <option value="Gurjinder Mann ,YYZ 647 288 4509" data-station="YYZ">Gurjinder Mann</option>
+                                    <option value="Abdullah Atta ,YYZ 647 288 4509" data-station="YYZ">Abdullah Atta</option>
+                                </optgroup>
+                                <optgroup label="YYC - Calgary">
+                                    <option value="Jeff Eng ,YYC 403 312 8555" data-station="YYC">Jeff Eng</option>
+                                    <option value="Kevin Joly ,YYC 403 312 8555" data-station="YYC">Kevin Joly</option>
+                                </optgroup>
+                                <optgroup label="YVR - Vancouver">
+                                    <option value="Kevin Brown ,YVR 604 830 0395" data-station="YVR">Kevin Brown</option>
+                                    <option value="Billy Yan ,YVR 604 830 0395" data-station="YVR">Billy Yan</option>
+                                </optgroup>
+                                <optgroup label="YUL - Montreal">
+                                    <option value="Ben Burgio ,YUL 514 977 5312" data-station="YUL">Ben Burgio</option>
+                                    <option value="Jean Cham ,YUL 514 977 5312" data-station="YUL">Jean Cham</option>
+                                    <option value="Joann Cortese ,YUL 514 977 5312" data-station="YUL">Joann Cortese</option>
+                                    <option value="Janine Ostaco ,YUL 514 977 5312" data-station="YUL">Janine Margaret Ostaco</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div class="form-group col-span-1">
+                            <label>Station</label>
+                            <select name="Service Station" id="station-field" required>
+                                <option value="">--</option>
+                                <option value="YUL">YUL</option>
+                                <option value="YYZ">YYZ</option>
+                                <option value="YYC">YYC</option>
+                                <option value="YVR">YVR</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>General Comments</label>
+                        <textarea name="GeneralComments" rows="2" placeholder="Overall notes..."></textarea>
+                    </div>
+
+                    <div class="hidden">
+                        <input type="hidden" name="Case3" value="NtRqrd">
+                        <input type="hidden" name="HHD5" value="NtRqrd">
+                        <input type="hidden" name="HHD6" value="NtRqrd">
+                        <input type="hidden" name="HD5Rmvd" value="">
+                        <input type="hidden" name="HD6Rmvd" value="">
+                    </div>
+
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-xl active:scale-95 transition-all mt-6 uppercase tracking-widest text-lg">
+                        SAVE RECORD
+                    </button>
+                </form>
+
+                <div class="mt-8 pt-4 border-t border-slate-100 flex justify-center items-center gap-2 opacity-40 hover:opacity-100 transition-opacity">
+                    <span class="text-[9px] font-black uppercase tracking-[0.2em] text-slate-500">Proprietary System &copy; Michael Marques</span>
+                    <div class="w-1 h-1 bg-slate-300 rounded-full"></div>
+                    <button onclick="openRefEditor()" class="text-[9px] font-bold text-slate-400 hover:text-blue-500 transition-colors" id="app-version-label"></button>
+                </div>
+            </div>
+        </section>
+
+        <section id="section-records" class="hidden space-y-4">
+            <div id="no-records" class="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p class="font-bold">No records found</p>
+            </div>
+            <div id="records-list" class="space-y-4"></div>
+        </section>
+
+        <section id="section-priority" class="hidden space-y-3">
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-wrap gap-2 items-center">
+                <span class="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Filter</span>
+                <div class="flex gap-1 flex-wrap">
+                    <button onclick="setPriorityFilter('airline','ALL')" id="pf-airline-ALL" class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-slate-800 text-white border-slate-700">ALL</button>
+                    <button onclick="setPriorityFilter('airline','AC')"  id="pf-airline-AC"  class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-slate-500 border-slate-200 hover:bg-slate-50">AC</button>
+                    <button onclick="setPriorityFilter('airline','QK')"  id="pf-airline-QK"  class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-slate-500 border-slate-200 hover:bg-slate-50">QK</button>
+                    <button onclick="setPriorityFilter('airline','RV')"  id="pf-airline-RV"  class="pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-slate-500 border-slate-200 hover:bg-slate-50">RV</button>
+                </div>
+                <div class="w-px h-5 bg-slate-200 mx-1"></div>
+                <div class="flex gap-1">
+                    <button onclick="setPriorityFilter('priority','ALL')" id="pf-priority-ALL" class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-slate-800 text-white border-slate-700">ALL</button>
+                    <button onclick="setPriorityFilter('priority','1')"   id="pf-priority-1"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-red-400 border-red-200 hover:bg-red-50">P1</button>
+                    <button onclick="setPriorityFilter('priority','2')"   id="pf-priority-2"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-amber-500 border-amber-200 hover:bg-amber-50">P2</button>
+                    <button onclick="setPriorityFilter('priority','3')"   id="pf-priority-3"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-emerald-500 border-emerald-200 hover:bg-emerald-50">P3</button>
+                </div>
+            </div>
+            <div id="priority-list"></div>
+        </section>
+    </main>
+
+    <div id="editor-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] items-center justify-center p-4">
+        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-4 bg-slate-100 border-b flex justify-between items-center">
+                <h3 class="font-black text-slate-800 uppercase tracking-tight">System Ref Editor</h3>
+                <button onclick="closeRefEditor()" class="text-slate-400 hover:text-slate-600">
+                    <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+            
+            <div class="flex border-b text-[10px] font-black uppercase tracking-widest bg-slate-50">
+                <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">Aircraft</button>
+                <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
+                <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Sync Table</button>
+                <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Schedule</button>
+            </div>
+
+            <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
+            
+            <div class="p-4 bg-slate-50 border-t flex gap-2" id="add-aircraft-ui">
+                <input type="text" id="new-ref-prefix" placeholder="Prefix" class="w-24 uppercase font-mono !text-xs">
+                <input type="text" id="new-ref-type" placeholder="Type" class="flex-1 !text-xs">
+                <select id="new-ref-body" class="w-16 !text-xs">
+                    <option value="NB">NB</option>
+                    <option value="WB">WB</option>
+                </select>
+                <button onclick="addNewRef()" class="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
+            </div>
+
+            <div class="p-4 bg-slate-50 border-t flex gap-2 hidden" id="add-asset-ui">
+                <input type="text" id="new-asset-id" placeholder="Asset#" class="w-24 uppercase font-mono !text-xs">
+                <input type="text" id="new-asset-name" placeholder="Item Name" class="flex-1 !text-xs">
+                <button onclick="addNewAsset()" class="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
+            </div>
+
+            <div class="p-3 bg-slate-50 border-t hidden" id="add-schedule-ui">
+                <!-- Filter bar -->
+                <div class="flex flex-wrap gap-1.5 mb-2">
+                    <input id="sf-fin"    type="text" placeholder="FIN"    oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-airline" type="text" placeholder="Airline" oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-istn"   type="text" placeholder="ISTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-stn"    type="text" placeholder="STN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-ostn"   type="text" placeholder="OSTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <button onclick="clearScheduleFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1">✕ Clear</button>
+                </div>
+                <!-- Drop zone -->
+                <label id="schedule-drop-zone" for="schedule-file-input"
+                    class="flex items-center justify-center gap-3 border border-dashed border-blue-200 rounded-lg px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors"
+                    ondragover="event.preventDefault()" ondrop="handleScheduleDrop(event)">
+                    <svg class="w-5 h-5 text-blue-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                    <span class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Drop .xlsx or tap to import</span>
+                </label>
+                <input type="file" id="schedule-file-input" accept=".xlsx,.xls" class="hidden" onchange="handleScheduleFile(this.files[0])">
+                <div id="schedule-import-status" class="mt-1.5 text-[10px] text-center font-bold text-slate-400"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-3 rounded-full opacity-0 pointer-events-none transition-all duration-300 shadow-2xl z-50 font-bold border border-slate-700">
+        Record Saved!
+    </div>
+
+
+    <script>
+        // Updated Version Number
+        const CURRENT_VERSION = "v2.7.2";
+
+        const DEFAULT_AIRCRAFT_REF = {
+            "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
+            "AC106": { type: "A220", body: "NB" }, "AC107": { type: "A220", body: "NB" }, "AC108": { type: "A220", body: "NB" }, "AC109": { type: "A220", body: "NB" }, "AC110": { type: "A220", body: "NB" },
+            "AC111": { type: "A220", body: "NB" }, "AC112": { type: "A220", body: "NB" }, "AC113": { type: "A220", body: "NB" }, "AC114": { type: "A220", body: "NB" }, "AC115": { type: "A220", body: "NB" },
+            "AC116": { type: "A220", body: "NB" }, "AC117": { type: "A220", body: "NB" }, "AC118": { type: "A220", body: "NB" }, "AC119": { type: "A220", body: "NB" }, "AC120": { type: "A220", body: "NB" },
+            "AC121": { type: "A220", body: "NB" }, "AC122": { type: "A220", body: "NB" }, "AC123": { type: "A220", body: "NB" }, "AC124": { type: "A220", body: "NB" }, "AC125": { type: "A220", body: "NB" },
+            "AC126": { type: "A220", body: "NB" }, "AC127": { type: "A220", body: "NB" }, "AC128": { type: "A220", body: "NB" }, "AC129": { type: "A220", body: "NB" }, "AC130": { type: "A220", body: "NB" },
+            "AC131": { type: "A320", body: "NB" }, "AC132": { type: "A320", body: "NB" }, "AC133": { type: "A320", body: "NB" }, "AC134": { type: "A320", body: "NB" }, "AC135": { type: "A320", body: "NB" },
+            "AC136": { type: "A320", body: "NB" }, "AC137": { type: "A320", body: "NB" }, "AC138": { type: "A320", body: "NB" }, "AC139": { type: "A320", body: "NB" }, "AC140": { type: "A320", body: "NB" },
+            "AC141": { type: "A320", body: "NB" }, "AC142": { type: "A220", body: "NB" }, "AC225": { type: "A320", body: "NB" }, "AC226": { type: "A320", body: "NB" }, "AC232": { type: "A320", body: "NB" },
+            "AC235": { type: "A320", body: "NB" }, "AC236": { type: "A320", body: "NB" }, "AC237": { type: "A320", body: "NB" }, "AC238": { type: "A320", body: "NB" }, "AC239": { type: "A320", body: "NB" },
+            "AC240": { type: "A320", body: "NB" }, "AC241": { type: "A320", body: "NB" }, "AC242": { type: "A320", body: "NB" }, "AC251": { type: "A319", body: "NB" }, "AC252": { type: "A319", body: "NB" },
+            "AC402": { type: "A320", body: "NB" }, "AC405": { type: "A320", body: "NB" }, "AC416": { type: "A320", body: "NB" }, "AC417": { type: "A320", body: "NB" }, "AC418": { type: "A320", body: "NB" },
+            "AC419": { type: "A320", body: "NB" }, "AC420": { type: "A320", body: "NB" }, "AC421": { type: "A320", body: "NB" }, "AC422": { type: "A320", body: "NB" }, "AC451": { type: "A321", body: "NB" },
+            "AC452": { type: "A321", body: "NB" }, "AC453": { type: "A321", body: "NB" }, "AC454": { type: "A321", body: "NB" }, "AC455": { type: "A321", body: "NB" }, "AC456": { type: "A321", body: "NB" },
+            "AC457": { type: "A321", body: "NB" }, "AC458": { type: "A321", body: "NB" }, "AC459": { type: "A321", body: "NB" }, "AC460": { type: "A321", body: "NB" }, "AC461": { type: "A321", body: "NB" },
+            "AC462": { type: "A321", body: "NB" }, "AC463": { type: "A321", body: "NB" }, "AC464": { type: "A321", body: "NB" }, "AC465": { type: "A321", body: "NB" }, "AC466": { type: "A321", body: "NB" },
+            "AC467": { type: "A321", body: "NB" }, "AC468": { type: "A321", body: "NB" }, "AC473": { type: "A321", body: "NB" }, "AC483": { type: "A321", body: "NB" }, "AC484": { type: "A321", body: "NB" },
+            "AC503": { type: "737-8", body: "NB" }, "AC504": { type: "737-8", body: "NB" }, "AC505": { type: "737-8", body: "NB" }, "AC506": { type: "737-8", body: "NB" }, "AC507": { type: "737-8", body: "NB" },
+            "AC508": { type: "737-8", body: "NB" }, "AC509": { type: "737-8", body: "NB" }, "AC510": { type: "737-8", body: "NB" }, "AC511": { type: "737-8", body: "NB" }, "AC512": { type: "737-8", body: "NB" },
+            "AC513": { type: "737-8", body: "NB" }, "AC514": { type: "737-8", body: "NB" }, "AC515": { type: "737-8", body: "NB" }, "AC516": { type: "737-8", body: "NB" }, "AC517": { type: "737-8", body: "NB" },
+            "AC518": { type: "737-8", body: "NB" }, "AC519": { type: "737-8", body: "NB" }, "AC520": { type: "737-8", body: "NB" }, "AC521": { type: "737-8", body: "NB" }, "AC522": { type: "737-8", body: "NB" },
+            "AC523": { type: "737-8", body: "NB" }, "AC524": { type: "737-8", body: "NB" }, "AC525": { type: "737-8", body: "NB" }, "AC526": { type: "737-8", body: "NB" }, "AC527": { type: "737-8", body: "NB" },
+            "AC528": { type: "737-8", body: "NB" }, "AC529": { type: "737-8", body: "NB" }, "AC530": { type: "737-8", body: "NB" }, "AC531": { type: "737-8", body: "NB" }, "AC532": { type: "737-8", body: "NB" },
+            "AC533": { type: "737-8", body: "NB" }, "AC534": { type: "737-8", body: "NB" }, "AC535": { type: "737-8", body: "NB" }, "AC536": { type: "737-8", body: "NB" }, "AC537": { type: "737-8", body: "NB" },
+            "AC538": { type: "737-8", body: "NB" }, "AC539": { type: "737-8", body: "NB" }, "AC540": { type: "737-8", body: "NB" }, "AC541": { type: "737-8", body: "NB" }, "AC542": { type: "737-8", body: "NB" },
+            "AC543": { type: "737-8", body: "NB" }, "AC544": { type: "737-8", body: "NB" }, "AC545": { type: "737-8", body: "NB" }, "AC571": { type: "737-8", body: "NB" }, "AC573": { type: "737-8", body: "NB" },
+            "AC574": { type: "737-8", body: "NB" }, "AC575": { type: "737-8", body: "NB" }, "AC576": { type: "737-8", body: "NB" }, "AC577": { type: "737-8", body: "NB" }, "AC578": { type: "737-8", body: "NB" },
+            "AC701": { type: "777-200", body: "WB" }, "AC702": { type: "777-200", body: "WB" }, "AC703": { type: "777-200", body: "WB" }, "AC704": { type: "777-200", body: "WB" }, "AC705": { type: "777-200", body: "WB" },
+            "AC706": { type: "777-200", body: "WB" }, "AC731": { type: "777-300", body: "WB" }, "AC732": { type: "777-300", body: "WB" }, "AC733": { type: "777-300", body: "WB" }, "AC734": { type: "777-300", body: "WB" },
+            "AC735": { type: "777-300", body: "WB" }, "AC736": { type: "777-300", body: "WB" }, "AC737": { type: "777-300", body: "WB" }, "AC738": { type: "777-300", body: "WB" }, "AC739": { type: "777-300", body: "WB" },
+            "AC740": { type: "777-300", body: "WB" }, "AC741": { type: "777-300", body: "WB" }, "AC742": { type: "777-300", body: "WB" }, "AC743": { type: "777-300HD", body: "WB" }, "AC744": { type: "777-300HD", body: "WB" },
+            "AC745": { type: "777-300HD", body: "WB" }, "AC746": { type: "777-300HD", body: "WB" }, "AC747": { type: "777-300HD", body: "WB" }, "AC748": { type: "777-300HD", body: "WB" }, "AC749": { type: "777-300HD", body: "WB" },
+            "AC801": { type: "787-8", body: "WB" }, "AC802": { type: "787-8", body: "WB" }, "AC803": { type: "787-8", body: "WB" }, "AC804": { type: "787-8", body: "WB" }, "AC805": { type: "787-8", body: "WB" },
+            "AC806": { type: "787-8", body: "WB" }, "AC807": { type: "787-8", body: "WB" }, "AC808": { type: "787-8", body: "WB" }, "AC831": { type: "787-9", body: "WB" }, "AC832": { type: "787-9", body: "WB" },
+            "AC833": { type: "787-9", body: "WB" }, "AC834": { type: "787-9", body: "WB" }, "AC835": { type: "787-9", body: "WB" }, "AC836": { type: "787-9", body: "WB" }, "AC837": { type: "787-9", body: "WB" },
+            "AC838": { type: "787-9", body: "WB" }, "AC839": { type: "787-9", body: "WB" }, "AC840": { type: "787-9", body: "WB" }, "AC841": { type: "787-9", body: "WB" }, "AC842": { type: "787-9", body: "WB" },
+            "AC843": { type: "787-9", body: "WB" }, "AC844": { type: "787-9", body: "WB" }, "AC845": { type: "787-9", body: "WB" }, "AC846": { type: "787-9", body: "WB" }, "AC847": { type: "787-9", body: "WB" },
+            "AC848": { type: "787-9", body: "WB" }, "AC849": { type: "787-9", body: "WB" }, "AC850": { type: "787-9", body: "WB" }, "AC851": { type: "787-9", body: "WB" }, "AC852": { type: "787-9", body: "WB" },
+            "AC853": { type: "787-9", body: "WB" }, "AC854": { type: "787-9", body: "WB" }, "AC855": { type: "787-9", body: "WB" }, "AC856": { type: "787-9", body: "WB" }, "AC857": { type: "787-9", body: "WB" },
+            "AC858": { type: "787-9", body: "WB" }, "AC859": { type: "787-9", body: "WB" }, "AC860": { type: "787-9", body: "WB" }, "AC861": { type: "787-9", body: "WB" }, "AC862": { type: "787-9", body: "WB" },
+            "AC931": { type: "A330", body: "WB" }, "AC932": { type: "A330", body: "WB" }, "AC933": { type: "A330", body: "WB" }, "AC934": { type: "A330", body: "WB" }, "AC935": { type: "A330", body: "WB" },
+            "AC936": { type: "A330", body: "WB" }, "AC937": { type: "A330", body: "WB" }, "AC938": { type: "A330", body: "WB" }, "AC939": { type: "A330", body: "WB" }, "AC940": { type: "A330", body: "WB" },
+            "AC941": { type: "A330", body: "WB" }, "AC942": { type: "A330", body: "WB" }, "AC943": { type: "A330", body: "WB" }, "AC944": { type: "A330", body: "WB" }, "AC945": { type: "A330", body: "WB" },
+            "AC946": { type: "A330", body: "WB" }, "AC947": { type: "A330", body: "WB" }, "AC948": { type: "A330", body: "WB" }, "AC949": { type: "A330", body: "WB" }, "AC950": { type: "A330", body: "WB" },
+            "QK521": { type: "E75", body: "NB" }, "QK522": { type: "E75", body: "NB" }, "QK523": { type: "E75", body: "NB" }, "QK524": { type: "E75", body: "NB" }, "QK525": { type: "E75", body: "NB" },
+            "QK526": { type: "E75", body: "NB" }, "QK527": { type: "E75", body: "NB" }, "QK528": { type: "E75", body: "NB" }, "QK529": { type: "E75", body: "NB" }, "QK530": { type: "E75", body: "NB" },
+            "QK531": { type: "E75", body: "NB" }, "QK532": { type: "E75", body: "NB" }, "QK533": { type: "E75", body: "NB" }, "QK534": { type: "E75", body: "NB" }, "QK535": { type: "E75", body: "NB" },
+            "QK536": { type: "E75", body: "NB" }, "QK537": { type: "E75", body: "NB" }, "QK538": { type: "E75", body: "NB" }, "QK539": { type: "E75", body: "NB" }, "QK540": { type: "E75", body: "NB" },
+            "QK541": { type: "E75", body: "NB" }, "QK542": { type: "E75", body: "NB" }, "QK543": { type: "E75", body: "NB" }, "QK544": { type: "E75", body: "NB" }, "QK545": { type: "E75", body: "NB" },
+            "QK701": { type: "CRJ705", body: "NB" }, "QK702": { type: "CRJ705", body: "NB" }, "QK703": { type: "CRJ705", body: "NB" }, "QK704": { type: "CRJ705", body: "NB" }, "QK705": { type: "CRJ705", body: "NB" },
+            "QK706": { type: "CRJ705", body: "NB" }, "QK707": { type: "CRJ705", body: "NB" }, "QK708": { type: "CRJ705", body: "NB" }, "QK709": { type: "CRJ705", body: "NB" }, "QK710": { type: "CRJ705", body: "NB" },
+            "QK711": { type: "CRJ705", body: "NB" }, "QK712": { type: "CRJ705", body: "NB" }, "QK713": { type: "CRJ705", body: "NB" }, "QK714": { type: "CRJ705", body: "NB" }, "QK715": { type: "CRJ705", body: "NB" },
+            "QK716": { type: "CRJ705", body: "NB" }, "QK717": { type: "CRJ705", body: "NB" }, "QK718": { type: "CRJ705", body: "NB" }, "QK719": { type: "CRJ705", body: "NB" }, "QK720": { type: "CRJ705", body: "NB" },
+            "QK721": { type: "CRJ705", body: "NB" }, "QK722": { type: "CRJ705", body: "NB" }, "QK723": { type: "CRJ705", body: "NB" }, "QK724": { type: "CRJ705", body: "NB" }, "QK725": { type: "CRJ705", body: "NB" },
+            "QK726": { type: "CRJ705", body: "NB" }, "QK727": { type: "CRJ705", body: "NB" }, "QK728": { type: "CRJ705", body: "NB" }, "QK729": { type: "CRJ705", body: "NB" }, "QK730": { type: "CRJ705", body: "NB" },
+            "RV243": { type: "A320", body: "NB" }, "RV244": { type: "A320", body: "NB" }, "RV245": { type: "A320", body: "NB" }, "RV246": { type: "A320", body: "NB" }, "RV247": { type: "A320", body: "NB" },
+            "RV255": { type: "A319", body: "NB" }, "RV256": { type: "A319", body: "NB" }, "RV257": { type: "A319", body: "NB" }, "RV259": { type: "A319", body: "NB" }, "RV262": { type: "A319", body: "NB" },
+            "RV263": { type: "A319", body: "NB" }, "RV273": { type: "A319", body: "NB" }, "RV278": { type: "A319", body: "NB" }, "RV279": { type: "A319", body: "NB" }, "RV281": { type: "A319", body: "NB" },
+            "RV283": { type: "A319", body: "NB" }, "RV284": { type: "A319", body: "NB" }, "RV286": { type: "A319", body: "NB" }, "RV287": { type: "A319", body: "NB" }, "RV290": { type: "A319", body: "NB" },
+            "RV469": { type: "A321", body: "NB" }, "RV470": { type: "A321", body: "NB" }, "RV471": { type: "A321", body: "NB" }, "RV472": { type: "A321", body: "NB" }, "RV474": { type: "A321", body: "NB" },
+            "RV475": { type: "A321", body: "NB" }, "RV476": { type: "A321", body: "NB" }, "RV477": { type: "A321", body: "NB" }, "RV478": { type: "A321", body: "NB" }, "RV479": { type: "A321", body: "NB" },
+            "RV480": { type: "A321", body: "NB" }, "RV481": { type: "A321", body: "NB" }, "RV482": { type: "A321", body: "NB" }, "RV501": { type: "A220", body: "NB" }, "RV502": { type: "A220", body: "NB" }
+        };
+
+        const INITIAL_ASSETS = {
+            "2140": "Urovo", "2141": "Urovo", "2142": "Urovo", "2143": "Urovo", "2144": "Urovo", "2146": "Urovo", "2147": "Urovo", "2148": "Urovo", "2149": "Urovo", "2150": "Urovo", "2151": "Urovo", "2152": "Urovo", "2153": "Urovo", "2156": "Urovo", "2158": "Urovo", "2159": "Urovo", "2161": "Urovo", "2163": "Urovo", "2164": "Urovo", "2165": "Urovo", "2166": "Urovo", "2167": "Urovo", "2169": "Urovo", "2170": "Urovo", "2171": "Urovo", "2172": "Urovo", "2174": "Urovo", "2175": "Urovo", "2176": "Urovo", "2177": "Urovo", "2178": "Urovo", "2180": "Urovo", "2181": "Urovo", "2182": "Urovo", "2183": "Urovo", "2184": "Urovo", "2185": "Urovo", "2186": "Urovo", "2188": "Urovo", "2190": "Urovo", "2192": "Urovo", "2193": "Urovo", "3100": "Urovo", "3101": "Urovo", "3102": "Urovo", "3103": "Urovo", "3104": "Urovo", "3105": "Urovo", "3106": "Urovo", "3107": "Urovo", "3108": "Urovo", "3109": "Urovo", "3110": "Urovo", "3111": "Urovo", "3112": "Urovo", "3113": "Urovo", "3114": "Urovo", "3115": "Urovo", "3116": "Urovo", "3117": "Urovo", "3118": "Urovo", "3119": "Urovo", "3120": "Urovo", "3121": "Urovo", "3122": "Urovo", "3123": "Urovo", "3124": "Urovo", "3125": "Urovo", "3126": "Urovo", "3127": "Urovo", "3128": "Urovo", "3129": "Urovo", "3130": "Urovo", "3131": "Urovo", "3132": "Urovo", "3133": "Urovo", "3134": "Urovo", "3135": "Urovo", "3136": "Urovo", "3137": "Urovo", "3138": "Urovo", "3139": "Urovo", "3140": "Urovo", "3141": "Urovo", "3142": "Urovo", "3143": "Urovo", "3144": "Urovo", "3145": "Urovo", "3146": "Urovo", "3147": "Urovo", "3148": "Urovo", "3149": "Urovo", "3150": "Urovo", "3151": "Urovo", "3152": "Urovo", "3153": "Urovo", "3154": "Urovo", "3155": "Urovo", "3156": "Urovo", "3157": "Urovo", "3158": "Urovo", "3159": "Urovo", "3160": "Urovo", "3161": "Urovo", "3162": "Urovo", "3163": "Urovo", "3164": "Urovo", "3165": "Urovo", "3166": "Urovo", "3167": "Urovo", "3168": "Urovo", "3169": "Urovo", "3170": "Urovo", "3171": "Urovo", "3172": "Urovo", "3173": "Urovo", "3174": "Urovo", "3175": "Urovo", "3176": "Urovo", "3177": "Urovo", "3178": "Urovo", "3179": "Urovo", "3180": "Urovo", "3181": "Urovo", "3182": "Urovo", "3183": "Urovo", "3184": "Urovo", "3185": "Urovo", "3186": "Urovo", "3187": "Urovo", "3188": "Urovo", "3189": "Urovo", "3190": "Urovo", "3191": "Urovo", "3192": "Urovo", "3193": "Urovo", "3194": "Urovo", "3195": "Urovo", "3196": "Urovo", "3197": "Urovo", "3198": "Urovo", "3199": "Urovo", "3300": "Urovo", "3301": "Urovo", "3302": "Urovo", "3303": "Urovo", "3304": "Urovo", "3305": "Urovo", "3306": "Urovo", "3307": "Urovo", "3308": "Urovo", "3309": "Urovo", "3310": "Urovo", "3311": "Urovo", "3312": "Urovo", "3313": "Urovo", "3314": "Urovo", "3315": "Urovo", "3316": "Urovo", "3317": "Urovo", "3318": "Urovo", "3319": "Urovo", "3320": "Urovo", "3321": "Urovo", "3322": "Urovo", "3323": "Urovo", "3324": "Urovo", "3325": "Urovo", "3326": "Urovo", "3327": "Urovo", "3328": "Urovo", "3329": "Urovo", "3330": "Urovo", "3331": "Urovo", "3332": "Urovo", "3333": "Urovo", "3334": "Urovo", "3335": "Urovo", "3336": "Urovo", "3337": "Urovo", "3338": "Urovo", "3339": "Urovo", "3340": "Urovo", "3341": "Urovo", "3342": "Urovo", "3343": "Urovo", "3344": "Urovo", "3345": "Urovo", "3346": "Urovo", "3347": "Urovo", "3348": "Urovo", "3349": "Urovo", "3350": "Urovo", "3351": "Urovo", "3352": "Urovo", "3353": "Urovo", "3354": "Urovo", "3355": "Urovo", "3356": "Urovo", "3357": "Urovo", "3358": "Urovo", "3359": "Urovo", "3360": "Urovo", "3361": "Urovo", "3362": "Urovo", "3363": "Urovo", "3364": "Urovo", "3365": "Urovo", "3366": "Urovo", "3367": "Urovo", "3368": "Urovo", "3369": "Urovo", "3370": "Urovo", "3371": "Urovo", "3372": "Urovo", "3373": "Urovo", "3374": "Urovo", "3375": "Urovo", "3376": "Urovo", "3377": "Urovo", "3378": "Urovo", "3379": "Urovo", "3380": "Urovo", "3381": "Urovo", "3382": "Urovo", "3383": "Urovo", "3384": "Urovo", "3385": "Urovo", "3449": "Urovo", "3450": "Urovo", "3451": "Urovo", "3452": "Urovo", "3453": "Urovo", "3454": "Urovo", "3455": "Urovo", "3456": "Urovo", "3457": "Urovo", "3458": "Urovo", "3459": "Urovo", "3460": "Urovo", "3461": "Urovo", "3462": "Urovo", "3463": "Urovo", "3464": "Urovo", "3465": "Urovo", "3466": "Urovo", "3467": "Urovo", "3468": "Urovo", "3469": "Urovo", "3470": "Urovo", "3471": "Urovo", "3472": "Urovo", "3473": "Urovo", "3474": "Urovo", "3475": "Urovo", "3476": "Urovo", "3477": "Urovo", "3478": "Urovo", "3479": "Urovo", "3480": "Urovo", "3481": "Urovo", "3482": "Urovo", "3483": "Urovo", "3484": "Urovo", "3485": "Urovo", "3486": "Urovo", "3487": "Urovo", "3488": "Urovo", "3489": "Urovo", "3490": "Urovo"
+        };
+
+        // Populate new asset range 3501 to 3585
+        for (let i = 3501; i <= 3585; i++) {
+            INITIAL_ASSETS[i.toString()] = "Urovo";
+        }
+
+        let db = [];
+        let finTable = {};  // persistent FIN → { type, body, assets, lastSeen, lastFlight }
+        let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
+        let assetRef = { ...INITIAL_ASSETS };
+        let isInventoryOnlyMode = false;
+        let activeRefTab = 'aircraft';
+
+        const APP_STORAGE_KEY  = 'yul_field_data_v2';
+        const REF_STORAGE_KEY  = 'yul_aircraft_ref_v3';
+        const ASSET_REF_KEY    = 'yul_asset_ref_v2';
+        const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
+        const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
+        const NRO_INDEX_KEY    = 'yul_nro_index_v1';
+        const SCHEDULE_KEY     = 'yul_schedule_v1';
+
+        // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
+        let scheduleData = {};
+        const AGENT_KEY        = 'yul_agent_name_session';
+        const STATION_KEY      = 'yul_station_id_session';
+
+        // assetIndex: { "GGC0123": { fin: "AC101", ts: 1234567890 }, ... }
+        // Single source of truth — each asset lives on exactly one FIN.
+        let assetIndex = {};
+
+        // nroIndex: { "GGC0123": { lastFin: "AC101", lastSeen: "2025-01-01", ts: 1234567890 }, ... }
+        // Assets expected on a FIN but not reported onboard or otherwise accounted for.
+        let nroIndex = {};
+
+        function saveFinTable() {
+            try { localStorage.setItem(SYNC_TABLE_KEY, JSON.stringify(finTable)); } catch(e) { console.warn('Could not save FIN table:', e); }
+        }
+
+        function saveAssetIndex() {
+            try { localStorage.setItem(ASSET_INDEX_KEY, JSON.stringify(assetIndex)); } catch(e) { console.warn('Could not save asset index:', e); }
+        }
+
+        function saveNroIndex() {
+            try { localStorage.setItem(NRO_INDEX_KEY, JSON.stringify(nroIndex)); } catch(e) { console.warn('Could not save NRO index:', e); }
+        }
+
+        // Derive each FIN's asset list on-the-fly from assetIndex.
+        // Returns { fin: [assetId, ...] } — each asset appears on exactly one FIN.
+        function buildFinAssets() {
+            const map = {};
+            Object.entries(assetIndex).forEach(([assetId, rec]) => {
+                if (!rec.fin || rec.fin === 'INV') return;
+                if (!map[rec.fin]) map[rec.fin] = [];
+                map[rec.fin].push(assetId);
+            });
+            return map;
+        }
+
+        function updateFinTable(entry) {
+            if (!entry || entry.FIN === 'INV') return;
+            const fin = entry.FIN;
+            const entryTs = entry.id || 0;
+
+            // Ensure finTable row exists
+            if (!finTable[fin]) {
+                finTable[fin] = { type: '', body: '', lastSeen: '', lastFlight: '', _ts: 0 };
+            }
+            // Resolve aircraft type
+            const match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
+            if (match) { finTable[fin].type = match.type; finTable[fin].body = match.body; }
+
+            // Update last seen — keep the most recent by timestamp
+            if (entryTs >= (finTable[fin]._ts || 0)) {
+                finTable[fin].lastSeen    = entry.displayDate || '';
+                finTable[fin].lastFlight  = entry['Flight#']  || '';
+                finTable[fin]._ts         = entryTs;
+
+                const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
+
+                // Snapshot of HHDs actually onboard this visit — replaces previous
+                const onboard = [];
+                [entry.HHD1, entry.HHD2, entry.HHD3, entry.HHD4].forEach(a => {
+                    if (a && !snapSkip.has(a) && !onboard.includes(a)) onboard.push(a);
+                });
+                finTable[fin].lastOnboard = onboard;
+
+                // Snapshot of removed/flagged assets this visit — replaces previous
+                // Exclude anything also reported onboard (onboard wins)
+                const onboardSet = new Set(onboard);
+                const removed = [];
+                [entry.HD1Rmvd, entry.HD2Rmvd, entry.HD3Rmvd, entry.HD4Rmvd].forEach(a => {
+                    if (a && !snapSkip.has(a) && !onboardSet.has(a) && !removed.includes(a)) removed.push(a);
+                });
+                if (entry.ASST && !snapSkip.has(entry.ASST) && !onboardSet.has(entry.ASST) && !removed.includes(entry.ASST)) removed.push(entry.ASST);
+                finTable[fin].lastRemoved = removed;
+            }
+
+            const SKIP = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
+
+            // Assets reported onboard in this entry
+            const reportedNow = new Set();
+            [entry.HHD1, entry.HHD2, entry.HHD3, entry.HHD4].forEach(a => {
+                if (a && !SKIP.has(a)) reportedNow.add(a);
+            });
+
+            // Assets explicitly accounted for: swapped out (HDxRmvd) or reported in ASST field
+            // — exclude any that also appear in reportedNow (onboard wins, Rmvd was a mistake)
+            const accountedFor = new Set();
+            [entry.HD1Rmvd, entry.HD2Rmvd, entry.HD3Rmvd, entry.HD4Rmvd].forEach(a => {
+                if (a && !SKIP.has(a) && !reportedNow.has(a)) accountedFor.add(a);
+            });
+            if (entry.ASST && !SKIP.has(entry.ASST) && !reportedNow.has(entry.ASST)) accountedFor.add(entry.ASST);
+
+            // Check assets previously on this FIN — flag any that are unaccounted for as NRO
+            Object.entries(assetIndex).forEach(([assetId, rec]) => {
+                if (rec.fin !== fin) return;           // not previously on this FIN
+                if (reportedNow.has(assetId)) return;  // still onboard — fine
+                if (accountedFor.has(assetId)) return; // explicitly moved or flagged — fine
+                // Asset was expected but missing with no explanation
+                const existingNro = nroIndex[assetId];
+                if (!existingNro || entryTs > (existingNro.ts || 0)) {
+                    nroIndex[assetId] = { lastFin: fin, lastSeen: entry.displayDate || '', ts: entryTs };
+                }
+            });
+
+            // Update assetIndex — reported assets move to this FIN
+            reportedNow.forEach(a => {
+                const existing = assetIndex[a];
+                if (!existing || entryTs >= existing.ts) {
+                    assetIndex[a] = { fin, ts: entryTs };
+                    // Clear NRO if this asset is now confirmed somewhere
+                    if (nroIndex[a]) delete nroIndex[a];
+                }
+            });
+
+            // Clear NRO and remove from assetIndex for anything explicitly accounted for
+            // — they are no longer expected on this FIN so future visits won't re-flag them
+            accountedFor.forEach(a => {
+                if (nroIndex[a]) delete nroIndex[a];
+                if (assetIndex[a] && assetIndex[a].fin === fin) delete assetIndex[a];
+            });
+
+            saveFinTable();
+            saveAssetIndex();
+            saveNroIndex();
+        }
+
+        function isValidAssetId(val) {
+            if (!val || val.trim() === "") return true;
+            const normalized = val.trim().toLowerCase();
+            if (["msng", "ntrqrd", "n/a", "rmvd"].includes(normalized)) return true;
+            const num = val.replace(/\D/g, '');
+            if (num === "") return false;
+            const padded = num.padStart(4, '0');
+            return !!assetRef[num] || !!assetRef[padded];
+        }
+
+        // Levenshtein distance between two strings
+        function levenshtein(a, b) {
+            const m = a.length, n = b.length;
+            const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+            for (let j = 0; j <= n; j++) dp[0][j] = j;
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    dp[i][j] = a[i-1] === b[j-1]
+                        ? dp[i-1][j-1]
+                        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+                }
+            }
+            return dp[m][n];
+        }
+
+        // Find the closest known asset to the entered value (within edit distance threshold)
+        function findTypoSuggestion(val) {
+            const SKIP = new Set(['msng', 'ntrqrd', 'n/a', 'rmvd', '']);
+            const norm = val.trim().toLowerCase();
+            if (SKIP.has(norm)) return null;
+
+            // Work purely on the 4-digit numeric portion for comparison
+            const enteredNum = val.replace(/\D/g,'').padStart(4, '0');
+            if (enteredNum.replace(/0/g,'') === '') return null; // all zeros — skip
+            const enteredFormatted = 'GGC' + enteredNum;
+
+            let best = null, bestDist = Infinity;
+
+            // 1. Check assets currently tracked on the FIN entered in the form (highest priority)
+            const currentFin = (document.getElementById('field-fin')?.value || '').trim().toUpperCase();
+            if (currentFin) {
+                Object.entries(assetIndex).forEach(([known, rec]) => {
+                    if (rec.fin !== currentFin) return;
+                    const knownNum = known.replace(/\D/g,'').padStart(4,'0');
+                    if (knownNum === enteredNum) return; // exact — no suggestion
+                    const dist = levenshtein(enteredNum, knownNum);
+                    if (dist <= 2 && dist < bestDist) {
+                        bestDist = dist;
+                        best = { id: 'GGC' + knownNum, fin: currentFin, dist, onCurrentFin: true };
+                    }
+                });
+            }
+
+            // 2. Check all tracked assets in assetIndex
+            Object.entries(assetIndex).forEach(([known, rec]) => {
+                const knownNum = known.replace(/\D/g,'').padStart(4,'0');
+                if (knownNum === enteredNum) return;
+                const dist = levenshtein(enteredNum, knownNum);
+                if (dist <= 2 && dist < bestDist) {
+                    bestDist = dist;
+                    best = { id: 'GGC' + knownNum, fin: rec.fin || null, dist, onCurrentFin: false };
+                }
+            });
+
+            // 3. Always search assetRef (full DB) — catches cases where assetIndex has no history yet
+            Object.keys(assetRef).forEach(refId => {
+                const refNum = String(refId).padStart(4,'0');
+                if (refNum === enteredNum) return; // exact match — this IS the entered asset
+                const dist = levenshtein(enteredNum, refNum);
+                if (dist <= 2 && dist < bestDist) {
+                    bestDist = dist;
+                    const tracked = assetIndex['GGC' + refNum];
+                    best = { id: 'GGC' + refNum, fin: tracked?.fin || null, dist, onCurrentFin: tracked?.fin === currentFin };
+                }
+            });
+
+            // Suppress distance-2 suggestions for valid entries unless it's on the current FIN — too noisy otherwise
+            if (!best) return null;
+            if (best.dist === 2 && isValidAssetId(val) && !best.onCurrentFin) return null;
+            return best;
+        }
+
+        let _typoHideTimer = null;
+
+        function showTypoHint(el, suggestion) {
+            if (!suggestion) return;
+            const hintBox = el.nextElementSibling;
+            if (!hintBox || !hintBox.classList.contains('typo-hint-box')) return;
+            const finNote = suggestion.onCurrentFin
+                ? ' · already on this aircraft'
+                : suggestion.fin ? ` · last on ${suggestion.fin}` : '';
+            hintBox.textContent = `⚠️ Did you mean ${suggestion.id}?${finNote}`;
+            // Auto-clear after 6s
+            clearTimeout(el._typoTimer);
+            el._typoTimer = setTimeout(() => { hintBox.textContent = ''; }, 6000);
+        }
+
+        function hideTypoHint(el) {
+            if (!el) {
+                // Clear all hint boxes
+                document.querySelectorAll('.typo-hint-box').forEach(b => b.textContent = '');
+                return;
+            }
+            const hintBox = el.nextElementSibling;
+            if (hintBox && hintBox.classList.contains('typo-hint-box')) hintBox.textContent = '';
+        }
+
+        function validateAssetInput(el) {
+            const val = el.value.trim();
+            const SKIP = new Set(['msng', 'ntrqrd', 'n/a', 'rmvd', '']);
+            const norm = val.toLowerCase();
+
+            if (!isValidAssetId(val)) {
+                el.classList.add('invalid-asset');
+            } else {
+                el.classList.remove('invalid-asset');
+            }
+
+            // Run typo check whenever there are enough digits and it's not a skip word
+            if (val.replace(/\D/g,'').length >= 3 && !SKIP.has(norm)) {
+                const suggestion = findTypoSuggestion(val);
+                if (suggestion) showTypoHint(el, suggestion);
+                else hideTypoHint(el);
+            } else {
+                hideTypoHint(el);
+            }
+        }
+
+        function openRefEditor() { renderRefList(); document.getElementById('editor-modal').classList.add('open'); }
+        function closeRefEditor() { document.getElementById('editor-modal').classList.remove('open'); }
+
+        function switchRefTab(tab) {
+            activeRefTab = tab;
+            document.getElementById('ref-tab-aircraft').className  = `flex-1 py-3 border-b-2 ${tab === 'aircraft'  ? 'border-blue-600 text-blue-600'     : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-assets').className    = `flex-1 py-3 border-b-2 ${tab === 'assets'    ? 'border-blue-600 text-blue-600'     : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-synctable').className = `flex-1 py-3 border-b-2 ${tab === 'synctable' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-schedule').className  = `flex-1 py-3 border-b-2 ${tab === 'schedule'  ? 'border-violet-500 text-violet-600'  : 'border-transparent text-slate-400'}`;
+            document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
+            document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
+            document.getElementById('add-schedule-ui').classList.toggle('hidden', tab !== 'schedule');
+            renderRefList();
+        }
+
+        function renderRefList() {
+            const container = document.getElementById('ref-editor-list');
+            container.innerHTML = '';
+            if (activeRefTab === 'aircraft') {
+                Object.keys(aircraftRef).sort().forEach(prefix => {
+                    const item = aircraftRef[prefix];
+                    const div = document.createElement('div');
+                    div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs";
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <span class="font-mono font-black text-blue-600">${prefix}</span>
+                            <span class="mx-2 text-slate-300">|</span>
+                            <span class="font-bold text-slate-700">${item.type}</span>
+                            <span class="ml-1 text-[9px] px-1 bg-slate-200 rounded text-slate-500">${item.body}</span>
+                        </div>
+                        <button onclick="removeRef('${prefix}')" class="text-red-400 hover:text-red-600 ml-2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>`;
+                    container.appendChild(div);
+                });
+            } else if (activeRefTab === 'assets') {
+                Object.keys(assetRef).sort((a,b) => parseInt(a) - parseInt(b)).forEach(assetId => {
+                    const name = assetRef[assetId];
+                    const div = document.createElement('div');
+                    div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs";
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <span class="font-mono font-black text-emerald-600">${assetId}</span>
+                            <span class="mx-2 text-slate-300">|</span>
+                            <span class="font-bold text-slate-700 uppercase">${name}</span>
+                        </div>
+                        <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>`;
+                    container.appendChild(div);
+                });
+            } else if (activeRefTab === 'synctable') {
+                renderSyncTable(container);
+            } else if (activeRefTab === 'schedule') {
+                renderScheduleList(container);
+            }
+        }
+
+        function renderSyncTable(container) {
+            const fins = Object.keys(finTable).sort();
+
+            if (fins.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No records saved yet</div>`;
+                return;
+            }
+
+            // Build a per-FIN NRO lookup: fin → [{assetId, lastSeen, ts}]
+            const finNro = {};
+            Object.entries(nroIndex).forEach(([assetId, rec]) => {
+                if (!rec.lastFin) return;
+                if (!finNro[rec.lastFin]) finNro[rec.lastFin] = [];
+                finNro[rec.lastFin].push({ assetId, lastSeen: rec.lastSeen, ts: rec.ts });
+            });
+
+            // Header — 5-column layout: FIN | Type | Assets on FIN | Last | NRO
+            const header = document.createElement('div');
+            header.className = "grid gap-1 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
+            header.style.gridTemplateColumns = "3rem 3.5rem 1fr 3rem 1fr";
+            header.innerHTML = `
+                <span>FIN</span>
+                <span>Type</span>
+                <span>Assets Onboard</span>
+                <span>Last</span>
+                <span class="text-amber-500">NRO</span>`;
+            container.appendChild(header);
+
+            fins.forEach(fin => {
+                const entry = finTable[fin];
+                const bodyColor = entry.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
+
+                // Assets onboard from most recent entry only (HHD1–4 snapshot)
+                const numSort = (a, b) => parseInt(a.replace(/\D/g,'')) - parseInt(b.replace(/\D/g,''));
+                const onboardAssets = (entry.lastOnboard || []).slice().sort(numSort);
+                const onboardHtml = onboardAssets.length > 0
+                    ? onboardAssets.map(a => `<span class="text-slate-600">${a}</span>`).join(', ')
+                    : '<span class="text-slate-300">—</span>';
+
+                // Removed/flagged assets from last visit (HDxRmvd + ASST)
+                const removedAssets = (entry.lastRemoved || []).slice().sort(numSort);
+                const removedHtml = removedAssets.length > 0
+                    ? '<span class="text-red-500 text-[8px] font-black uppercase tracking-wide block mt-0.5">Rmvd: </span>' +
+                      removedAssets.map(a => `<span class="text-red-600 font-black">${a}</span>`).join(', ')
+                    : '';
+
+                // NRO items for this FIN, sorted numerically
+                const nroItems = (finNro[fin] || []).slice().sort((a, b) => parseInt(a.assetId.replace(/\D/g,'')) - parseInt(b.assetId.replace(/\D/g,'')));
+                const nroCell = nroItems.length > 0
+                    ? nroItems.map(n => `<span class="text-amber-600 font-black">${n.assetId}</span><span class="text-amber-600 ml-0.5 text-[8px]">${n.lastSeen || ''}</span>`).join('<br>')
+                    : '<span class="text-slate-200">—</span>';
+
+                const div = document.createElement('div');
+                div.className = "grid gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
+                div.style.gridTemplateColumns = "3rem 3.5rem 1fr 3rem 1fr";
+                div.innerHTML = `
+                    <span class="font-mono font-black text-blue-600">${fin}</span>
+                    <span class="font-bold text-slate-700">
+                        ${entry.type || '—'}
+                        ${entry.body ? `<span class="block text-[8px] font-black ${bodyColor}">${entry.body}</span>` : ''}
+                    </span>
+                    <span class="font-mono text-[9px] leading-relaxed">${onboardHtml}${removedHtml}</span>
+                    <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}</span>
+                    <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
+                container.appendChild(div);
+            });
+
+            // Summary footer
+            const nroTotal = Object.keys(nroIndex).length;
+            const footer = document.createElement('div');
+            footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
+            footer.innerHTML = `${fins.length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries · ${Object.keys(assetIndex).length} assets tracked` +
+                (nroTotal > 0 ? ` · <span class="text-amber-500">${nroTotal} NRO</span>` : '');
+            container.appendChild(footer);
+        }
+
+        function addNewRef() {
+            const prefix = document.getElementById('new-ref-prefix').value.trim().toUpperCase();
+            const type = document.getElementById('new-ref-type').value.trim();
+            const body = document.getElementById('new-ref-body').value;
+            if (!prefix || !type) return showToast("Enter Prefix & Type");
+            aircraftRef[prefix] = { type, body };
+            try { localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef)); } catch(e) { showToast("Storage full!"); }
+            renderRefList();
+            document.getElementById('new-ref-prefix').value = '';
+            document.getElementById('new-ref-type').value = '';
+            showToast("Added Aircraft Ref");
+        }
+
+        function removeRef(prefix) {
+            delete aircraftRef[prefix];
+            try { localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef)); } catch(e) { showToast("Storage full!"); }
+            renderRefList();
+            showToast("Removed");
+        }
+
+        function addNewAsset() {
+            const id = document.getElementById('new-asset-id').value.trim();
+            const name = document.getElementById('new-asset-name').value.trim();
+            if (!id || !name) return showToast("Enter ID & Name");
+            assetRef[id] = name;
+            try { localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef)); } catch(e) { showToast("Storage full!"); }
+            renderRefList();
+            document.getElementById('new-asset-id').value = '';
+            document.getElementById('new-asset-name').value = '';
+            showToast("Added Asset");
+        }
+
+        function removeAsset(id) {
+            delete assetRef[id];
+            try { localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef)); } catch(e) { showToast("Storage full!"); }
+            renderRefList();
+            showToast("Removed Asset");
+        }
+
+        function getBodyType(fin) {
+            if (!fin) return "NB";
+            let match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
+            return match ? match.body : "NB";
+        }
+
+        // Station → IANA timezone map
+        const STATION_TZ = {
+            'YYZ': 'America/Toronto',
+            'YUL': 'America/Toronto',
+            'YYC': 'America/Edmonton',
+            'YVR': 'America/Vancouver'
+        };
+
+        // Returns the best upcoming rotation object for a FIN, or null
+        function getNextRotation(fin) {
+            const rotations = scheduleData[fin];
+            if (!rotations || rotations.length === 0) return null;
+            const now = new Date();
+            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            const grace = new Date(now.getTime() - 30 * 60000);
+            const parseOdt = (odt) => { if (!odt) return null; const d = new Date(odt); return isNaN(d) ? null : d; };
+            const upcoming = rotations.filter(r => { const d = parseOdt(r.odt); return d && d >= grace; })
+                .sort((a, b) => parseOdt(a.odt) - parseOdt(b.odt));
+            if (upcoming.length === 0) return null;
+            return agentStation
+                ? (upcoming.find(r => (r.stn || '').toUpperCase() === agentStation) || upcoming[0])
+                : upcoming[0];
+        }
+
+        // Returns a single display line for the next/current rotation for a given FIN
+        function getNextRotationLine(fin) {
+            const rot = getNextRotation(fin);
+            if (!rot) return '';
+
+            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            const agentTz = STATION_TZ[agentStation] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+            const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
+
+            const odtDate = parseT(rot.odt);
+            const idtDate = parseT(rot.idt);
+            if (!odtDate) return '';
+
+            const rotStn = (rot.stn  || '').toUpperCase();
+            const iStn   = (rot.iStn || '').toUpperCase();
+            const oStn   = (rot.oStn || '').toUpperCase();
+            const rotTz  = STATION_TZ[rotStn] || agentTz;
+            const iStnTz = STATION_TZ[iStn]   || agentTz;
+            const atStation = agentStation && rotStn === agentStation;
+
+            // ODT: show in rotation's station tz, with agent-local equivalent if different
+            const odtRot   = fmtInTz(odtDate, rotTz);
+            const odtLocal = (rotTz !== agentTz) ? ' (' + fmtInTz(odtDate, agentTz) + ' ' + agentStation + ')' : '';
+
+            // IDT: only show if it has a meaningful time (non-midnight UTC)
+            let idtStr = '';
+            if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
+                idtStr = fmtInTz(idtDate, iStnTz);
+                if (iStnTz !== agentTz) idtStr += ' (' + fmtInTz(idtDate, agentTz) + ' ' + agentStation + ')';
+            }
+
+            const iflt = (rot.iflt || '');
+            const oflt = (rot.oflt || '');
+            const inGt = (rot.inGt || '');
+            const oGt  = (rot.oGt  || '');
+
+            // Format: IFLT G(InGt) ISTN → STN → OSTN G(OGT)  OFLT  ✈in IDT  ✈out ODT [STN if not at station]
+            let parts = [];
+            if (iflt && iflt !== 'AC0000') parts.push(iflt);
+            if (inGt) parts.push('G' + inGt);
+            parts.push(iStn + ' → ' + rotStn + ' → ' + oStn);
+            if (oGt)  parts.push('G' + oGt);
+            if (oflt) parts.push(oflt);
+            if (idtStr) parts.push('✈in ' + idtStr);
+            parts.push('✈out ' + odtRot + odtLocal);
+            if (!atStation) parts.push('[' + rotStn + ']');
+
+            return parts.join('  ');
+        }
+
+        function handleFinInput(el) {
+            el.value = el.value.toUpperCase();
+            const val = el.value;
+            const refType = document.getElementById('ref-type');
+            const refBody = document.getElementById('ref-body');
+            refType.textContent = "";
+            refBody.textContent = "";
+
+            const case2  = document.getElementById('field-case2');
+            const hhd2   = document.getElementById('field-hhd2');
+            const hhd3   = document.getElementById('field-hhd3');
+            const hhd4   = document.getElementById('field-hhd4');
+
+            // Reset placeholders to default
+            case2.placeholder = "000 or Msng";
+            hhd2.placeholder  = "0000 or Msng";
+            hhd3.placeholder  = "0000 or Msng";
+            hhd4.placeholder  = "0000 or Msng";
+
+            // Auto-set priority from computed priority list whenever FIN is long enough to match
+            const priorityField = document.getElementById('priority-field');
+            const rotationEl    = document.getElementById('fin-rotation');
+
+            // If field cleared, release any claim and restore placeholder suggestions
+            if (val.length === 0) {
+                priorityField.value = '1';
+                if (updateFinPlaceholder._lastSuggested) {
+                    releaseFin(updateFinPlaceholder._lastSuggested);
+                    updateFinPlaceholder._lastSuggested = null;
+                }
+                updateFinPlaceholder();
+                return;
+            }
+
+            if (val.length >= 5) {
+                const p = computeFinPriority(val);
+                priorityField.value = String(p);
+                // Populate next rotation line from scheduleData
+                rotationEl.textContent = getNextRotationLine(val);
+
+                // Prepopulate Flight# placeholder from inbound flight number (numeric portion)
+                // Fall back to outbound if inbound is 0000
+                const flightField = document.getElementById('field-flight');
+                const rot = getNextRotation(val);
+                if (rot && flightField && !flightField.value) {
+                    const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '') || '0000';
+                    const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '') || '0000';
+                    const useNum  = (ifltNum === '0' || ifltNum === '0000' || ifltNum === '') ? ofltNum : ifltNum;
+                    flightField.placeholder = useNum.padStart(4, '0');
+                } else if (!rot && flightField) {
+                    flightField.placeholder = 'e.g. 0123';
+                }
+            } else {
+                priorityField.value = '1';
+                rotationEl.textContent = '';
+                const flightField = document.getElementById('field-flight');
+                if (flightField) flightField.placeholder = 'e.g. 0123';
+            }
+
+            if (val.length >= 2) {
+                let match = aircraftRef[val.substring(0,5)] || aircraftRef[val.substring(0,4)];
+                if (match) {
+                    refType.textContent = match.type;
+                    refBody.textContent = match.body;
+                    refBody.className = match.body === "WB" ? "text-base font-black text-purple-600 uppercase" : "text-base font-black text-slate-400 uppercase";
+
+                    const isNB = match.body === "NB";
+                    const isQK = val.startsWith("QK");
+
+                    if (isNB) {
+                        case2.placeholder = "NtRqrd";
+                        hhd3.placeholder  = "NtRqrd";
+                        hhd4.placeholder  = "NtRqrd";
+                    }
+                    if (isQK) {
+                        hhd2.placeholder = "NtRqrd";
+                    }
+                }
+            }
+        }
+
+        function updateBatteryPlaceholder() {
+            const hasHHD = (id) => {
+                const el = document.querySelector(`[name="${id}"]`);
+                const val = el ? el.value.trim().toLowerCase() : "";
+                return val !== "" && val !== "msng" && val !== "ntrqrd" && val !== "n/a";
+            };
+
+            const h1 = hasHHD('HHD1'), h2 = hasHHD('HHD2');
+            const h3 = hasHHD('HHD3'), h4 = hasHHD('HHD4');
+
+            // +1 per HHD entered
+            let count = [h1, h2, h3, h4].filter(Boolean).length;
+            // +1 if case 1 has any HHD (HHD1 or HHD2)
+            if (h1 || h2) count++;
+            // +1 if case 2 has any HHD (HHD3 or HHD4)
+            if (h3 || h4) count++;
+
+            const batteryField = document.getElementById('field-battery');
+            batteryField.placeholder = count > 0 ? String(count) : "0";
+        }
+
+        function toggleInventoryMode() { isInventoryOnlyMode = !isInventoryOnlyMode; applyModeUI(); }
+        function applyModeUI() {
+            const btn = document.getElementById('toggle-inventory-btn');
+            const flightHeader = document.getElementById('flight-header-label');
+            const serviceSections = document.getElementById('service-specific-sections');
+            const issuesLabel = document.getElementById('issues-section-label');
+            const finField = document.getElementById('field-fin');
+            const flightField = document.getElementById('field-flight');
+            const refArea = document.getElementById('fin-reference');
+
+            if (isInventoryOnlyMode) {
+                btn.textContent = "Back to Full Service";
+                flightHeader.textContent = "Inventory Entry";
+                serviceSections.classList.add('hidden');
+                issuesLabel.textContent = "Record Movement";
+                finField.removeAttribute('required');
+                flightField.removeAttribute('required');
+                refArea.classList.add('invisible');
+            } else {
+                btn.textContent = "Inventory Only Mode";
+                flightHeader.textContent = "Flight Details";
+                serviceSections.classList.remove('hidden');
+                issuesLabel.textContent = "Service Issues";
+                finField.setAttribute('required', '');
+                flightField.setAttribute('required', '');
+                refArea.classList.remove('invisible');
+            }
+            updateCategoryOptions();
+        }
+
+        function updateCategoryOptions() {
+            const catField = document.getElementById('srvc-iss-cat-field');
+            catField.innerHTML = '<option value="">-- Select --</option>';
+            Object.keys(issueMap).forEach(cat => {
+                const lower = cat.toLowerCase();
+                const isMovement = lower.includes("rt (") || lower.includes("rm (");
+                const isFound = lower.includes("found");
+                if (isInventoryOnlyMode) {
+                    if (isFound || isMovement) {
+                        const opt = document.createElement('option');
+                        opt.value = cat; opt.textContent = cat;
+                        catField.appendChild(opt);
+                    }
+                } else {
+                    if (!isMovement) {
+                        const opt = document.createElement('option');
+                        opt.value = cat; opt.textContent = cat;
+                        catField.appendChild(opt);
+                    }
+                }
+            });
+            updateIssueOptions();
+        }
+
+        function updateIssueOptions() {
+            const catField = document.getElementById('srvc-iss-cat-field');
+            const issField = document.getElementById('srvc-iss-field');
+            const selectedCat = catField.value;
+            issField.innerHTML = '';
+            if (!selectedCat) {
+                issField.innerHTML = '<option value="">-- Select Category --</option>';
+                return;
+            }
+            let issues = [...(issueMap[selectedCat] || [])];
+            const isFoundCat = selectedCat.toLowerCase().includes("found");
+            if (isFoundCat) {
+                if (isInventoryOnlyMode) {
+                    issues = issues.filter(i => i !== "HHD Found Onboard Aircraft");
+                } else {
+                    issues = issues.filter(i => i === "HHD Found Onboard Aircraft");
+                }
+            }
+            issField.innerHTML = '<option value="">-- Select Specific --</option>';
+            issues.forEach(issue => {
+                const opt = document.createElement('option');
+                opt.value = issue; opt.textContent = issue;
+                issField.appendChild(opt);
+            });
+        }
+
+        // ─── FIN Claim System ────────────────────────────────────────────────
+        const CLAIM_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+        function claimFin(fin) {
+            if (!fin) return;
+            const agentVal = document.getElementById('agent-field')?.value || '';
+            const agentName = agentVal.split(',')[0].trim();
+            finClaims[fin] = { agent: agentName, ts: Date.now() };
+            // Broadcast to peers
+            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+        }
+
+        function releaseFin(fin) {
+            if (!fin || !finClaims[fin]) return;
+            delete finClaims[fin];
+            const msg = { type: 'RELEASE_FIN', fin };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+        }
+
+        function isFinClaimed(fin) {
+            const claim = finClaims[fin];
+            if (!claim) return false;
+            // Expire stale claims
+            if (Date.now() - claim.ts > CLAIM_TTL_MS) { delete finClaims[fin]; return false; }
+            // Don't block our own claim
+            const agentVal = document.getElementById('agent-field')?.value || '';
+            const myName = agentVal.split(',')[0].trim();
+            return claim.agent !== myName;
+        }
+
+        // Returns the FIN of the highest-priority P1 aircraft with an upcoming rotation at the agent's station
+        // Priority: 1) most days since last serviced (never = highest), 2) airline AC > RV > QK, 3) earliest ODT
+        function getNextP1Fin() {
+            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            if (!agentStation) return null;
+
+            const now    = new Date();
+            const today  = new Date(now); today.setHours(0,0,0,0);
+            const grace  = new Date(now.getTime() - 30 * 60000);
+            const parseT = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+
+            const AIRLINE_RANK = { 'AC': 0, 'RV': 1, 'QK': 2 };
+
+            // Days since last serviced — higher = more overdue; never serviced = 9999
+            const daysOverdue = (fin) => {
+                const entry = finTable[fin];
+                if (!entry || !entry.lastSeen) return 9999;
+                const parts = entry.lastSeen.split('/');
+                let d;
+                if (parts.length === 3) {
+                    d = new Date(parts[2], parts[0]-1, parts[1]);
+                    if (isNaN(d)) d = new Date(parts[2], parts[1]-1, parts[0]);
+                } else { d = new Date(entry.lastSeen); }
+                if (isNaN(d)) return 9999;
+                d.setHours(0,0,0,0);
+                return Math.round((today - d) / 86400000);
+            };
+
+            const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
+            const candidates = [];
+
+            allFins.forEach(fin => {
+                if (computeFinPriority(fin) !== 1) return;
+                const rotations = scheduleData[fin];
+                if (!rotations || rotations.length === 0) return;
+
+                const minService = new Date(now.getTime() + 20 * 60000); // must have 20min remaining
+                const upcoming = rotations
+                    .filter(r => { const d = parseT(r.odt); return d && d >= minService && (r.stn || '').toUpperCase() === agentStation; })
+                    .sort((a, b) => parseT(a.odt) - parseT(b.odt));
+                if (upcoming.length === 0) return;
+
+                const airline = fin.substring(0, 2).toUpperCase();
+                // Skip FINs claimed by another active agent
+                if (isFinClaimed(fin)) return;
+
+                candidates.push({
+                    fin,
+                    days:        daysOverdue(fin),
+                    airlineRank: AIRLINE_RANK[airline] !== undefined ? AIRLINE_RANK[airline] : 99,
+                    odt:         parseT(upcoming[0].odt).getTime()
+                });
+            });
+
+            if (candidates.length === 0) return null;
+
+            // Sort: most overdue first, then airline rank, then earliest ODT
+            candidates.sort((a, b) =>
+                b.days - a.days ||
+                a.airlineRank - b.airlineRank ||
+                a.odt - b.odt
+            );
+
+            return candidates[0].fin;
+        }
+
+        // Set FIN and Flight# placeholders to next P1 aircraft at agent's station
+        // Also shows rotation info under the FIN field until the user types
+        function updateFinPlaceholder() {
+            const finField    = document.getElementById('field-fin');
+            const flightField = document.getElementById('field-flight');
+            const rotationEl  = document.getElementById('fin-rotation');
+
+            if (!finField || finField.value) return; // don't overwrite if user has typed something
+
+            const p1Fin = getNextP1Fin();
+            finField.placeholder = p1Fin ? p1Fin : 'e.g. AC101';
+
+            if (!p1Fin) {
+                if (flightField && !flightField.value) flightField.placeholder = 'e.g. 0123';
+                if (rotationEl) rotationEl.textContent = '';
+                const rt = document.getElementById('ref-type');
+                const rb = document.getElementById('ref-body');
+                if (rt) rt.textContent = '';
+                if (rb) rb.textContent = '';
+                return;
+            }
+
+            // Flight# placeholder
+            if (flightField && !flightField.value) {
+                const rot = getNextRotation(p1Fin);
+                if (rot) {
+                    const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                    const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                    const useNum  = (!ifltNum || ifltNum === '0') ? ofltNum : ifltNum;
+                    flightField.placeholder = useNum ? useNum.padStart(4, '0') : 'e.g. 0123';
+                } else {
+                    flightField.placeholder = 'e.g. 0123';
+                }
+            }
+
+            // Rotation info line — show for the suggested P1 FIN
+            if (rotationEl) {
+                rotationEl.textContent = getNextRotationLine(p1Fin);
+            }
+
+            // Populate aircraft type/body reference spans
+            const refType = document.getElementById('ref-type');
+            const refBody = document.getElementById('ref-body');
+            if (refType && refBody) {
+                const match = aircraftRef[p1Fin.substring(0,5)] || aircraftRef[p1Fin.substring(0,4)];
+                if (match) {
+                    refType.textContent = match.type;
+                    refBody.textContent = match.body;
+                    refBody.className = match.body === 'WB'
+                        ? 'text-base font-black text-purple-600 uppercase'
+                        : 'text-base font-black text-slate-400 uppercase';
+                } else {
+                    refType.textContent = '';
+                    refBody.textContent = '';
+                }
+            }
+
+            // Claim this FIN so other agents skip it
+            claimFin(p1Fin);
+            updateFinPlaceholder._lastSuggested = p1Fin;
+        }
+
+        function onAgentChange() {
+            const agentField = document.getElementById('agent-field');
+            const stationField = document.getElementById('station-field');
+            const station = agentField.options[agentField.selectedIndex]?.getAttribute('data-station');
+            if (station) stationField.value = station;
+            sessionStorage.setItem(AGENT_KEY, agentField.value);
+            sessionStorage.setItem(STATION_KEY, stationField.value);
+            // Kick off P2P whenever agent is selected
+            if (agentField.value) initP2P(agentField.value);
+            updateFinPlaceholder();
+        }
+
+        function restoreAgent() {
+            const savedAgent = sessionStorage.getItem(AGENT_KEY);
+            const savedStation = sessionStorage.getItem(STATION_KEY);
+            if (savedAgent) document.getElementById('agent-field').value = savedAgent;
+            if (savedStation) document.getElementById('station-field').value = savedStation;
+            // Auto-connect on restore
+            if (savedAgent) initP2P(savedAgent);
+            updateFinPlaceholder();
+        }
+
+        const issueMap = {
+            "Aircraft Location": ["Access Restricted", "Unable to Locate"],
+            "Asset Identification": ["Asset Number Missing From Report", "Asset Stickers Missing", "Unable to Identify HHD/Case"],
+            "Cancellations": ["Arrival Cancelled"],
+            "Case": ["Case Damaged"],
+            "Consumables": ["Batteries Depleted", "Printer Paper Depleted"],
+            "Crew Interactions": ["Crew not Trained", "Crew Refused Service", "Inapropiate Crew Behavior", "Unwillingness to Use Supplied Equipment"],
+            "Damaged": ["Abuse", "Battery", "HHD", "MCG", "Printer", "SafeMode", "Screen", "Unknown"],
+            "Found": ["Found In Commissary", "HHD Found In Commissary", "HHD Found On bridge", "HHD Found Onboard Aircraft"],
+            "Missed Service": ["Attended to Urgent Call", "B.O.B. Not Required", "Early Departure", "Flight Delayed", "Flight Towed Away", "Held Up On Flight", "Serviced Other Priority", "Spare Batteries Unavailable", "Spare Case Unavailable", "Spare HHD's Unavailable"],
+            "Missing": ["Batteries From Aircraft", "Batteries From Case", "Case From Aircraft", "Case From Storage", "HHD Frm Storage", "HHD From Aircraft", "Printer From Aircraft", "Printer From Case"],
+            "Other": ["Other"],
+            "RM ( INV REM Base )": ["For OPS Backup", "For Repair", "For Use In Service", "For Use in Training", "Transfer ( Other Station )"],
+            "RT ( INV RTN Base )": ["Damaged Hardware ( Body )", "Damaged Hardware ( LCD )", "Damaged Hardware ( Printer )", "Damaged Hardware ( Unknown )", "Damaged Hardware ( Water Damage )", "Damaged Hardware ( WIFI )", "Not Required", "Repaired In-House", "Returned From Repair", "Software", "Transfer ( Received )"],
+            "Service Calls": ["False Issue", "Short Notice"],
+            "Software Issues": ["Data Pack Doesn't Install", "Data Upload Failed", "Program Corrupt", "WIFI Not Working"]
+        };
+
+        window.onload = () => {
+            try {
+                const savedDb = localStorage.getItem(APP_STORAGE_KEY);
+                if (savedDb) { db = JSON.parse(savedDb); updateUI(); }
+            } catch(e) { console.warn("Could not load saved records:", e); }
+            try {
+                const savedRef = localStorage.getItem(REF_STORAGE_KEY);
+                if (savedRef) aircraftRef = JSON.parse(savedRef);
+            } catch(e) { console.warn("Could not load aircraft ref:", e); }
+            try {
+                const savedAssetRef = localStorage.getItem(ASSET_REF_KEY);
+                if (savedAssetRef) assetRef = JSON.parse(savedAssetRef);
+            } catch(e) { console.warn("Could not load asset ref:", e); }
+            try {
+                const savedFinTable = localStorage.getItem(SYNC_TABLE_KEY);
+                if (savedFinTable) finTable = JSON.parse(savedFinTable);
+            } catch(e) { console.warn("Could not load FIN table:", e); }
+            try {
+                const savedAssetIndex = localStorage.getItem(ASSET_INDEX_KEY);
+                if (savedAssetIndex) assetIndex = JSON.parse(savedAssetIndex);
+            } catch(e) { console.warn("Could not load asset index:", e); }
+            try {
+                const savedNroIndex = localStorage.getItem(NRO_INDEX_KEY);
+                if (savedNroIndex) nroIndex = JSON.parse(savedNroIndex);
+            } catch(e) { console.warn("Could not load NRO index:", e); }
+            try {
+                const savedSchedule = localStorage.getItem(SCHEDULE_KEY);
+                if (savedSchedule) scheduleData = JSON.parse(savedSchedule);
+            } catch(e) { console.warn("Could not load schedule:", e); }
+
+            restoreAgent();
+            updateCategoryOptions();
+            document.getElementById('app-version-label').textContent = CURRENT_VERSION;
+        };
+
+        function formatGGCId(val, isRemovalField = false) {
+            if (!val || val.trim() === "" || val.toLowerCase().includes("ntrqrd") || val.toLowerCase().includes("n/a")) return val || "";
+            if (!isRemovalField) {
+                if (val.trim().toLowerCase() === "rmvd" || val.trim().toLowerCase() === "msng") return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+            }
+            let num = val.replace(/\D/g, '');
+            if (num === "") return val.toUpperCase(); 
+            return "GGC" + num.padStart(4, '0');
+        }
+
+        function formatCaseId(val) {
+            if (!val || val.trim() === "" || val.toLowerCase().includes("ntrqrd") || val.toLowerCase().includes("n/a")) return val || "";
+            if (val.trim().toLowerCase() === "rmvd" || val.trim().toLowerCase() === "msng") return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+            let num = val.replace(/\D/g, '');
+            if (num === "") return val.toUpperCase();
+            return num.padStart(3, '0');
+        }
+
+        function switchTab(tab) {
+            document.getElementById('section-form').classList.toggle('hidden', tab !== 'form');
+            document.getElementById('section-records').classList.toggle('hidden', tab !== 'records');
+            document.getElementById('section-priority').classList.toggle('hidden', tab !== 'priority');
+            document.getElementById('tab-form').classList.toggle('active', tab === 'form');
+            document.getElementById('tab-records').classList.toggle('active', tab === 'records');
+            document.getElementById('tab-priority').classList.toggle('active', tab === 'priority');
+            if (tab === 'records') updateUI();
+            if (tab === 'priority') renderPriorityList();
+        }
+
+
+        // ─── Schedule Import ──────────────────────────────────────────────────
+
+        function saveScheduleData() {
+            try { localStorage.setItem(SCHEDULE_KEY, JSON.stringify(scheduleData)); } catch(e) { console.warn('Could not save schedule:', e); }
+        }
+
+        function handleScheduleDrop(event) {
+            event.preventDefault();
+            const file = event.dataTransfer.files[0];
+            if (file) handleScheduleFile(file);
+        }
+
+        // Parse an Excel serial date or datetime value into a JS Date
+        function xlDateToDate(val) {
+            if (!val) return null;
+            if (val instanceof Date) return val;
+            if (typeof val === 'number') {
+                // Excel serial: days since 1900-01-00 (with Lotus bug offset)
+                const d = new Date(Math.round((val - 25569) * 86400000));
+                return d;
+            }
+            if (typeof val === 'string' && val.trim()) {
+                const d = new Date(val);
+                return isNaN(d) ? null : d;
+            }
+            return null;
+        }
+
+        function fmtTime(val) {
+            const d = xlDateToDate(val);
+            if (!d) return '';
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+
+        function fmtDate(val) {
+            const d = xlDateToDate(val);
+            if (!d) return '';
+            return d.toLocaleDateString();
+        }
+
+        function handleScheduleFile(file) {
+            if (!file) return;
+            const statusEl = document.getElementById('schedule-import-status');
+            statusEl.textContent = 'Reading file…';
+            statusEl.className = 'mt-2 text-[10px] text-center font-bold text-blue-400';
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+                    const ws = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+                    const rawRows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true });
+
+                    if (rows.length === 0) {
+                        statusEl.textContent = 'No rows found in file.';
+                        statusEl.className = 'mt-2 text-[10px] text-center font-bold text-red-400';
+                        return;
+                    }
+
+                    const ts = Date.now();
+                    const newSchedule = {};
+                    let rowCount = 0;
+
+                    rows.forEach((row, i) => {
+                        const fin = String(row['FIN'] || '').trim().toUpperCase();
+                        if (!fin) return;
+
+                        const rotation = {
+                            idt:     row['IDT']   || '',
+                            iflt:    String(row['IFLT']  || '').trim(),
+                            inGt:    String(row['InGt']  || '').trim(),
+                            iStn:    String(row['ISTN']  || '').trim(),
+                            stn:     String(row['STN']   || '').trim(),
+                            oStn:    String(row['OSTN']  || '').trim(),
+                            oGt:     String(row['OGT']   || '').trim(),
+                            oflt:    String(row['OFLT']  || '').trim(),
+                            odt:     row['ODT']   || '',
+                            routeDt: row['RouteDt'] || '',
+                            _ts: ts
+                        };
+
+                        if (!newSchedule[fin]) newSchedule[fin] = [];
+                        newSchedule[fin].push(rotation);
+                        rowCount++;
+                    });
+
+                    // Sort each FIN's rotations by outbound time
+                    Object.keys(newSchedule).forEach(fin => {
+                        newSchedule[fin].sort((a, b) => {
+                            const ta = a.odt ? new Date(a.odt).getTime() : 0;
+                            const tb = b.odt ? new Date(b.odt).getTime() : 0;
+                            return ta - tb;
+                        });
+                    });
+
+                    scheduleData = newSchedule;
+                    saveScheduleData();
+
+                    // Broadcast to all peers
+                    const peers = Object.keys(p2pConnections);
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', finTable, assetIndex, nroIndex, scheduleData }));
+
+                    const finCount = Object.keys(newSchedule).length;
+                    statusEl.textContent = `✓ ${rowCount} rotations across ${finCount} aircraft imported.`;
+                    statusEl.className = 'mt-2 text-[10px] text-center font-bold text-emerald-500';
+                    renderRefList();
+                    showToast(`Schedule: ${finCount} aircraft, ${rowCount} rotations`);
+                } catch(err) {
+                    console.error(err);
+                    statusEl.textContent = 'Error: ' + err.message;
+                    statusEl.className = 'mt-2 text-[10px] text-center font-bold text-red-400';
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function clearScheduleFilters() {
+            ['sf-fin','sf-airline','sf-stn','sf-istn','sf-ostn'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            renderRefList();
+        }
+
+        function renderScheduleList(container) {
+            const finCount = Object.keys(scheduleData).length;
+            const rotCount = Object.values(scheduleData).reduce((s, arr) => s + arr.length, 0);
+            const ts = finCount > 0 ? (Object.values(scheduleData)[0][0]?._ts || null) : null;
+
+            if (finCount === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No schedule imported yet</div>`;
+                return;
+            }
+
+            // Read filter values
+            const fFin    = (document.getElementById('sf-fin')?.value     || '').trim().toUpperCase();
+            const fAirline= (document.getElementById('sf-airline')?.value || '').trim().toUpperCase();
+            const fStn    = (document.getElementById('sf-stn')?.value     || '').trim().toUpperCase();
+            const fIStn   = (document.getElementById('sf-istn')?.value    || '').trim().toUpperCase();
+            const fOStn   = (document.getElementById('sf-ostn')?.value    || '').trim().toUpperCase();
+
+            // Build filtered list: { fin, rotations[] }
+            const filtered = [];
+            Object.keys(scheduleData).sort().forEach(fin => {
+                if (fFin     && !fin.includes(fFin))           return;
+                if (fAirline && !fin.startsWith(fAirline))     return;
+                const rots = scheduleData[fin].filter(rot => {
+                    if (fStn  && (rot.stn  || '').toUpperCase()  !== fStn)  return false;
+                    if (fIStn && (rot.iStn || '').toUpperCase()  !== fIStn) return false;
+                    if (fOStn && (rot.oStn || '').toUpperCase()  !== fOStn) return false;
+                    return true;
+                });
+                if (rots.length > 0) filtered.push({ fin, rots });
+            });
+
+            const shownRots = filtered.reduce((s, r) => s + r.rots.length, 0);
+
+            // Summary bar
+            const summary = document.createElement('div');
+            summary.className = "text-center py-2 border-b border-slate-100 mb-1";
+            const isFiltered = fFin || fAirline || fStn || fIStn || fOStn;
+            summary.innerHTML = isFiltered
+                ? `<span class="text-[10px] font-black text-violet-600">${filtered.length} aircraft · ${shownRots} rotations</span> <span class="text-[9px] text-slate-300">(filtered from ${finCount} / ${rotCount})</span>`
+                : `<span class="text-[10px] font-black text-slate-500">${finCount} aircraft · ${rotCount} rotations</span>${ts ? `<span class="text-[9px] text-slate-300 ml-2">· ${new Date(ts).toLocaleString()}</span>` : ''}`;
+            container.appendChild(summary);
+
+            if (filtered.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = "text-center py-6 text-[10px] text-slate-300 font-bold uppercase tracking-widest";
+                empty.textContent = "No results";
+                container.appendChild(empty);
+                return;
+            }
+
+            // Column header
+            const colHead = document.createElement('div');
+            colHead.className = "grid gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
+            colHead.style.gridTemplateColumns = "3.2rem 3.5rem 3.5rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3rem";
+            colHead.innerHTML = `<span>FIN</span><span>IDT</span><span>ODT</span><span>IFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>OFLT</span>`;
+            container.appendChild(colHead);
+
+            filtered.forEach(({ fin, rots }) => {
+                rots.forEach((rot, idx) => {
+                    const row = document.createElement('div');
+                    row.className = `grid gap-1 px-2 py-1.5 text-[9px] items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
+                    row.style.gridTemplateColumns = "3.2rem 3.5rem 3.5rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3rem";
+                    row.innerHTML = `
+                        <span class="font-mono font-black ${idx === 0 ? 'text-blue-600' : 'text-slate-200'}">${idx === 0 ? fin : ''}</span>
+                        <span class="text-slate-400">${rot.idt   || '—'}</span>
+                        <span class="text-violet-600 font-bold">${rot.odt  || '—'}</span>
+                        <span class="font-mono text-slate-400">${rot.iflt  || '—'}</span>
+                        <span class="text-slate-500">${rot.inGt  || '—'}</span>
+                        <span class="text-slate-500">${rot.iStn  || '—'}</span>
+                        <span class="font-bold text-slate-700">${rot.stn   || '—'}</span>
+                        <span class="text-slate-500">${rot.oStn  || '—'}</span>
+                        <span class="text-slate-500">${rot.oGt   || '—'}</span>
+                        <span class="font-mono text-slate-600">${rot.oflt  || '—'}</span>`;
+                    container.appendChild(row);
+                });
+            });
+        }
+
+        // Filter state for priority tab
+        let priorityFilterAirline  = 'ALL';
+        let priorityFilterPriority = 'ALL';
+
+        function setPriorityFilter(type, val) {
+            if (type === 'airline')  priorityFilterAirline  = val;
+            if (type === 'priority') priorityFilterPriority = val;
+
+            // Update button styles
+            document.querySelectorAll('.pf-airline').forEach(btn => {
+                const active = btn.id === `pf-airline-${priorityFilterAirline}`;
+                btn.className = `pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`;
+            });
+            document.querySelectorAll('.pf-priority').forEach(btn => {
+                const key = btn.id.replace('pf-priority-','');
+                const active = btn.id === `pf-priority-${priorityFilterPriority}`;
+                const colors = { '1':'text-red-400 border-red-200 hover:bg-red-50', '2':'text-amber-500 border-amber-200 hover:bg-amber-50', '3':'text-emerald-500 border-emerald-200 hover:bg-emerald-50', 'ALL':'text-slate-500 border-slate-200 hover:bg-slate-50' };
+                btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white ' + (colors[key] || colors['ALL'])}`;
+            });
+
+            renderPriorityList();
+        }
+
+        // Compute priority for a given FIN based on last service date
+        function computeFinPriority(fin) {
+            const entry = finTable[fin];
+            if (!entry || !entry.lastSeen) return 1; // never serviced = P1
+            const today = new Date(); today.setHours(0,0,0,0);
+            const parts = entry.lastSeen.split('/');
+            let lastDate;
+            if (parts.length === 3) {
+                lastDate = new Date(parts[2], parts[0]-1, parts[1]);
+                if (isNaN(lastDate)) lastDate = new Date(parts[2], parts[1]-1, parts[0]);
+            } else { lastDate = new Date(entry.lastSeen); }
+            if (isNaN(lastDate)) return 1;
+            lastDate.setHours(0,0,0,0);
+            const daysAgo = Math.round((today - lastDate) / 86400000);
+            if (daysAgo <= 1)      return 3;
+            else if (daysAgo <= 2) return 2;
+            else                   return 1;
+        }
+
+        function renderPriorityList() {
+            const container = document.getElementById('priority-list');
+            container.innerHTML = '';
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // All known FINs: union of finTable (serviced) + aircraftRef (all known aircraft)
+            const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
+
+            const rows = [...allFins].map(fin => {
+                const entry  = finTable[fin];
+                const refMatch = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)] || aircraftRef[fin];
+                const type   = (entry && entry.type) || (refMatch && refMatch.type) || '—';
+                const body   = (entry && entry.body) || (refMatch && refMatch.body) || '—';
+                const airline = fin.substring(0,2);
+
+                let lastSeen = null, daysAgo = null, priority;
+                if (entry && entry.lastSeen) {
+                    const parts = entry.lastSeen.split('/');
+                    let lastDate;
+                    if (parts.length === 3) {
+                        lastDate = new Date(parts[2], parts[0]-1, parts[1]);
+                        if (isNaN(lastDate)) lastDate = new Date(parts[2], parts[1]-1, parts[0]);
+                    } else { lastDate = new Date(entry.lastSeen); }
+                    if (!isNaN(lastDate)) {
+                        lastDate.setHours(0,0,0,0);
+                        daysAgo  = Math.round((today - lastDate) / 86400000);
+                        lastSeen = entry.lastSeen;
+                    }
+                }
+                if (daysAgo === null)     priority = 1;
+                else if (daysAgo <= 1)   priority = 3;
+                else if (daysAgo <= 2)   priority = 2;
+                else                     priority = 1;
+
+                return { fin, type, body, airline, lastSeen, daysAgo, priority };
+            });
+
+            // Apply filters
+            const filtered = rows.filter(r => {
+                if (priorityFilterAirline  !== 'ALL' && r.airline  !== priorityFilterAirline)       return false;
+                if (priorityFilterPriority !== 'ALL' && String(r.priority) !== priorityFilterPriority) return false;
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div class="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 font-bold">No aircraft match filter</div>`;
+                return;
+            }
+
+            // Sort: priority asc (1 first), then airline alpha, then FIN numeric
+            filtered.sort((a, b) =>
+                a.priority - b.priority ||
+                a.airline.localeCompare(b.airline) ||
+                parseInt(a.fin.replace(/\D/g,'')) - parseInt(b.fin.replace(/\D/g,''))
+            );
+
+            // Group by priority
+            const groups = { 1: [], 2: [], 3: [] };
+            filtered.forEach(r => groups[r.priority].push(r));
+
+            const priorityMeta = {
+                1: { label: 'Priority 1 — Overdue (3+ days)', bg: 'bg-red-50', border: 'border-red-200', headColor: 'text-red-600', badge: 'bg-red-100 text-red-700 border-red-200' },
+                2: { label: 'Priority 2 — 2 Days Ago',          bg: 'bg-amber-50', border: 'border-amber-200', headColor: 'text-amber-600', badge: 'bg-amber-100 text-amber-700 border-amber-200' },
+                3: { label: 'Priority 3 — Recent (0–1 Day)', bg: 'bg-emerald-50', border: 'border-emerald-200', headColor: 'text-emerald-600', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+            };
+
+            [1, 2, 3].forEach(p => {
+                if (groups[p].length === 0) return;
+                const meta = priorityMeta[p];
+
+                const section = document.createElement('div');
+                section.className = `bg-white rounded-2xl border ${meta.border} shadow-sm overflow-hidden mb-3`;
+
+                const groupHead = document.createElement('div');
+                groupHead.className = `${meta.bg} px-4 py-2 border-b ${meta.border} flex items-center justify-between`;
+                groupHead.innerHTML = `
+                    <span class="text-[10px] font-black uppercase tracking-widest ${meta.headColor}">${meta.label}</span>
+                    <span class="text-[10px] font-black px-2 py-0.5 rounded-full border ${meta.badge}">${groups[p].length}</span>`;
+                section.appendChild(groupHead);
+
+                const colHead = document.createElement('div');
+                colHead.className = "grid gap-2 px-4 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100";
+                colHead.style.gridTemplateColumns = "4rem 4.5rem 2.5rem 1fr 2rem";
+                colHead.innerHTML = `<span>FIN</span><span>Type</span><span>Body</span><span>Last Serviced</span><span class="text-center">P</span>`;
+                section.appendChild(colHead);
+
+                groups[p].forEach(r => {
+                    const bodyColor  = r.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
+                    const daysLabel  = r.daysAgo === null ? 'Never' : r.daysAgo === 0 ? 'Today' : r.daysAgo === 1 ? 'Yesterday' : `${r.daysAgo}d ago`;
+                    const dateStr    = r.lastSeen || '—';
+                    const pColor     = p === 1 ? 'text-red-500' : p === 2 ? 'text-amber-500' : 'text-emerald-500';
+                    const row = document.createElement('div');
+                    row.className = "grid gap-2 px-4 py-2.5 text-[11px] border-b border-slate-50 hover:bg-slate-50 items-center last:border-0";
+                    row.style.gridTemplateColumns = "4rem 4.5rem 2.5rem 1fr 2rem";
+                    row.innerHTML = `
+                        <span class="font-mono font-black text-blue-600">${r.fin}</span>
+                        <span class="font-bold text-slate-700">${r.type}</span>
+                        <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
+                        <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span></span>
+                        <span class="text-center font-black text-[13px] ${pColor}">${p}</span>`;
+                    section.appendChild(row);
+                });
+
+                container.appendChild(section);
+            });
+        }
+
+        function handleSave(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+            const entry = Object.fromEntries(formData.entries());
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            const isInvMode = isInventoryOnlyMode || (entry.FIN && entry.FIN.toUpperCase() === "INV");
+
+            if (!entry.Agent || entry.Agent.trim() === "") {
+                showToast("Please select your Agent name!");
+                document.getElementById('agent-field').focus();
+                return;
+            }
+
+            entry.Rv = CURRENT_VERSION;
+
+            // Auto-format Flight#: prepend first 2 chars of FIN + zero-pad to 4 digits
+            if (!isInventoryOnlyMode && entry['Flight#'] && entry.FIN) {
+                const prefix = entry.FIN.substring(0, 2).toUpperCase();
+                const digits = entry['Flight#'].replace(/\D/g, '').padStart(4, '0');
+                entry['Flight#'] = prefix + digits;
+            }
+
+            let invalidAssetsFound = [];
+            const assetFieldsToCheck = ['HHD1', 'HHD2', 'HHD3', 'HHD4', 'HD1Rmvd', 'HD2Rmvd', 'HD3Rmvd', 'HD4Rmvd', 'ASST'];
+            assetFieldsToCheck.forEach(field => {
+                const val = entry[field];
+                if (val && !isValidAssetId(val)) invalidAssetsFound.push(val);
+            });
+
+            if (!isInvMode) {
+                const bodyType = getBodyType(entry.FIN);
+                const isQK = entry.FIN.toUpperCase().startsWith("QK");
+                let missingDetected = false;
+                if (!entry.Case1 || entry.Case1.trim() === "") { entry.Case1 = "Msng"; missingDetected = true; }
+                else entry.Case1 = formatCaseId(entry.Case1);
+                if (!entry.HHD1 || entry.HHD1.trim() === "") { entry.HHD1 = "Msng"; missingDetected = true; }
+                else entry.HHD1 = formatGGCId(entry.HHD1);
+                if (!entry.HHD2 || entry.HHD2.trim() === "") {
+                    if (isQK) { entry.HHD2 = "NtRqrd"; }
+                    else { entry.HHD2 = "Msng"; missingDetected = true; }
+                } else entry.HHD2 = formatGGCId(entry.HHD2);
+                if (!entry.Case2 || entry.Case2.trim() === "") {
+                    if (bodyType === "NB") { entry.Case2 = "NtRqrd"; }
+                    else { entry.Case2 = "Msng"; missingDetected = true; }
+                } else entry.Case2 = formatCaseId(entry.Case2);
+                if (!entry.HHD3 || entry.HHD3.trim() === "") {
+                    if (bodyType === "NB") { entry.HHD3 = "NtRqrd"; }
+                    else { entry.HHD3 = "Msng"; missingDetected = true; }
+                } else entry.HHD3 = formatGGCId(entry.HHD3);
+                if (!entry.HHD4 || entry.HHD4.trim() === "") {
+                    if (bodyType === "NB") { entry.HHD4 = "NtRqrd"; }
+                    else { entry.HHD4 = "Msng"; missingDetected = true; }
+                } else entry.HHD4 = formatGGCId(entry.HHD4);
+                if (missingDetected && (!entry.SrvcIssCAT || entry.SrvcIssCAT === "")) {
+                    entry.SrvcIssCAT = "Missing"; entry.SrvcIss = "HHD From Aircraft";
+                }
+                ['HD1Rmvd', 'HD2Rmvd', 'HD3Rmvd', 'HD4Rmvd'].forEach(f => entry[f] = formatGGCId(entry[f], true));
+            } else {
+                entry.FIN = "INV"; entry['Flight#'] = ""; entry.Serviced = "Yes"; 
+                entry.Case1 = "N/A"; entry.Case2 = "N/A"; entry.Case3 = "N/A";
+                entry.HHD1 = "N/A"; entry.HHD2 = "N/A"; entry.HHD3 = "N/A";
+                entry.HHD4 = "N/A"; entry.HHD5 = "N/A"; entry.HHD6 = "N/A";
+            }
+
+            if (entry.ASST) entry.ASST = formatGGCId(entry.ASST);
+            if (!entry.SrvcIssCAT || entry.SrvcIssCAT.trim() === "") entry.SrvcIssCAT = "---";
+            if (!entry.SrvcIss || entry.SrvcIss.trim() === "") entry.SrvcIss = "---";
+            
+            entry.id = Date.now() + Math.floor(Math.random() * 1000);
+            entry.displayDate = now.toLocaleDateString();
+            entry.displayTime = timeStr;
+
+            const buildComments = (rec) => {
+                let parts = [];
+                if (isInvMode) parts.push("[INV]");
+                if (form.elements['ServiceCall']?.checked) parts.push("Service Call");
+                if (rec.ASST) {
+                    const rawId = rec.ASST.replace(/\D/g, '');
+                    const assetType = assetRef[rawId] || assetRef[rawId.padStart(4, '0')];
+                    if (assetType) parts.push(`Type: ${assetType}`);
+                }
+                if (rec.SrvcIssCAT !== "---") parts.push(`${rec.SrvcIssCAT}: ${rec.SrvcIss}`);
+                if (rec.IssueDetails) parts.push(`Iss: ${rec.IssueDetails}`);
+                if (rec.GeneralComments) parts.push(rec.GeneralComments);
+                if (invalidAssetsFound.length > 0) {
+                    invalidAssetsFound.forEach(val => {
+                        const digits = val.replace(/\D/g, '').padStart(4, '0');
+                        parts.push(`GGC${digits} Doesn't Exist`);
+                    });
+                }
+                return parts.join(" | ");
+            };
+
+            entry.Comments = buildComments(entry);
+            db.unshift(entry);
+            broadcastNewEntry(entry);
+            updateFinTable(entry);
+
+            if (!isInvMode) {
+                const removals = [{f: 'HD1Rmvd', p: 'HHD1'}, {f: 'HD2Rmvd', p: 'HHD2'}, {f: 'HD3Rmvd', p: 'HHD3'}, {f: 'HD4Rmvd', p: 'HHD4'}];
+                removals.forEach((r, idx) => {
+                    const removedId = entry[r.f];
+                    const boardedId = entry[r.p];
+                    if (removedId && removedId.trim() !== "" && !removedId.toLowerCase().includes("ntrqrd") && !removedId.toLowerCase().includes("n/a")) {
+                        db.unshift({
+                            id: Date.now() + Math.floor(Math.random() * 1000) + (idx + 1), FIN: "INV", 'Flight#': entry['Flight#'] || "", displayDate: entry.displayDate, displayTime: timeStr,
+                            Priority: "1", Serviced: "Yes", Case1: "N/A", Case2: "N/A", Case3: "N/A", HHD1: "N/A", HHD2: "N/A",
+                            HHD3: "N/A", HHD4: "N/A", HHD5: "N/A", HHD6: "N/A", Battery: "", Rolls: "", ASST: removedId,
+                            SrvcIssCAT: "RM ( INV REM Base )", SrvcIss: "For Use In Service",
+                            'Service Station': entry['Service Station'], Agent: entry.Agent, Rv: CURRENT_VERSION,
+                            Comments: `${removedId} Swp Wth ${boardedId} On Fin ${entry.FIN}${!isValidAssetId(removedId) ? ' | ' + removedId + ' Doesn\'t Exist' : ''}`
+                        });
+                    }
+                });
+            }
+
+            try {
+                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db));
+            } catch (e) {
+                showToast("Save failed: storage full!");
+                return;
+            }
+            updateUI();
+            showToast("Record Saved!");
+            form.reset();
+            document.querySelectorAll('.asset-input').forEach(el => el.classList.remove('invalid-asset'));
+            restoreAgent();
+            document.getElementById('ref-type').textContent = "";
+            document.getElementById('ref-body').textContent = "";
+            document.getElementById('fin-rotation').textContent = "";
+            document.getElementById('field-flight').placeholder = 'e.g. 0123';
+            // Release claim for the FIN that was just saved
+            const savedFin = document.getElementById('field-fin');
+            if (savedFin && savedFin.value) releaseFin(savedFin.value);
+            else if (updateFinPlaceholder._lastSuggested) releaseFin(updateFinPlaceholder._lastSuggested);
+            updateFinPlaceholder._lastSuggested = null;
+            updateFinPlaceholder();
+            hideTypoHint(); // clears all hint boxes
+            // Reset placeholders that may have been set by handleFinInput
+            document.getElementById('field-case2').placeholder = "000 or Msng";
+            document.getElementById('field-hhd2').placeholder  = "0000 or Msng";
+            document.getElementById('field-hhd3').placeholder  = "0000 or Msng";
+            document.getElementById('field-hhd4').placeholder  = "0000 or Msng";
+            document.getElementById('field-battery').placeholder = "0";
+            if (isInventoryOnlyMode) applyModeUI();
+            window.scrollTo({top: 0, behavior: 'smooth'});
+        }
+
+        function updateUI() {
+            const list = document.getElementById('records-list');
+            document.getElementById('count').innerText = db.length;
+            if (db.length === 0) { list.innerHTML = ''; document.getElementById('no-records').classList.remove('hidden'); return; }
+            document.getElementById('no-records').classList.add('hidden');
+
+            const skip = new Set(['N/A', 'NtRqrd', 'Msng', '', undefined, null]);
+            const fmtA = (...vals) => vals.filter(v => !skip.has(v)).join(', ') || '---';
+            const fmtR = (...vals) => vals.filter(v => !skip.has(v)).join(', ');
+
+            list.innerHTML = db.map(r => {
+                const cases  = fmtA(r.Case1, r.Case2);
+                const hhds1  = fmtA(r.HHD1, r.HHD2);
+                const hhds2  = fmtA(r.HHD3, r.HHD4);
+                const rmvd   = fmtR(r.HD1Rmvd, r.HD2Rmvd, r.HD3Rmvd, r.HD4Rmvd);
+                const suppl  = (r.Battery !== undefined && r.Battery !== '') || (r.Rolls !== undefined && r.Rolls !== '')
+                    ? 'B:' + (r.Battery || 0) + ' / R:' + (r.Rolls || 0) : '---';
+                const agent  = r.Agent ? r.Agent.split(',')[0].trim() : '';
+                const isInv  = r.FIN === 'INV';
+                const finCls = isInv ? 'text-amber-600' : 'text-blue-600';
+                const notSvc  = r.Serviced === 'No' ? '<span class="text-[9px] font-black text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full ml-1">NOT SVC</span>' : '';
+                const svcCall = (r.ServiceCall || (r.Comments && r.Comments.includes('Service Call'))) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
+
+                let equip = '';
+                if (!isInv) {
+                    equip += '<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600 font-medium mb-2">';
+                    equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Cases</span>' + cases + '</div>';
+                    equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Supplies</span>' + suppl + '</div>';
+                    if (hhds1 !== '---') equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Case 1 HHDs</span>' + hhds1 + '</div>';
+                    if (hhds2 !== '---') equip += '<div><span class="text-slate-400 block text-[9px] font-black uppercase">Case 2 HHDs</span>' + hhds2 + '</div>';
+                    if (rmvd) equip += '<div class="col-span-2"><span class="text-red-400 block text-[9px] font-black uppercase">Removed</span><span class="text-red-500">' + rmvd + '</span></div>';
+                    if (r.ASST) equip += '<div class="col-span-2"><span class="text-slate-400 block text-[9px] font-black uppercase">Reported Asset</span>' + r.ASST + '</div>';
+                    equip += '</div>';
+                }
+
+                const issueHtml = (r.SrvcIssCAT && r.SrvcIssCAT !== '---')
+                    ? '<div class="text-[10px] text-slate-500 font-bold mb-1">' + r.SrvcIssCAT + ': ' + (r.SrvcIss || '') + '</div>' : '';
+                const commentHtml = r.Comments
+                    ? '<div class="mt-2 p-2 bg-slate-50 rounded text-[11px] italic text-slate-500 border-l-2 border-slate-200">' + r.Comments + '</div>' : '';
+
+                return '<div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative group text-sm">'
+                    + '<div class="flex justify-between items-start">'
+                    + '<div class="flex-1">'
+                    + '<div class="flex items-center gap-1 mb-1 font-black text-xl flex-wrap">'
+                    + '<span class="' + finCls + '">' + r.FIN + '</span>'
+                    + '<span class="text-slate-200 mx-1">/</span>'
+                    + '<span class="text-slate-800">' + (r['Flight#'] || '---') + '</span>'
+                    + notSvc + svcCall
+                    + '</div>'
+                    + '<div class="text-[10px] text-slate-400 font-bold uppercase mb-3">' + r.displayDate + ' • ' + r.displayTime + ' • ' + r['Service Station'] + ' • ' + agent + '</div>'
+                    + equip + issueHtml + commentHtml
+                    + '</div>'
+                    + '<button onclick="deleteRecord(' + r.id + ')" class="text-slate-200 hover:text-red-500 transition-all p-2 shrink-0">'
+                    + '<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>'
+                    + '</button>'
+                    + '</div></div>';
+            }).join('');
+        }
+
+        function deleteRecord(id) { db = db.filter(r => r.id !== id); try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); } updateUI(); }
+        function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.classList.add('opacity-100', '-translate-y-2'); setTimeout(() => t.classList.remove('opacity-100', '-translate-y-2'), 2000); }
+
+        function exportToCSV() {
+            if (db.length === 0) return showToast("No records");
+            const headers = ["FIN", "Flight#", "Arrival Time", "Priority", "Serviced", "Case1", "HHD1", "HHD2", "Case2", "HHD3", "HHD4", "Case3", "HHD5", "HHD6", "Battery", "Rolls", "SrvcIssCAT", "SrvcIss", "Comments", "Service Date", "Service Station", "Agent", "Rv", "ASST", "HD1Rmvd", "HD2Rmvd", "HD3Rmvd", "HD4Rmvd", "HD5Rmvd", "HD6Rmvd"];
+            const escapeCSV = (v) => v === undefined || v === null ? '""' : `"${String(v).replace(/"/g, '""')}"`;
+            const csvRows = [headers.join(",")];
+            db.forEach(r => {
+                csvRows.push(headers.map(h => {
+                    let v = r[h] !== undefined ? r[h] : "";
+                    if (h === "Arrival Time") v = r.displayTime;
+                    if (h === "Service Date") v = r.displayDate;
+                    if (h === "Rv") v = CURRENT_VERSION; 
+                    return escapeCSV(v);
+                }).join(","));
+            });
+            const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const agentVal = document.getElementById('agent-field').value;
+            const station = document.getElementById('station-field').value || "NA";
+            const dateStr = new Date().toISOString().split('T')[0];
+            const agentName = agentVal ? agentVal.split(',')[0].trim().replace(/\s+/g, '_') : "Agent";
+            a.href = url; a.download = `${agentName}_${station}_${dateStr}.csv`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+            showToast("CSV Exported!");
+        }
+
+        function emailCSV() {
+            if (db.length === 0) return showToast("No records to email");
+            const agentVal = document.getElementById('agent-field').value;
+            const station = document.getElementById('station-field').value || "NA";
+            const dateStr = new Date().toISOString().split('T')[0];
+            const agentName = agentVal ? agentVal.split(',')[0].trim().replace(/\s+/g, '_') : "Agent";
+            const filename = `${agentName}_${station}_${dateStr}.csv`;
+
+            // First download the CSV
+            exportToCSV();
+
+            // Then open mailto with instructions to attach
+            const subject = encodeURIComponent(`Service Report - ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"} - ${station} - ${dateStr}`);
+
+            // Collect issue details from all records that have them, split by Found vs other
+            const issueRecords = db.filter(r => r.IssueDetails && r.IssueDetails.trim() !== "");
+            const foundRecords = issueRecords.filter(r => r.SrvcIssCAT && r.SrvcIssCAT.toLowerCase().includes("found"));
+            const otherRecords = issueRecords.filter(r => !r.SrvcIssCAT || !r.SrvcIssCAT.toLowerCase().includes("found"));
+
+            const formatLine = r => `  • ${r.FIN}${r['Flight#'] ? ' / ' + r['Flight#'] : ''}${r.ASST ? ' [' + r.ASST + ']' : ''}: ${r.IssueDetails.trim()}`;
+
+            const issueLines = otherRecords.map(formatLine);
+            const foundLines = foundRecords.map(formatLine);
+
+            // Collect service call records (detected via Comments containing "Service Call")
+            const serviceCallLines = db
+                .filter(r => r.Comments && r.Comments.includes("Service Call") && r.FIN !== 'INV')
+                .map(r => {
+                    const parts = [`  • ${r.FIN}${r['Flight#'] ? ' / ' + r['Flight#'] : ''}`];
+                    if (r.SrvcIssCAT && r.SrvcIssCAT !== '---') parts.push(`${r.SrvcIssCAT}: ${r.SrvcIss}`);
+                    if (r.IssueDetails && r.IssueDetails.trim() !== '') parts.push(`Iss: ${r.IssueDetails.trim()}`);
+                    return parts.join(' | ');
+                });
+
+            const servicedCount = db.filter(r => r.FIN !== 'INV').length;
+
+            const body = encodeURIComponent(
+                `Please find the service report attached.\n\n` +
+                `Agent: ${agentVal ? agentVal.split(',')[0].trim() : "Unknown"}\n` +
+                `Station: ${station}\n` +
+                `Date: ${dateStr}\n` +
+                `Records: ${db.length}\n` +
+                `Serviced: ${servicedCount}\n` +
+                (serviceCallLines.length > 0
+                    ? `\nService Calls:\n${serviceCallLines.join('\n')}\n`
+                    : '') +
+                (issueLines.length > 0
+                    ? `\nIssue Details:\n${issueLines.join('\n')}\n`
+                    : '') +
+                (foundLines.length > 0
+                    ? `\nFound Items:\n${foundLines.join('\n')}\n`
+                    : '') +
+                `\n⚠️ Please attach the downloaded file: ${filename}`
+            );
+            setTimeout(() => { window.location.href = `mailto:hhdhq@gategourmet.com?subject=${subject}&body=${body}`; }, 500);
+        }
+        // ─── P2P SYNC ENGINE ─────────────────────────────────────────────────
+
+        // All known agents — IDs are derived deterministically from their name
+        const ALL_AGENTS = [
+            "Michael Marques", "Amar Atta", "Amritheera Malhi", "Muqeet Alam",
+            "Stan Beatty", "Gurjinder Mann", "Abdullah Atta",
+            "Jeff Eng", "Kevin Joly",
+            "Kevin Brown", "Billy Yan",
+            "Ben Burgio", "Jean Cham", "Joann Cortese", "Janine Margaret Ostaco"
+        ];
+
+        let p2pPeer = null;
+        let p2pConnections = {};      // peerId → DataConnection
+        let p2pMyId = null;
+        let p2pOfflineQueue = [];     // { entry } objects to broadcast when reconnected
+        let p2pReady = false;
+        let p2pSyncInterval = null;
+        let lastSyncTs = {};          // peerId → timestamp of last successful sync with that peer
+        let finClaims  = {};          // fin → { agent, ts } — in-memory only, not persisted
+
+        const P2P_QUEUE_KEY = 'p2p_offline_queue_v1';
+
+        // Build a delta of only records changed since a given timestamp
+        function buildDelta(sinceTs) {
+            const fin   = {};
+            const asset = {};
+            const nro   = {};
+
+            Object.entries(finTable).forEach(([k, v]) => {
+                if ((v._ts || 0) > sinceTs) fin[k] = v;
+            });
+            Object.entries(assetIndex).forEach(([k, v]) => {
+                if ((v.ts || 0) > sinceTs) asset[k] = v;
+            });
+            Object.entries(nroIndex).forEach(([k, v]) => {
+                if ((v.ts || 0) > sinceTs) nro[k] = v;
+            });
+
+            // Schedule: include only if imported after sinceTs
+            const firstLocal = Object.keys(scheduleData).length > 0 ? Object.values(scheduleData)[0] : null;
+            const schedTs = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
+            const sched = schedTs > sinceTs ? scheduleData : {};
+
+            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched };
+        }
+
+        // Derive a short stable peer ID from an agent name
+        // e.g. "Michael Marques" → "ggcsync-michael-marques"
+        function agentToPeerId(agentValue) {
+            // agentValue is the full option value e.g. "Michael Marques ,YYZ 905 405 4198"
+            const name = agentValue.split(',')[0].trim().toLowerCase().replace(/\s+/g, '-');
+            return `ggcsync-${name}`;
+        }
+
+        function initP2P(agentValue) {
+            if (!agentValue) return;
+            const peerId = agentToPeerId(agentValue);
+
+            // Already running with this ID — no need to reinit
+            if (p2pPeer && p2pMyId === peerId && !p2pPeer.destroyed) return;
+
+            // Destroy any existing peer before reinitialising
+            if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
+            if (p2pSyncInterval) { clearInterval(p2pSyncInterval); p2pSyncInterval = null; }
+            p2pPeer = null;
+            p2pConnections = {};
+            p2pReady = false;
+            p2pMyId = peerId;
+
+            setSyncStatus('connecting');
+
+            try {
+                const savedQueue = localStorage.getItem(P2P_QUEUE_KEY);
+                if (savedQueue) p2pOfflineQueue = JSON.parse(savedQueue);
+            } catch(e) {}
+
+            p2pPeer = new Peer(peerId, {
+                debug: 0,
+                host: '0.peerjs.com',
+                port: 443,
+                path: '/',
+                secure: true,
+                pingInterval: 5000,
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        {
+                            urls: 'turn:free.expressturn.com:3478',
+                            username: '000000002089362952',
+                            credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0='
+                        },
+                        {
+                            urls: 'turn:free.expressturn.com:3478?transport=tcp',
+                            username: '000000002089362952',
+                            credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0='
+                        }
+                    ]
+                }
+            });
+
+            p2pPeer.on('open', (id) => {
+                p2pReady = true;
+                setSyncStatus('online', 0);
+                // Attempt connections to all other known agents
+                connectToAllPeers(agentValue);
+                // Start 5-minute background sync pulse
+                startPeriodicSync(agentValue);
+            });
+
+            // Accept incoming connections from other agents
+            p2pPeer.on('connection', (conn) => {
+                setupP2PConnection(conn);
+            });
+
+            p2pPeer.on('disconnected', () => {
+                p2pReady = false;
+                setSyncStatus('offline');
+                // Auto-reconnect to signaling server
+                setTimeout(() => {
+                    if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect();
+                }, 4000);
+            });
+
+            p2pPeer.on('error', (err) => {
+                console.warn('P2P error:', err.type, err.message);
+                if (err.type === 'unavailable-id') {
+                    // ID taken (e.g. same agent on another device) — register with a suffix and still connect outward
+                    setSyncStatus('connecting');
+                    const fallbackId = peerId + '-' + Math.random().toString(36).slice(2, 6);
+                    if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
+                    p2pPeer = new Peer(fallbackId, { debug: 0, host: '0.peerjs.com', port: 443, path: '/', secure: true, pingInterval: 5000, config: { iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:free.expressturn.com:3478', username: '000000002089362952', credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0=' }, { urls: 'turn:free.expressturn.com:3478?transport=tcp', username: '000000002089362952', credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0=' } ] } });
+                    p2pMyId = fallbackId;
+                    p2pPeer.on('open', () => {
+                        p2pReady = true;
+                        setSyncStatus('online', 0);
+                        connectToAllPeers(agentValue);
+                        startPeriodicSync(agentValue);
+                    });
+                    p2pPeer.on('connection', (conn) => { setupP2PConnection(conn); });
+                    p2pPeer.on('disconnected', () => {
+                        p2pReady = false;
+                        setSyncStatus('offline');
+                        setTimeout(() => { if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect(); }, 4000);
+                    });
+                } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+                    setSyncStatus('offline');
+                    setTimeout(() => {
+                        if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect();
+                    }, 5000);
+                }
+            });
+        }
+
+        function connectToAllPeers(myAgentValue) {
+            const myPeerId = agentToPeerId(myAgentValue);
+            ALL_AGENTS.forEach(name => {
+                const theirId = `ggcsync-${name.toLowerCase().replace(/\s+/g, '-')}`;
+                if (theirId === myPeerId) return;              // skip self
+                if (p2pConnections[theirId]) return;           // already connected
+                attemptConnect(theirId);
+            });
+        }
+
+        function attemptConnect(theirId, retries = 0) {
+            if (!p2pPeer || !p2pReady || p2pConnections[theirId]) return;
+            const conn = p2pPeer.connect(theirId, { reliable: true });
+            setupP2PConnection(conn);
+        }
+
+        function setupP2PConnection(conn) {
+            // Register data/close/error handlers immediately regardless of open state
+            conn.on('data', (msg) => handleP2PMessage(msg, conn.peer));
+
+            conn.on('close', () => {
+                delete p2pConnections[conn.peer];
+                updateSyncCount();
+                setTimeout(() => attemptConnect(conn.peer), 20000);
+            });
+
+            conn.on('error', () => {
+                delete p2pConnections[conn.peer];
+                updateSyncCount();
+            });
+
+            const doSync = () => {
+                p2pConnections[conn.peer] = conn;
+                updateSyncCount();
+                const sinceTs = lastSyncTs[conn.peer] || 0;
+                const delta = buildDelta(sinceTs);
+                const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
+                conn.send({ type: msgType, sinceTs, ...delta });
+                flushP2PQueue();
+            };
+
+            // If already open (incoming connection), sync immediately
+            // Otherwise wait for the open event (outgoing connection)
+            if (conn.open) {
+                doSync();
+            } else {
+                conn.on('open', doSync);
+            }
+        }
+
+        function applyIncomingSyncMsg(msg, fromPeer) {
+            let anyChanged = false;
+
+            // Merge finTable
+            if (msg.finTable && typeof msg.finTable === 'object') {
+                let changed = false;
+                Object.entries(msg.finTable).forEach(([fin, incoming]) => {
+                    if (!finTable[fin]) {
+                        finTable[fin] = { ...incoming };
+                        changed = true;
+                    } else if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
+                        finTable[fin].lastSeen      = incoming.lastSeen;
+                        finTable[fin].lastFlight    = incoming.lastFlight;
+                        finTable[fin].lastOnboard   = incoming.lastOnboard;
+                        finTable[fin].lastRemoved   = incoming.lastRemoved;
+                        finTable[fin].type          = incoming.type || finTable[fin].type;
+                        finTable[fin].body          = incoming.body || finTable[fin].body;
+                        finTable[fin]._ts           = incoming._ts;
+                        changed = true;
+                    }
+                });
+                if (changed) { saveFinTable(); anyChanged = true; }
+            }
+
+            // Merge assetIndex
+            if (msg.assetIndex && typeof msg.assetIndex === 'object') {
+                let changed = false;
+                Object.entries(msg.assetIndex).forEach(([assetId, incoming]) => {
+                    const existing = assetIndex[assetId];
+                    if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
+                        assetIndex[assetId] = incoming;
+                        changed = true;
+                    }
+                });
+                if (changed) { saveAssetIndex(); anyChanged = true; }
+            }
+
+            // Merge nroIndex
+            if (msg.nroIndex && typeof msg.nroIndex === 'object') {
+                let changed = false;
+                Object.entries(msg.nroIndex).forEach(([assetId, incoming]) => {
+                    const inAsset = assetIndex[assetId];
+                    if (inAsset && (inAsset.ts || 0) >= (incoming.ts || 0)) return;
+                    const existing = nroIndex[assetId];
+                    if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
+                        nroIndex[assetId] = incoming;
+                        changed = true;
+                    }
+                });
+                Object.keys(nroIndex).forEach(assetId => {
+                    const inAsset = assetIndex[assetId];
+                    if (inAsset && (inAsset.ts || 0) >= (nroIndex[assetId].ts || 0)) {
+                        delete nroIndex[assetId]; changed = true;
+                    }
+                });
+                if (changed) { saveNroIndex(); anyChanged = true; }
+            }
+
+            // Merge scheduleData — full replace only if newer
+            if (msg.scheduleData && typeof msg.scheduleData === 'object' && Object.keys(msg.scheduleData).length > 0) {
+                const firstIncoming = Object.values(msg.scheduleData)[0];
+                const incomingTs = Array.isArray(firstIncoming) ? (firstIncoming[0]?._ts || 0) : (firstIncoming?._ts || 0);
+                const firstLocal  = Object.keys(scheduleData).length > 0 ? Object.values(scheduleData)[0] : null;
+                const localTs     = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
+                if (incomingTs > localTs) {
+                    scheduleData = msg.scheduleData;
+                    saveScheduleData();
+                    anyChanged = true;
+                    showToast('↓ Schedule updated from peer');
+                }
+            }
+
+            return anyChanged;
+        }
+
+        function handleP2PMessage(msg, fromPeer) {
+            if (msg.type === 'FULL_SYNC' || msg.type === 'DELTA_SYNC') {
+                const changed = applyIncomingSyncMsg(msg, fromPeer);
+
+                // Record when we last synced with this peer
+                const nowTs = Date.now();
+                lastSyncTs[fromPeer] = nowTs;
+
+                if (changed) setSyncStatus('synced', Object.keys(p2pConnections).length);
+
+                // Reply with our own delta of anything newer than what they told us they had
+                const replyConn = p2pConnections[fromPeer];
+                if (replyConn && replyConn.open) {
+                    const theirSinceTs = msg.sinceTs || 0;
+                    const replyDelta = buildDelta(theirSinceTs);
+                    const hasData = Object.keys(replyDelta.finTable).length > 0 ||
+                                    Object.keys(replyDelta.assetIndex).length > 0 ||
+                                    Object.keys(replyDelta.nroIndex).length > 0 ||
+                                    Object.keys(replyDelta.scheduleData).length > 0;
+                    if (hasData || theirSinceTs === 0) {
+                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, ...replyDelta });
+                    }
+                }
+                return;
+            }
+
+            if (msg.type === 'NEW_ENTRY') {
+                const inEntry = msg.entry;
+                // Only update backend tables — do NOT add to db or history tab
+                updateFinTable(inEntry);
+                setSyncStatus('synced', Object.keys(p2pConnections).length);
+            }
+
+            if (msg.type === 'CLAIM_FIN') {
+                if (msg.fin && msg.agent && msg.ts) {
+                    // Only store if newer than existing claim
+                    const existing = finClaims[msg.fin];
+                    if (!existing || msg.ts > existing.ts) {
+                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts };
+                        // If this FIN is our current suggestion, re-suggest
+                        if (updateFinPlaceholder._lastSuggested === msg.fin) {
+                            updateFinPlaceholder._lastSuggested = null;
+                            updateFinPlaceholder();
+                        }
+                    }
+                }
+            }
+
+            if (msg.type === 'RELEASE_FIN') {
+                if (msg.fin && finClaims[msg.fin]) {
+                    delete finClaims[msg.fin];
+                    // Re-run suggestion in case this FIN was blocking ours
+                    if (!document.getElementById('field-fin')?.value) {
+                        updateFinPlaceholder();
+                    }
+                }
+            }
+        }
+
+        // Called from handleSave — broadcast newly saved entry to all peers
+        function broadcastNewEntry(entry) {
+            const msg = { type: 'NEW_ENTRY', entry };
+            const peers = Object.keys(p2pConnections);
+            if (peers.length > 0) {
+                peers.forEach(pid => conn_p2p_send(pid, msg));
+                setSyncStatus('synced', peers.length);
+            } else {
+                // Queue for when a peer connects
+                p2pOfflineQueue.push(msg);
+                try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
+            }
+        }
+
+        function flushP2PQueue() {
+            if (p2pOfflineQueue.length === 0) return;
+            const peers = Object.keys(p2pConnections);
+            if (peers.length === 0) return;
+            p2pOfflineQueue.forEach(msg => peers.forEach(pid => conn_p2p_send(pid, msg)));
+            p2pOfflineQueue = [];
+            try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify([])); } catch(e) {}
+        }
+
+        function startPeriodicSync(agentValue) {
+            const P2P_SYNC_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
+            if (p2pSyncInterval) clearInterval(p2pSyncInterval);
+            p2pSyncInterval = setInterval(() => {
+                // Re-attempt any peers not currently connected
+                connectToAllPeers(agentValue);
+                // Send a full sync to all currently connected peers
+                const peers = Object.keys(p2pConnections);
+                if (peers.length > 0) {
+                    peers.forEach(pid => {
+                        const sinceTs = lastSyncTs[pid] || 0;
+                        const delta = buildDelta(sinceTs);
+                        const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
+                        conn_p2p_send(pid, { type: msgType, sinceTs, ...delta });
+                    });
+                }
+            }, P2P_SYNC_INTERVAL_MS);
+        }
+
+        function conn_p2p_send(peerId, msg) {
+            const conn = p2pConnections[peerId];
+            if (conn && conn.open) {
+                conn.send(msg);
+            }
+        }
+
+        // ─── Sync status indicator ────────────────────────────────────────────
+        function setSyncStatus(state, peerCount = 0) {
+            const dot   = document.getElementById('sync-dot');
+            const label = document.getElementById('sync-label');
+            const peersEl = document.getElementById('sync-peers');
+            if (!dot || !label) return;
+            dot.className = 'w-2 h-2 rounded-full inline-block';
+            if (state === 'online' || state === 'synced') {
+                dot.classList.add('sync-dot-online');
+                label.textContent = peerCount > 0 ? peerCount + ' peer' + (peerCount > 1 ? 's' : '') : 'Ready';
+                label.style.color = '#34d399';
+            } else if (state === 'connecting') {
+                dot.classList.add('sync-dot-syncing');
+                label.textContent = 'Connecting';
+                label.style.color = '#93c5fd';
+                if (peersEl) peersEl.textContent = '';
+            } else {
+                dot.classList.add('sync-dot-offline');
+                label.textContent = 'P2P';
+                label.style.color = '#475569';
+                if (peersEl) peersEl.textContent = '';
+            }
+            // Update peer names line
+            if (peersEl && (state === 'online' || state === 'synced')) {
+                const names = Object.keys(p2pConnections).map(peerId => {
+                    // peerId format: ggcsync-first-last — extract first name, capitalise
+                    const parts = peerId.replace('ggcsync-', '').split('-');
+                    return parts[0] ? parts[0].charAt(0).toUpperCase() + parts[0].slice(1) : peerId;
+                });
+                peersEl.textContent = names.join(' ');
+                peersEl.style.color = '#6b7280';
+            }
+        }
+
+        function updateSyncCount() {
+            const count = Object.keys(p2pConnections).length;
+            setSyncStatus(count > 0 ? 'online' : 'online', count);
+        }
+
+    </script>
+
+    <script>
+        // ─── PWA: Service Worker Registration ───────────────────────────────
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => {
+                        console.log('[PWA] SW registered:', reg.scope);
+                        reg.update();
+                    })
+                    .catch(err => console.warn('[PWA] SW registration failed:', err));
+            });
+        }
+
+        // ─── PWA: Install Prompt ─────────────────────────────────────────────
+        let deferredInstallPrompt = null;
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredInstallPrompt = e;
+            showInstallBanner();
+        });
+
+        function showInstallBanner() {
+            if (window.matchMedia('(display-mode: standalone)').matches) return;
+            if (document.getElementById('pwa-install-banner')) return;
+            const banner = document.createElement('div');
+            banner.id = 'pwa-install-banner';
+            banner.style.cssText = [
+                'position:fixed','bottom:80px','left:50%','transform:translateX(-50%)',
+                'background:#1e293b','border:1px solid #334155','color:white',
+                'padding:12px 20px','border-radius:16px','z-index:9999',
+                'display:flex','align-items:center','gap:12px',
+                'box-shadow:0 8px 32px rgba(0,0,0,0.4)',
+                'max-width:340px','width:calc(100% - 32px)',
+                'font-family:sans-serif','font-size:13px'
+            ].join(';');
+            banner.innerHTML = `
+                <div style="width:36px;height:36px;background:#3b82f6;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;flex-shrink:0;">A</div>
+                <div style="flex:1;">
+                    <div style="font-weight:700;margin-bottom:2px;">Install Service Report</div>
+                    <div style="color:#94a3b8;font-size:11px;">Works offline · Fast load · No browser bar</div>
+                </div>
+                <button onclick="installPWA()" style="background:#3b82f6;color:white;border:none;padding:8px 14px;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer;flex-shrink:0;">Install</button>
+                <button onclick="dismissInstallBanner()" style="background:transparent;color:#475569;border:none;padding:4px;cursor:pointer;font-size:18px;line-height:1;flex-shrink:0;">×</button>
+            `;
+            document.body.appendChild(banner);
+        }
+
+        function installPWA() {
+            if (!deferredInstallPrompt) return;
+            deferredInstallPrompt.prompt();
+            deferredInstallPrompt.userChoice.then((choice) => {
+                if (choice.outcome === 'accepted') showToast('App installed!');
+                deferredInstallPrompt = null;
+                dismissInstallBanner();
+            });
+        }
+
+        function dismissInstallBanner() {
+            const b = document.getElementById('pwa-install-banner');
+            if (b) b.remove();
+        }
+
+        window.addEventListener('appinstalled', () => {
+            showToast('Service Report installed!');
+            dismissInstallBanner();
+        });
+    </script>
+
+</body>
+</html>
