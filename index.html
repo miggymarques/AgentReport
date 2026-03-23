@@ -2632,7 +2632,7 @@
                 msg.agentRef.forEach(incoming => {
                     const tombstoneTs = agentBlock[incoming.value] || 0;
                     // Reject if tombstone is newer than this agent record
-                    if (tombstoneTs >= (incoming._ts || 0)) return;
+                    if (tombstoneTs > (incoming._ts || 0)) return; // tombstone must be strictly newer
                     const existing = agentRef.find(a => a.value === incoming.value);
                     if (!existing) { agentRef.push(incoming); agentChanged = true; }
                     else if ((incoming._ts || 0) > (existing._ts || 0)) { Object.assign(existing, incoming); agentChanged = true; }
@@ -2641,7 +2641,7 @@
                 const before = agentRef.length;
                 agentRef = agentRef.filter(a => {
                     const tombTs = agentBlock[a.value] || 0;
-                    return tombTs < (a._ts || 0);
+                    return tombTs <= (a._ts || 0); // keep if tombstone is same age or older
                 });
                 if (agentRef.length !== before) agentChanged = true;
                 if (agentChanged) {
@@ -2701,7 +2701,7 @@
                     let agentChanged = false;
                     msg.agentRef.forEach(incoming => {
                         const tombstoneTs = agentBlock[incoming.value] || 0;
-                        if (tombstoneTs >= (incoming._ts || 0)) return; // tombstone wins
+                        if (tombstoneTs > (incoming._ts || 0)) return; // tombstone must be strictly newer // tombstone wins
                         const existing = agentRef.find(a => a.value === incoming.value);
                         if (!existing) { agentRef.push(incoming); agentChanged = true; }
                         else if ((incoming._ts || 0) > (existing._ts || 0)) { Object.assign(existing, incoming); agentChanged = true; }
@@ -2709,7 +2709,7 @@
                     const before = agentRef.length;
                     agentRef = agentRef.filter(a => {
                         const tombTs = agentBlock[a.value] || 0;
-                        return tombTs < (a._ts || 0);
+                        return tombTs <= (a._ts || 0); // keep if tombstone is same age or older
                     });
                     if (agentRef.length !== before) agentChanged = true;
                     if (agentChanged) {
