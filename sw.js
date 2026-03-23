@@ -1,7 +1,7 @@
 // Service Worker for Agent Service Report PWA
-// v2.8.3 — matches app version
+// v2.8.4 — matches app version
 
-const CACHE_NAME = 'service-report-v2.8.3';
+const CACHE_NAME = 'service-report-v2.8.4';
 const RUNTIME_CACHE = 'service-report-runtime-v1';
 
 // App shell — listed here so it gets cleaned from old caches on update

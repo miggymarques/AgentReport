@@ -426,7 +426,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.3";
+        const CURRENT_VERSION = "v2.8.4";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1224,7 +1224,9 @@
 
             // Format: route line + separate times line
             let routeParts = [];
-            if (iflt && iflt !== 'AC0000') routeParts.push(iflt);
+            const ifltNum = (iflt || '').replace(/\D/g, '');
+            if (!iflt || ifltNum === '0000' || iflt === 'AC0000') routeParts.push('ORG');
+            else routeParts.push(iflt);
             if (inGt) routeParts.push('IGT:' + inGt);
             routeParts.push(iStn + ' → ' + rotStn + ' → ' + oStn);
             if (oGt)  routeParts.push('OGT:' + oGt);
