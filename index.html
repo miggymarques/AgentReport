@@ -274,29 +274,6 @@
                             <label>Agent Name</label>
                             <select name="Agent" id="agent-field" onchange="onAgentChange()" required>
                                 <option value="">-- Select Agent --</option>
-                                <optgroup label="YYZ - Toronto">
-                                    <option value="Michael Marques ,YYZ 905 405 4198" data-station="YYZ">Michael Marques</option>
-                                    <option value="Amar Atta ,YYZ 647 288 4509" data-station="YYZ">Amar Atta</option>
-                                    <option value="Amritheera Malhi ,YYZ 647 288 4509" data-station="YYZ">Amritheera Malhi</option>
-                                    <option value="Muqeet Alam ,YYZ 647 288 4509" data-station="YYZ">Muqeet Alam</option>
-                                    <option value="Stan Beatty ,YYZ 647 825 1214" data-station="YYZ">Stan Beatty</option>
-                                    <option value="Gurjinder Mann ,YYZ 647 288 4509" data-station="YYZ">Gurjinder Mann</option>
-                                    <option value="Abdullah Atta ,YYZ 647 288 4509" data-station="YYZ">Abdullah Atta</option>
-                                </optgroup>
-                                <optgroup label="YYC - Calgary">
-                                    <option value="Jeff Eng ,YYC 403 312 8555" data-station="YYC">Jeff Eng</option>
-                                    <option value="Kevin Joly ,YYC 403 312 8555" data-station="YYC">Kevin Joly</option>
-                                </optgroup>
-                                <optgroup label="YVR - Vancouver">
-                                    <option value="Kevin Brown ,YVR 604 830 0395" data-station="YVR">Kevin Brown</option>
-                                    <option value="Billy Yan ,YVR 604 830 0395" data-station="YVR">Billy Yan</option>
-                                </optgroup>
-                                <optgroup label="YUL - Montreal">
-                                    <option value="Ben Burgio ,YUL 514 977 5312" data-station="YUL">Ben Burgio</option>
-                                    <option value="Jean Cham ,YUL 514 977 5312" data-station="YUL">Jean Cham</option>
-                                    <option value="Joann Cortese ,YUL 514 977 5312" data-station="YUL">Joann Cortese</option>
-                                    <option value="Janine Ostaco ,YUL 514 977 5312" data-station="YUL">Janine Margaret Ostaco</option>
-                                </optgroup>
                             </select>
                         </div>
                         <div class="form-group col-span-1">
@@ -449,7 +426,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.0";
+        const CURRENT_VERSION = "v2.8.1";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -619,7 +596,8 @@
         // byte-identical to the original hardcoded options.
         function rebuildAgentDropdown() {
             const select = document.getElementById('agent-field');
-            if (!select || agentRef.length === 0) return; // keep hardcoded fallback if empty
+            if (!select) return;
+            // Always rebuild from agentRef — no hardcoded fallback
 
             const currentVal = select.value;
             select.innerHTML = '<option value="">-- Select Agent --</option>';
