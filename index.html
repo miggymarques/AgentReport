@@ -543,7 +543,10 @@
         // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
         let scheduleData = {};
 
-        let agentBlock = new Set(); // value strings of defaults the user has deliberately removed
+        // agentBlock: { value → deletedAt (timestamp) }
+        // Tombstone map — an agent in here was explicitly deleted and must never be re-added
+        // unless the re-add timestamp is newer than the deletion timestamp.
+        let agentBlock = {};
 
         // agentRef: [ { value, station, displayName, _ts }, ... ]
         // value = exact option value string e.g. "Michael Marques ,YYZ 905 405 4198"
@@ -592,7 +595,7 @@
             if (alreadyInitialised) return; // never re-seed after first load
 
             DEFAULT_AGENTS.forEach(def => {
-                if (!agentBlock.has(def.value)) {
+                if (!agentBlock[def.value]) {
                     agentRef.push({ ...def, _ts: 0 });
                 }
             });
@@ -605,7 +608,7 @@
         }
 
         function saveAgentBlock() {
-            try { localStorage.setItem(AGENT_BLOCK_KEY, JSON.stringify([...agentBlock])); } catch(e) { console.warn('Could not save agent block:', e); }
+            try { localStorage.setItem(AGENT_BLOCK_KEY, JSON.stringify(agentBlock)); } catch(e) { console.warn('Could not save agent block:', e); }
         }
 
         // Rebuild the agent dropdown from agentRef.
@@ -669,7 +672,7 @@
             // Broadcast immediately to peers
             const _syncTs = Date.now();
             Object.keys(p2pConnections).forEach(pid =>
-                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock: [...agentBlock], _ts: _syncTs })
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock, _ts: _syncTs })
             );
 
             document.getElementById('new-agent-name').value  = '';
@@ -681,18 +684,16 @@
         function removeAgent(idx) {
             const removed = agentRef.splice(idx, 1)[0];
             // If this is a default agent, add to blocklist so initAgentRef won't re-add it
-            const isDefault = DEFAULT_AGENTS.some(d => d.value === removed.value);
-            if (isDefault) {
-                agentBlock.add(removed.value);
-                saveAgentBlock();
-            }
+            // Tombstone this agent with the current timestamp
+            agentBlock[removed.value] = Date.now();
+            saveAgentBlock();
             saveAgentRef();
             rebuildAgentDropdown();
             syncAllAgentsFromRef();
 
             const _rmSyncTs = Date.now();
             Object.keys(p2pConnections).forEach(pid =>
-                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock: [...agentBlock], _ts: _rmSyncTs })
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock, _ts: _rmSyncTs })
             );
 
             renderRefList();
@@ -1666,7 +1667,7 @@
             } catch(e) { console.warn("Could not load agent ref:", e); }
             try {
                 const savedBlock = localStorage.getItem(AGENT_BLOCK_KEY);
-                if (savedBlock) agentBlock = new Set(JSON.parse(savedBlock));
+                if (savedBlock) agentBlock = JSON.parse(savedBlock);
             } catch(e) { console.warn("Could not load agent block:", e); }
 
             initAgentRef();
@@ -2398,7 +2399,7 @@
             const sched = schedTs > sinceTs ? scheduleData : {};
 
             const agents = agentRef.length > 0 ? agentRef : [];
-            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock: [...agentBlock] };
+            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock };
         }
 
         // Derive a short stable peer ID from an agent name
@@ -2633,21 +2634,30 @@
                 }
             }
 
-            // Merge agentRef — per-agent last-write-wins, never full replace
+            // Merge agentRef — per-agent last-write-wins with tombstone support
             if (msg.agentRef && Array.isArray(msg.agentRef)) {
-                if (msg.agentBlock && Array.isArray(msg.agentBlock)) {
-                    msg.agentBlock.forEach(v => agentBlock.add(v));
+                // Merge incoming tombstones first — keep the newest deletion timestamp
+                if (msg.agentBlock && typeof msg.agentBlock === 'object') {
+                    Object.entries(msg.agentBlock).forEach(([v, ts]) => {
+                        if (!agentBlock[v] || ts > agentBlock[v]) agentBlock[v] = ts;
+                    });
                     saveAgentBlock();
                 }
                 let agentChanged = false;
                 msg.agentRef.forEach(incoming => {
-                    if (agentBlock.has(incoming.value)) return;
+                    const tombstoneTs = agentBlock[incoming.value] || 0;
+                    // Reject if tombstone is newer than this agent record
+                    if (tombstoneTs >= (incoming._ts || 0)) return;
                     const existing = agentRef.find(a => a.value === incoming.value);
                     if (!existing) { agentRef.push(incoming); agentChanged = true; }
                     else if ((incoming._ts || 0) > (existing._ts || 0)) { Object.assign(existing, incoming); agentChanged = true; }
                 });
+                // Remove any agents whose tombstone is newer than their record
                 const before = agentRef.length;
-                agentRef = agentRef.filter(a => !agentBlock.has(a.value));
+                agentRef = agentRef.filter(a => {
+                    const tombTs = agentBlock[a.value] || 0;
+                    return tombTs < (a._ts || 0);
+                });
                 if (agentRef.length !== before) agentChanged = true;
                 if (agentChanged) {
                     agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
@@ -2696,19 +2706,26 @@
 
             if (msg.type === 'AGENT_REF_SYNC') {
                 if (msg.agentRef && Array.isArray(msg.agentRef)) {
-                    if (msg.agentBlock && Array.isArray(msg.agentBlock)) {
-                        msg.agentBlock.forEach(v => agentBlock.add(v));
+                    // Merge tombstones first
+                    if (msg.agentBlock && typeof msg.agentBlock === 'object') {
+                        Object.entries(msg.agentBlock).forEach(([v, ts]) => {
+                            if (!agentBlock[v] || ts > agentBlock[v]) agentBlock[v] = ts;
+                        });
                         saveAgentBlock();
                     }
                     let agentChanged = false;
                     msg.agentRef.forEach(incoming => {
-                        if (agentBlock.has(incoming.value)) return;
+                        const tombstoneTs = agentBlock[incoming.value] || 0;
+                        if (tombstoneTs >= (incoming._ts || 0)) return; // tombstone wins
                         const existing = agentRef.find(a => a.value === incoming.value);
                         if (!existing) { agentRef.push(incoming); agentChanged = true; }
                         else if ((incoming._ts || 0) > (existing._ts || 0)) { Object.assign(existing, incoming); agentChanged = true; }
                     });
                     const before = agentRef.length;
-                    agentRef = agentRef.filter(a => !agentBlock.has(a.value));
+                    agentRef = agentRef.filter(a => {
+                        const tombTs = agentBlock[a.value] || 0;
+                        return tombTs < (a._ts || 0);
+                    });
                     if (agentRef.length !== before) agentChanged = true;
                     if (agentChanged) {
                         agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
