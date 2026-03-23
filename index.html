@@ -585,21 +585,19 @@
 
         // ─── Agent Ref Management ──────────────────────────────────────────────
 
-        // Ensure all DEFAULT_AGENTS are present in agentRef, unless deliberately blocked.
-        // Called on every load — safe to run even if agentRef already has custom entries.
+        // Seed defaults ONLY on first ever load — when localStorage has no saved agentRef.
+        // After that, the Agents tab is the sole source of truth and removals are permanent.
         function initAgentRef() {
-            const existingValues = new Set(agentRef.map(a => a.value));
-            let changed = false;
+            const alreadyInitialised = localStorage.getItem(AGENT_REF_KEY) !== null;
+            if (alreadyInitialised) return; // never re-seed after first load
+
             DEFAULT_AGENTS.forEach(def => {
-                if (!existingValues.has(def.value) && !agentBlock.has(def.value)) {
-                    agentRef.push({ ...def, _ts: 0 }); // _ts:0 so custom additions always win
-                    changed = true;
+                if (!agentBlock.has(def.value)) {
+                    agentRef.push({ ...def, _ts: 0 });
                 }
             });
-            if (changed) {
-                agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
-                saveAgentRef();
-            }
+            agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
+            saveAgentRef();
         }
 
         function saveAgentRef() {
