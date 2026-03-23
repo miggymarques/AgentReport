@@ -346,22 +346,22 @@
         </section>
 
         <section id="section-alldata" class="hidden space-y-3">
-            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-wrap gap-2 items-center justify-between">
-                <span class="text-[9px] font-black uppercase tracking-widest text-slate-400">All Agents · All Records</span>
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-wrap gap-2 items-center justify-between sticky top-[112px] z-10">
+                <span class="text-[9px] font-black uppercase tracking-widest text-slate-400">All Agents · All Records · <span id="shared-count-label"></span></span>
                 <div class="flex gap-2">
-                    <button onclick="exportSharedCSV()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                    <button onclick="exportSharedCSV()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-black transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                         Export CSV
                     </button>
-                    <button onclick="clearSharedDb()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    <button onclick="clearSharedDb()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-black transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         Clear Data
                     </button>
                 </div>
             </div>
-            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
-                <div id="shared-table-wrap">
-                    <div id="no-shared-records" class="text-center py-16 text-slate-400">
+            <div class="rounded-2xl border border-slate-200 shadow-sm overflow-x-auto w-full">
+                <div id="shared-table-wrap" class="min-w-full">
+                    <div id="no-shared-records" class="text-center py-16 text-slate-400 bg-white rounded-2xl">
                         <p class="font-bold">No shared records yet</p>
                         <p class="text-xs mt-1">Records from all agents will appear here as they save</p>
                     </div>
@@ -451,7 +451,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.5";
+        const CURRENT_VERSION = "v2.8.6";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -2310,6 +2310,8 @@
         function updateSharedCount() {
             const el = document.getElementById('shared-count');
             if (el) el.textContent = sharedDb.length;
+            const lbl = document.getElementById('shared-count-label');
+            if (lbl) lbl.textContent = sharedDb.length + ' record' + (sharedDb.length !== 1 ? 's' : '');
         }
 
         // Add entry to sharedDb — deduplicate by id
@@ -2340,22 +2342,16 @@
 
         function renderSharedTable() {
             const wrap = document.getElementById('shared-table-wrap');
-            const noRec = document.getElementById('no-shared-records');
             if (!wrap) return;
 
             if (sharedDb.length === 0) {
-                wrap.innerHTML = '';
-                wrap.appendChild(noRec || (() => {
-                    const d = document.createElement('div');
-                    d.id = 'no-shared-records';
-                    d.className = 'text-center py-16 text-slate-400';
-                    d.innerHTML = '<p class="font-bold">No shared records yet</p><p class="text-xs mt-1">Records from all agents will appear here as they save</p>';
-                    return d;
-                })());
+                wrap.innerHTML = `<div class="text-center py-16 text-slate-400 bg-white rounded-2xl">
+                    <p class="font-bold">No shared records yet</p>
+                    <p class="text-xs mt-1">Records from all agents will appear here as they save</p>
+                </div>`;
                 return;
             }
 
-            // Display columns — subset for readability on mobile, matching CSV order
             const DISPLAY_COLS = ["Service Date", "Arrival Time", "Service Station", "Agent", "FIN", "Flight#", "Priority", "Serviced", "Case1", "HHD1", "HHD2", "Case2", "HHD3", "HHD4", "Battery", "Rolls", "ASST", "HD1Rmvd", "HD2Rmvd", "HD3Rmvd", "HD4Rmvd", "SrvcIssCAT", "SrvcIss", "Comments", "Rv"];
 
             const getVal = (r, h) => {
@@ -2365,26 +2361,26 @@
                 return r[h] !== undefined ? String(r[h]) : "";
             };
 
-            let html = `<table class="w-full text-[10px] border-collapse min-w-max">
-                <thead class="bg-slate-800 text-white sticky top-0 z-10">
+            let html = `<table class="w-full text-[10px] border-collapse" style="min-width:max-content">
+                <thead class="bg-slate-800 text-white">
                     <tr>${DISPLAY_COLS.map(h => `<th class="px-2 py-2 text-left font-black uppercase tracking-wider whitespace-nowrap border-r border-slate-700 last:border-0">${h}</th>`).join('')}</tr>
                 </thead>
                 <tbody>`;
 
             sharedDb.forEach((r, i) => {
                 const isInv = r.FIN === 'INV';
-                const rowBg = isInv ? 'bg-amber-50' : (i % 2 === 0 ? 'bg-white' : 'bg-slate-50');
-                html += `<tr class="${rowBg} hover:bg-blue-50 border-b border-slate-100">`;
+                const rowBg = isInv ? 'background-color:#fffbeb' : (i % 2 === 0 ? 'background-color:#ffffff' : 'background-color:#f8fafc');
+                html += `<tr style="${rowBg}" onmouseover="this.style.backgroundColor='#eff6ff'" onmouseout="this.style.backgroundColor='${isInv ? '#fffbeb' : (i % 2 === 0 ? '#ffffff' : '#f8fafc')}'" class="border-b border-slate-100">`;
                 DISPLAY_COLS.forEach(h => {
                     const val = getVal(r, h);
-                    let cellCls = 'px-2 py-1.5 whitespace-nowrap border-r border-slate-100 last:border-0 text-slate-600';
-                    if (h === 'FIN') cellCls += isInv ? ' font-black text-amber-600' : ' font-black text-blue-600';
+                    let style = 'padding:4px 8px;white-space:nowrap;border-right:1px solid #f1f5f9;font-size:10px;color:#475569;';
+                    if (h === 'FIN') style += isInv ? 'font-weight:900;color:#d97706;' : 'font-weight:900;color:#2563eb;';
                     if (h === 'Priority') {
-                        const pColor = val === '1' ? 'text-red-500' : val === '2' ? 'text-amber-500' : 'text-emerald-500';
-                        cellCls += ` font-black ${pColor}`;
+                        const pColor = val === '1' ? '#ef4444' : val === '2' ? '#f59e0b' : '#10b981';
+                        style += `font-weight:900;color:${pColor};`;
                     }
-                    if (h === 'Comments') cellCls += ' max-w-[200px] truncate';
-                    html += `<td class="${cellCls}" title="${val.replace(/"/g, '&quot;')}">${val || '<span class="text-slate-200">—</span>'}</td>`;
+                    if (h === 'Comments' || h === 'SrvcIss') style += 'max-width:180px;overflow:hidden;text-overflow:ellipsis;';
+                    html += `<td style="${style}" title="${val.replace(/"/g, '&quot;')}">${val || '<span style="color:#e2e8f0">—</span>'}</td>`;
                 });
                 html += '</tr>';
             });
