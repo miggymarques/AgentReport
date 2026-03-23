@@ -142,13 +142,13 @@
                                     <span id="ref-type" class="text-base font-black text-blue-600 uppercase"></span>
                                     <span id="ref-body" class="text-base font-black text-slate-400 uppercase"></span>
                                 </div>
-                                <div id="fin-rotation" class="mt-0.5 h-4 text-[10px] font-bold text-slate-400 truncate"></div>
                             </div>
                             <div class="form-group">
                                 <label>Flight #</label>
                                 <input type="text" name="Flight#" id="field-flight" placeholder="e.g. 0123" pattern="^\d{1,4}$" class="font-mono" inputmode="numeric" maxlength="4" oninput="this.value = this.value.replace(/\D/g, '').slice(0, 4)" required>
                             </div>
                         </div>
+                        <div id="fin-rotation" class="mt-0.5 h-4 text-[10px] font-bold text-slate-400 truncate"></div>
 
                         <div class="grid grid-cols-3 gap-4 items-end">
                             <div class="form-group">
@@ -382,6 +382,7 @@
                 <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
                 <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Sync Table</button>
                 <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Schedule</button>
+                <button onclick="switchRefTab('agents')" id="ref-tab-agents" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Agents</button>
             </div>
 
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
@@ -400,6 +401,22 @@
                 <input type="text" id="new-asset-id" placeholder="Asset#" class="w-24 uppercase font-mono !text-xs">
                 <input type="text" id="new-asset-name" placeholder="Item Name" class="flex-1 !text-xs">
                 <button onclick="addNewAsset()" class="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
+            </div>
+
+            <div class="p-4 bg-slate-50 border-t hidden" id="add-agent-ui">
+                <div class="flex gap-2 mb-2">
+                    <input type="text" id="new-agent-name" placeholder="Full Name" class="flex-1 !text-xs">
+                    <select id="new-agent-station" class="w-16 !text-xs">
+                        <option value="YYZ">YYZ</option>
+                        <option value="YUL">YUL</option>
+                        <option value="YYC">YYC</option>
+                        <option value="YVR">YVR</option>
+                    </select>
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" id="new-agent-phone" placeholder="Phone e.g. 647 288 4509" class="flex-1 !text-xs font-mono">
+                    <button onclick="addNewAgent()" class="bg-rose-600 text-white px-4 py-1 rounded-lg text-xs font-bold whitespace-nowrap">+ Add</button>
+                </div>
             </div>
 
             <div class="p-3 bg-slate-50 border-t hidden" id="add-schedule-ui">
@@ -432,7 +449,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.7.2";
+        const CURRENT_VERSION = "v2.8.0";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -525,7 +542,14 @@
 
         // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
         let scheduleData = {};
+
+        // agentRef: [ { value, station, displayName, _ts }, ... ]
+        // value = exact option value string e.g. "Michael Marques ,YYZ 905 405 4198"
+        // This is stored verbatim so the dropdown, CSV export, and email all
+        // produce byte-identical output to the original hardcoded options.
+        let agentRef = [];
         const AGENT_KEY        = 'yul_agent_name_session';
+        const AGENT_REF_KEY    = 'yul_agent_ref_v1';
         const STATION_KEY      = 'yul_station_id_session';
 
         // assetIndex: { "GGC0123": { fin: "AC101", ts: 1234567890 }, ... }
@@ -535,6 +559,139 @@
         // nroIndex: { "GGC0123": { lastFin: "AC101", lastSeen: "2025-01-01", ts: 1234567890 }, ... }
         // Assets expected on a FIN but not reported onboard or otherwise accounted for.
         let nroIndex = {};
+
+        // ─── Agent Ref Management ──────────────────────────────────────────────
+
+        function saveAgentRef() {
+            try { localStorage.setItem(AGENT_REF_KEY, JSON.stringify(agentRef)); } catch(e) { console.warn('Could not save agent ref:', e); }
+        }
+
+        // Rebuild the agent dropdown from agentRef.
+        // Each agentRef entry stores { value, station, displayName, _ts } where
+        // value is the EXACT option value string from the original hardcoded list:
+        //   "Full Name ,STATION phone-digits-with-spaces"
+        // This ensures the Agent field saved to records, CSV, and email is
+        // byte-identical to the original hardcoded options.
+        function rebuildAgentDropdown() {
+            const select = document.getElementById('agent-field');
+            if (!select || agentRef.length === 0) return; // keep hardcoded fallback if empty
+
+            const currentVal = select.value;
+            select.innerHTML = '<option value="">-- Select Agent --</option>';
+
+            const stationLabels = { YYZ:'YYZ - Toronto', YUL:'YUL - Montreal', YYC:'YYC - Calgary', YVR:'YVR - Vancouver' };
+            ['YYZ','YUL','YYC','YVR'].forEach(stn => {
+                const agents = agentRef.filter(a => a.station === stn);
+                if (agents.length === 0) return;
+                const grp = document.createElement('optgroup');
+                grp.label = stationLabels[stn] || stn;
+                agents.forEach(a => {
+                    const opt = document.createElement('option');
+                    opt.value = a.value;                        // exact original value string
+                    opt.setAttribute('data-station', a.station);
+                    opt.textContent = a.displayName;            // exact original display name
+                    grp.appendChild(opt);
+                });
+                select.appendChild(grp);
+            });
+
+            // Restore previous selection if still present
+            if (currentVal) {
+                for (let i = 0; i < select.options.length; i++) {
+                    if (select.options[i].value === currentVal) { select.value = currentVal; break; }
+                }
+            }
+        }
+
+        function addNewAgent() {
+            const displayName = document.getElementById('new-agent-name').value.trim();
+            const station     = document.getElementById('new-agent-station').value;
+            const phone       = document.getElementById('new-agent-phone').value.trim();
+            if (!displayName) return showToast("Enter agent name");
+
+            // Build the value string exactly as the original hardcoded options:
+            // "Full Name ,STATION phone"  (space before comma, space after station)
+            const value = phone
+                ? `${displayName} ,${station} ${phone}`
+                : `${displayName} ,${station}`;
+
+            // Prevent duplicates by value string
+            if (agentRef.find(a => a.value === value)) return showToast("Agent already exists");
+
+            agentRef.push({ value, station, displayName, _ts: Date.now() });
+            agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
+            saveAgentRef();
+            rebuildAgentDropdown();
+            syncAllAgentsFromRef();
+
+            // Broadcast immediately to peers
+            Object.keys(p2pConnections).forEach(pid =>
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, _ts: Date.now() })
+            );
+
+            document.getElementById('new-agent-name').value  = '';
+            document.getElementById('new-agent-phone').value = '';
+            renderRefList();
+            showToast(`Added ${displayName}`);
+        }
+
+        function removeAgent(idx) {
+            const removed = agentRef.splice(idx, 1)[0];
+            saveAgentRef();
+            rebuildAgentDropdown();
+            syncAllAgentsFromRef();
+
+            Object.keys(p2pConnections).forEach(pid =>
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, _ts: Date.now() })
+            );
+
+            renderRefList();
+            showToast(`Removed ${removed.displayName}`);
+        }
+
+        // Keep ALL_AGENTS in sync with agentRef for P2P peer ID discovery
+        function syncAllAgentsFromRef() {
+            if (agentRef.length === 0) return;
+            ALL_AGENTS.length = 0;
+            agentRef.forEach(a => ALL_AGENTS.push(a.displayName));
+        }
+
+        function renderAgentList(container) {
+            if (agentRef.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No agents added yet — using built-in list</div>
+                    <div class="text-center text-[10px] text-slate-300 mt-1">Add agents below to override the built-in list</div>`;
+                return;
+            }
+
+            const stationColors = { YYZ:'text-blue-600', YUL:'text-violet-600', YYC:'text-amber-600', YVR:'text-emerald-600' };
+
+            agentRef.forEach((agent, idx) => {
+                // Parse phone from the value string: everything after ",STATION "
+                const parts  = agent.value.split(',');
+                const suffix = parts[1] ? parts[1].trim() : '';          // e.g. "YYZ 905 405 4198"
+                const phone  = suffix.replace(/^[A-Z]{3}\s*/, '').trim(); // strip station code
+
+                const div = document.createElement('div');
+                div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs mb-1";
+                div.innerHTML = `
+                    <div class="flex-1 min-w-0">
+                        <span class="font-bold text-slate-800">${agent.displayName}</span>
+                        <span class="mx-2 text-slate-300">|</span>
+                        <span class="font-black text-[10px] ${stationColors[agent.station] || 'text-slate-500'}">${agent.station}</span>
+                        ${phone ? `<span class="ml-2 text-slate-400 font-mono text-[10px]">${phone}</span>` : ''}
+                        <div class="text-[8px] text-slate-300 font-mono mt-0.5 truncate" title="${agent.value}">${agent.value}</div>
+                    </div>
+                    <button onclick="removeAgent(${idx})" class="text-red-400 hover:text-red-600 ml-2 shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>`;
+                container.appendChild(div);
+            });
+
+            const footer = document.createElement('div');
+            footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
+            footer.textContent = `${agentRef.length} agent${agentRef.length !== 1 ? 's' : ''} · synced across peers`;
+            container.appendChild(footer);
+        }
 
         function saveFinTable() {
             try { localStorage.setItem(SYNC_TABLE_KEY, JSON.stringify(finTable)); } catch(e) { console.warn('Could not save FIN table:', e); }
@@ -567,7 +724,7 @@
 
             // Ensure finTable row exists
             if (!finTable[fin]) {
-                finTable[fin] = { type: '', body: '', lastSeen: '', lastFlight: '', _ts: 0 };
+                finTable[fin] = { type: '', body: '', lastSeen: '', lastFlight: '', lastAgent: '', lastStation: '', _ts: 0 };
             }
             // Resolve aircraft type
             const match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
@@ -577,6 +734,8 @@
             if (entryTs >= (finTable[fin]._ts || 0)) {
                 finTable[fin].lastSeen    = entry.displayDate || '';
                 finTable[fin].lastFlight  = entry['Flight#']  || '';
+                finTable[fin].lastAgent   = entry.Agent ? entry.Agent.split(',')[0].trim() : '';
+                finTable[fin].lastStation = entry['Service Station'] || '';
                 finTable[fin]._ts         = entryTs;
 
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
@@ -786,9 +945,11 @@
             document.getElementById('ref-tab-assets').className    = `flex-1 py-3 border-b-2 ${tab === 'assets'    ? 'border-blue-600 text-blue-600'     : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-synctable').className = `flex-1 py-3 border-b-2 ${tab === 'synctable' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-schedule').className  = `flex-1 py-3 border-b-2 ${tab === 'schedule'  ? 'border-violet-500 text-violet-600'  : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-agents').className    = `flex-1 py-3 border-b-2 ${tab === 'agents'    ? 'border-rose-500 text-rose-600'      : 'border-transparent text-slate-400'}`;
             document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
             document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
             document.getElementById('add-schedule-ui').classList.toggle('hidden', tab !== 'schedule');
+            document.getElementById('add-agent-ui').classList.toggle('hidden', tab !== 'agents');
             renderRefList();
         }
 
@@ -832,6 +993,8 @@
                 renderSyncTable(container);
             } else if (activeRefTab === 'schedule') {
                 renderScheduleList(container);
+            } else if (activeRefTab === 'agents') {
+                renderAgentList(container);
             }
         }
 
@@ -854,11 +1017,12 @@
             // Header — 5-column layout: FIN | Type | Assets on FIN | Last | NRO
             const header = document.createElement('div');
             header.className = "grid gap-1 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
-            header.style.gridTemplateColumns = "3rem 3.5rem 1fr 3rem 1fr";
+            header.style.gridTemplateColumns = "3rem 3.5rem 1fr 5rem 3rem 1fr";
             header.innerHTML = `
                 <span>FIN</span>
                 <span>Type</span>
                 <span>Assets Onboard</span>
+                <span>Agent / Stn</span>
                 <span>Last</span>
                 <span class="text-amber-500">NRO</span>`;
             container.appendChild(header);
@@ -887,9 +1051,13 @@
                     ? nroItems.map(n => `<span class="text-amber-600 font-black">${n.assetId}</span><span class="text-amber-600 ml-0.5 text-[8px]">${n.lastSeen || ''}</span>`).join('<br>')
                     : '<span class="text-slate-200">—</span>';
 
+                const agentDisplay = entry.lastAgent
+                    ? `<span class="font-bold text-slate-600">${entry.lastAgent}</span>${entry.lastStation ? `<span class="block text-[8px] font-black text-slate-400">${entry.lastStation}</span>` : ''}`
+                    : '<span class="text-slate-200">—</span>';
+
                 const div = document.createElement('div');
                 div.className = "grid gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
-                div.style.gridTemplateColumns = "3rem 3.5rem 1fr 3rem 1fr";
+                div.style.gridTemplateColumns = "3rem 3.5rem 1fr 5rem 3rem 1fr";
                 div.innerHTML = `
                     <span class="font-mono font-black text-blue-600">${fin}</span>
                     <span class="font-bold text-slate-700">
@@ -897,6 +1065,7 @@
                         ${entry.body ? `<span class="block text-[8px] font-black ${bodyColor}">${entry.body}</span>` : ''}
                     </span>
                     <span class="font-mono text-[9px] leading-relaxed">${onboardHtml}${removedHtml}</span>
+                    <span class="text-[9px] leading-relaxed">${agentDisplay}</span>
                     <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}</span>
                     <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
                 container.appendChild(div);
@@ -1441,7 +1610,12 @@
                 const savedSchedule = localStorage.getItem(SCHEDULE_KEY);
                 if (savedSchedule) scheduleData = JSON.parse(savedSchedule);
             } catch(e) { console.warn("Could not load schedule:", e); }
+            try {
+                const savedAgentRef = localStorage.getItem(AGENT_REF_KEY);
+                if (savedAgentRef) agentRef = JSON.parse(savedAgentRef);
+            } catch(e) { console.warn("Could not load agent ref:", e); }
 
+            rebuildAgentDropdown();
             restoreAgent();
             updateCategoryOptions();
             document.getElementById('app-version-label').textContent = CURRENT_VERSION;
@@ -2168,7 +2342,8 @@
             const schedTs = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
             const sched = schedTs > sinceTs ? scheduleData : {};
 
-            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched };
+            const agents = agentRef.length > 0 ? agentRef : [];
+            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents };
         }
 
         // Derive a short stable peer ID from an agent name
@@ -2342,6 +2517,8 @@
                     } else if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
                         finTable[fin].lastSeen      = incoming.lastSeen;
                         finTable[fin].lastFlight    = incoming.lastFlight;
+                        finTable[fin].lastAgent     = incoming.lastAgent   || finTable[fin].lastAgent   || '';
+                        finTable[fin].lastStation   = incoming.lastStation || finTable[fin].lastStation || '';
                         finTable[fin].lastOnboard   = incoming.lastOnboard;
                         finTable[fin].lastRemoved   = incoming.lastRemoved;
                         finTable[fin].type          = incoming.type || finTable[fin].type;
@@ -2401,6 +2578,20 @@
                 }
             }
 
+            // Merge agentRef — last-write-wins by newest _ts in list
+            if (msg.agentRef && Array.isArray(msg.agentRef) && msg.agentRef.length > 0) {
+                const incomingTs = Math.max(...msg.agentRef.map(a => a._ts || 0));
+                const localTs    = agentRef.length > 0 ? Math.max(...agentRef.map(a => a._ts || 0)) : 0;
+                if (incomingTs > localTs) {
+                    agentRef = msg.agentRef;
+                    saveAgentRef();
+                    rebuildAgentDropdown();
+                    syncAllAgentsFromRef();
+                    anyChanged = true;
+                    showToast('↓ Agent list updated from peer');
+                }
+            }
+
             return anyChanged;
         }
 
@@ -2435,6 +2626,22 @@
                 // Only update backend tables — do NOT add to db or history tab
                 updateFinTable(inEntry);
                 setSyncStatus('synced', Object.keys(p2pConnections).length);
+            }
+
+            if (msg.type === 'AGENT_REF_SYNC') {
+                if (msg.agentRef && Array.isArray(msg.agentRef) && msg.agentRef.length > 0) {
+                    const incomingTs = msg._ts || Math.max(...msg.agentRef.map(a => a._ts || 0), 0);
+                    const localTs    = agentRef.length > 0 ? Math.max(...agentRef.map(a => a._ts || 0)) : 0;
+                    if (incomingTs > localTs) {
+                        agentRef = msg.agentRef;
+                        saveAgentRef();
+                        rebuildAgentDropdown();
+                        syncAllAgentsFromRef();
+                        showToast('↓ Agent list updated from peer');
+                        if (activeRefTab === 'agents') renderRefList();
+                    }
+                }
+                return;
             }
 
             if (msg.type === 'CLAIM_FIN') {
