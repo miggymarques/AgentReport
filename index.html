@@ -148,7 +148,7 @@
                                 <input type="text" name="Flight#" id="field-flight" placeholder="e.g. 0123" pattern="^\d{1,4}$" class="font-mono" inputmode="numeric" maxlength="4" oninput="this.value = this.value.replace(/\D/g, '').slice(0, 4)" required>
                             </div>
                         </div>
-                        <div id="fin-rotation" class="mt-0.5 h-4 text-[10px] font-bold text-slate-400 truncate"></div>
+                        <div id="fin-rotation" class="mt-1 text-[12px] font-bold text-slate-500 leading-snug min-h-[2.5rem]"></div>
 
                         <div class="grid grid-cols-3 gap-4 items-end">
                             <div class="form-group">
@@ -426,7 +426,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.2";
+        const CURRENT_VERSION = "v2.8.3";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1222,18 +1222,21 @@
             const inGt = (rot.inGt || '');
             const oGt  = (rot.oGt  || '');
 
-            // Format: IFLT G(InGt) ISTN → STN → OSTN G(OGT)  OFLT  ✈in IDT  ✈out ODT [STN if not at station]
-            let parts = [];
-            if (iflt && iflt !== 'AC0000') parts.push(iflt);
-            if (inGt) parts.push('G' + inGt);
-            parts.push(iStn + ' → ' + rotStn + ' → ' + oStn);
-            if (oGt)  parts.push('G' + oGt);
-            if (oflt) parts.push(oflt);
-            if (idtStr) parts.push('✈in ' + idtStr);
-            parts.push('✈out ' + odtRot + odtLocal);
-            if (!atStation) parts.push('[' + rotStn + ']');
+            // Format: route line + separate times line
+            let routeParts = [];
+            if (iflt && iflt !== 'AC0000') routeParts.push(iflt);
+            if (inGt) routeParts.push('IGT:' + inGt);
+            routeParts.push(iStn + ' → ' + rotStn + ' → ' + oStn);
+            if (oGt)  routeParts.push('OGT:' + oGt);
+            if (oflt) routeParts.push(oflt);
+            if (!atStation) routeParts.push('[' + rotStn + ']');
 
-            return parts.join('  ');
+            let timeParts = [];
+            if (idtStr) timeParts.push('✈in ' + idtStr);
+            timeParts.push('✈out ' + odtRot + odtLocal);
+
+            return `<span class="block text-slate-500">${routeParts.join('  ')}</span>`
+                 + `<span class="block text-[13px] font-black text-blue-600 mt-0.5">${timeParts.join('   ')}</span>`;
         }
 
         function handleFinInput(el) {
@@ -1274,7 +1277,7 @@
                 const p = computeFinPriority(val);
                 priorityField.value = String(p);
                 // Populate next rotation line from scheduleData
-                rotationEl.textContent = getNextRotationLine(val);
+                rotationEl.innerHTML = getNextRotationLine(val);
 
                 // Prepopulate Flight# placeholder from inbound flight number (numeric portion)
                 // Fall back to outbound if inbound is 0000
@@ -1290,9 +1293,8 @@
                 }
             } else {
                 priorityField.value = '1';
-                rotationEl.textContent = '';
+                rotationEl.innerHTML = '';
                 const flightField = document.getElementById('field-flight');
-                if (flightField) flightField.placeholder = 'e.g. 0123';
             }
 
             if (val.length >= 2) {
@@ -1529,7 +1531,7 @@
 
             if (!p1Fin) {
                 if (flightField && !flightField.value) flightField.placeholder = 'e.g. 0123';
-                if (rotationEl) rotationEl.textContent = '';
+                if (rotationEl) rotationEl.innerHTML = '';
                 const rt = document.getElementById('ref-type');
                 const rb = document.getElementById('ref-body');
                 if (rt) rt.textContent = '';
@@ -1552,7 +1554,7 @@
 
             // Rotation info line — show for the suggested P1 FIN
             if (rotationEl) {
-                rotationEl.textContent = getNextRotationLine(p1Fin);
+                rotationEl.innerHTML = getNextRotationLine(p1Fin);
             }
 
             // Populate aircraft type/body reference spans
@@ -2177,7 +2179,7 @@
             restoreAgent();
             document.getElementById('ref-type').textContent = "";
             document.getElementById('ref-body').textContent = "";
-            document.getElementById('fin-rotation').textContent = "";
+            document.getElementById('fin-rotation').innerHTML = "";
             document.getElementById('field-flight').placeholder = 'e.g. 0123';
             // Release claim for the FIN that was just saved
             const savedFin = document.getElementById('field-fin');
