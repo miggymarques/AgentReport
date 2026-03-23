@@ -119,6 +119,7 @@
         <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-4 text-center font-bold transition-colors">NEW ENTRY</button>
         <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
         <button id="tab-priority" onclick="switchTab('priority')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">PRIORITY</button>
+        <button id="tab-alldata" onclick="switchTab('alldata')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">ALL DATA (<span id="shared-count">0</span>)</button>
     </nav>
 
     <main class="container mx-auto p-4 pb-24 max-w-2xl">
@@ -343,6 +344,30 @@
             </div>
             <div id="priority-list"></div>
         </section>
+
+        <section id="section-alldata" class="hidden space-y-3">
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex flex-wrap gap-2 items-center justify-between">
+                <span class="text-[9px] font-black uppercase tracking-widest text-slate-400">All Agents · All Records</span>
+                <div class="flex gap-2">
+                    <button onclick="exportSharedCSV()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Export CSV
+                    </button>
+                    <button onclick="clearSharedDb()" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        Clear Data
+                    </button>
+                </div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                <div id="shared-table-wrap">
+                    <div id="no-shared-records" class="text-center py-16 text-slate-400">
+                        <p class="font-bold">No shared records yet</p>
+                        <p class="text-xs mt-1">Records from all agents will appear here as they save</p>
+                    </div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <div id="editor-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] items-center justify-center p-4">
@@ -426,7 +451,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.4";
+        const CURRENT_VERSION = "v2.8.5";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -503,6 +528,7 @@
         }
 
         let db = [];
+        let sharedDb = [];  // all agents' entries — accumulates via P2P, cleared manually
         let finTable = {};  // persistent FIN → { type, body, assets, lastSeen, lastFlight }
         let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
         let assetRef = { ...INITIAL_ASSETS };
@@ -510,6 +536,7 @@
         let activeRefTab = 'aircraft';
 
         const APP_STORAGE_KEY  = 'yul_field_data_v2';
+        const SHARED_DB_KEY    = 'yul_shared_db_v1';
         const REF_STORAGE_KEY  = 'yul_aircraft_ref_v3';
         const ASSET_REF_KEY    = 'yul_asset_ref_v2';
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
@@ -1658,6 +1685,10 @@
                 const savedBlock = localStorage.getItem(AGENT_BLOCK_KEY);
                 if (savedBlock) agentBlock = JSON.parse(savedBlock);
             } catch(e) { console.warn("Could not load agent block:", e); }
+            try {
+                const savedSharedDb = localStorage.getItem(SHARED_DB_KEY);
+                if (savedSharedDb) { sharedDb = JSON.parse(savedSharedDb); updateSharedCount(); }
+            } catch(e) { console.warn("Could not load shared db:", e); }
 
             initAgentRef();
             rebuildAgentDropdown();
@@ -1688,11 +1719,14 @@
             document.getElementById('section-form').classList.toggle('hidden', tab !== 'form');
             document.getElementById('section-records').classList.toggle('hidden', tab !== 'records');
             document.getElementById('section-priority').classList.toggle('hidden', tab !== 'priority');
+            document.getElementById('section-alldata').classList.toggle('hidden', tab !== 'alldata');
             document.getElementById('tab-form').classList.toggle('active', tab === 'form');
             document.getElementById('tab-records').classList.toggle('active', tab === 'records');
             document.getElementById('tab-priority').classList.toggle('active', tab === 'priority');
+            document.getElementById('tab-alldata').classList.toggle('active', tab === 'alldata');
             if (tab === 'records') updateUI();
             if (tab === 'priority') renderPriorityList();
+            if (tab === 'alldata') renderSharedTable();
         }
 
 
@@ -2147,6 +2181,7 @@
 
             entry.Comments = buildComments(entry);
             db.unshift(entry);
+            addToSharedDb(entry);
             broadcastNewEntry(entry);
             updateFinTable(entry);
 
@@ -2259,7 +2294,135 @@
             }).join('');
         }
 
-        function deleteRecord(id) { db = db.filter(r => r.id !== id); try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); } updateUI(); }
+        function deleteRecord(id) {
+            db = db.filter(r => r.id !== id);
+            try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
+            removeFromSharedDb(id);
+            updateUI();
+        }
+
+        // ─── Shared DB (all agents) ───────────────────────────────────────────
+
+        function saveSharedDb() {
+            try { localStorage.setItem(SHARED_DB_KEY, JSON.stringify(sharedDb)); } catch(e) { console.warn('Could not save shared db:', e); }
+        }
+
+        function updateSharedCount() {
+            const el = document.getElementById('shared-count');
+            if (el) el.textContent = sharedDb.length;
+        }
+
+        // Add entry to sharedDb — deduplicate by id
+        function addToSharedDb(entry) {
+            if (!entry || !entry.id) return;
+            if (sharedDb.find(r => r.id === entry.id)) return; // already present
+            sharedDb.unshift(entry);
+            saveSharedDb();
+            updateSharedCount();
+        }
+
+        // Remove entry from sharedDb by id (mirrors local delete)
+        function removeFromSharedDb(id) {
+            const before = sharedDb.length;
+            sharedDb = sharedDb.filter(r => r.id !== id);
+            if (sharedDb.length !== before) {
+                saveSharedDb();
+                updateSharedCount();
+                // Re-render table if currently visible
+                if (!document.getElementById('section-alldata').classList.contains('hidden')) {
+                    renderSharedTable();
+                }
+            }
+        }
+
+        // CSV headers — identical to exportToCSV
+        const CSV_HEADERS = ["FIN", "Flight#", "Arrival Time", "Priority", "Serviced", "Case1", "HHD1", "HHD2", "Case2", "HHD3", "HHD4", "Case3", "HHD5", "HHD6", "Battery", "Rolls", "SrvcIssCAT", "SrvcIss", "Comments", "Service Date", "Service Station", "Agent", "Rv", "ASST", "HD1Rmvd", "HD2Rmvd", "HD3Rmvd", "HD4Rmvd", "HD5Rmvd", "HD6Rmvd"];
+
+        function renderSharedTable() {
+            const wrap = document.getElementById('shared-table-wrap');
+            const noRec = document.getElementById('no-shared-records');
+            if (!wrap) return;
+
+            if (sharedDb.length === 0) {
+                wrap.innerHTML = '';
+                wrap.appendChild(noRec || (() => {
+                    const d = document.createElement('div');
+                    d.id = 'no-shared-records';
+                    d.className = 'text-center py-16 text-slate-400';
+                    d.innerHTML = '<p class="font-bold">No shared records yet</p><p class="text-xs mt-1">Records from all agents will appear here as they save</p>';
+                    return d;
+                })());
+                return;
+            }
+
+            // Display columns — subset for readability on mobile, matching CSV order
+            const DISPLAY_COLS = ["Service Date", "Arrival Time", "Service Station", "Agent", "FIN", "Flight#", "Priority", "Serviced", "Case1", "HHD1", "HHD2", "Case2", "HHD3", "HHD4", "Battery", "Rolls", "ASST", "HD1Rmvd", "HD2Rmvd", "HD3Rmvd", "HD4Rmvd", "SrvcIssCAT", "SrvcIss", "Comments", "Rv"];
+
+            const getVal = (r, h) => {
+                if (h === "Arrival Time") return r.displayTime || "";
+                if (h === "Service Date") return r.displayDate || "";
+                if (h === "Agent") return r.Agent ? r.Agent.split(',')[0].trim() : "";
+                return r[h] !== undefined ? String(r[h]) : "";
+            };
+
+            let html = `<table class="w-full text-[10px] border-collapse min-w-max">
+                <thead class="bg-slate-800 text-white sticky top-0 z-10">
+                    <tr>${DISPLAY_COLS.map(h => `<th class="px-2 py-2 text-left font-black uppercase tracking-wider whitespace-nowrap border-r border-slate-700 last:border-0">${h}</th>`).join('')}</tr>
+                </thead>
+                <tbody>`;
+
+            sharedDb.forEach((r, i) => {
+                const isInv = r.FIN === 'INV';
+                const rowBg = isInv ? 'bg-amber-50' : (i % 2 === 0 ? 'bg-white' : 'bg-slate-50');
+                html += `<tr class="${rowBg} hover:bg-blue-50 border-b border-slate-100">`;
+                DISPLAY_COLS.forEach(h => {
+                    const val = getVal(r, h);
+                    let cellCls = 'px-2 py-1.5 whitespace-nowrap border-r border-slate-100 last:border-0 text-slate-600';
+                    if (h === 'FIN') cellCls += isInv ? ' font-black text-amber-600' : ' font-black text-blue-600';
+                    if (h === 'Priority') {
+                        const pColor = val === '1' ? 'text-red-500' : val === '2' ? 'text-amber-500' : 'text-emerald-500';
+                        cellCls += ` font-black ${pColor}`;
+                    }
+                    if (h === 'Comments') cellCls += ' max-w-[200px] truncate';
+                    html += `<td class="${cellCls}" title="${val.replace(/"/g, '&quot;')}">${val || '<span class="text-slate-200">—</span>'}</td>`;
+                });
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            wrap.innerHTML = html;
+        }
+
+        function exportSharedCSV() {
+            if (sharedDb.length === 0) return showToast("No shared records");
+            const escapeCSV = (v) => v === undefined || v === null ? '""' : `"${String(v).replace(/"/g, '""')}"`;
+            const csvRows = [CSV_HEADERS.join(",")];
+            sharedDb.forEach(r => {
+                csvRows.push(CSV_HEADERS.map(h => {
+                    let v = r[h] !== undefined ? r[h] : "";
+                    if (h === "Arrival Time") v = r.displayTime || "";
+                    if (h === "Service Date") v = r.displayDate || "";
+                    if (h === "Rv") v = r.Rv || CURRENT_VERSION;
+                    return escapeCSV(v);
+                }).join(","));
+            });
+            const blob = new Blob(["\uFEFF" + csvRows.join("\n")], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const dateStr = new Date().toISOString().split('T')[0];
+            a.href = url; a.download = `ALL_AGENTS_${dateStr}.csv`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+            showToast("All-agents CSV exported!");
+        }
+
+        function clearSharedDb() {
+            if (!confirm(`Clear all ${sharedDb.length} shared records? This cannot be undone.`)) return;
+            sharedDb = [];
+            saveSharedDb();
+            updateSharedCount();
+            renderSharedTable();
+            showToast("Shared data cleared");
+        }
         function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.classList.add('opacity-100', '-translate-y-2'); setTimeout(() => t.classList.remove('opacity-100', '-translate-y-2'), 2000); }
 
         function exportToCSV() {
@@ -2690,6 +2853,7 @@
                 const inEntry = msg.entry;
                 // Only update backend tables — do NOT add to db or history tab
                 updateFinTable(inEntry);
+                addToSharedDb(inEntry);
                 setSyncStatus('synced', Object.keys(p2pConnections).length);
             }
 
