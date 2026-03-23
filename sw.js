@@ -1,13 +1,11 @@
 // Service Worker for Agent Service Report PWA
-// v2.7.2 — matches app version
+// v2.8.1 — matches app version
 
-const CACHE_NAME = 'service-report-v2.7.2';
+const CACHE_NAME = 'service-report-v2.8.1';
 const RUNTIME_CACHE = 'service-report-runtime-v1';
 
-// App shell — cache on install
-const PRECACHE_URLS = [
-  './index.html'
-];
+// App shell — listed here so it gets cleaned from old caches on update
+const PRECACHE_URLS = [];
 
 // CDN resources — cache on first fetch (stale-while-revalidate)
 const CDN_ORIGINS = [
@@ -56,9 +54,10 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // App shell (same origin) — cache-first
+  // App shell (same origin) — network-first so updates reach users immediately
+  // Falls back to cache when offline
   if (url.origin === self.location.origin) {
-    event.respondWith(cacheFirst(event.request, CACHE_NAME));
+    event.respondWith(networkFirst(event.request, CACHE_NAME));
     return;
   }
 
@@ -80,6 +79,21 @@ async function cacheFirst(request, cacheName) {
     return response;
   } catch {
     return new Response('Offline — app shell not cached yet.', { status: 503 });
+  }
+}
+
+async function networkFirst(request, cacheName) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(cacheName);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    // Offline — serve from cache
+    const cached = await caches.match(request);
+    return cached || new Response('Offline — open the app while connected to cache the latest version.', { status: 503 });
   }
 }
 
