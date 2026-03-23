@@ -669,8 +669,9 @@
             syncAllAgentsFromRef();
 
             // Broadcast immediately to peers
+            const _syncTs = Date.now();
             Object.keys(p2pConnections).forEach(pid =>
-                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, _ts: Date.now() })
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock: [...agentBlock], _ts: _syncTs })
             );
 
             document.getElementById('new-agent-name').value  = '';
@@ -691,8 +692,9 @@
             rebuildAgentDropdown();
             syncAllAgentsFromRef();
 
+            const _rmSyncTs = Date.now();
             Object.keys(p2pConnections).forEach(pid =>
-                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, _ts: Date.now() })
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock: [...agentBlock], _ts: _rmSyncTs })
             );
 
             renderRefList();
@@ -2398,7 +2400,7 @@
             const sched = schedTs > sinceTs ? scheduleData : {};
 
             const agents = agentRef.length > 0 ? agentRef : [];
-            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents };
+            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock: [...agentBlock] };
         }
 
         // Derive a short stable peer ID from an agent name
@@ -2633,17 +2635,28 @@
                 }
             }
 
-            // Merge agentRef — last-write-wins by newest _ts in list
-            if (msg.agentRef && Array.isArray(msg.agentRef) && msg.agentRef.length > 0) {
-                const incomingTs = Math.max(...msg.agentRef.map(a => a._ts || 0));
-                const localTs    = agentRef.length > 0 ? Math.max(...agentRef.map(a => a._ts || 0)) : 0;
-                if (incomingTs > localTs) {
-                    agentRef = msg.agentRef;
+            // Merge agentRef — per-agent last-write-wins, never full replace
+            if (msg.agentRef && Array.isArray(msg.agentRef)) {
+                if (msg.agentBlock && Array.isArray(msg.agentBlock)) {
+                    msg.agentBlock.forEach(v => agentBlock.add(v));
+                    saveAgentBlock();
+                }
+                let agentChanged = false;
+                msg.agentRef.forEach(incoming => {
+                    if (agentBlock.has(incoming.value)) return;
+                    const existing = agentRef.find(a => a.value === incoming.value);
+                    if (!existing) { agentRef.push(incoming); agentChanged = true; }
+                    else if ((incoming._ts || 0) > (existing._ts || 0)) { Object.assign(existing, incoming); agentChanged = true; }
+                });
+                const before = agentRef.length;
+                agentRef = agentRef.filter(a => !agentBlock.has(a.value));
+                if (agentRef.length !== before) agentChanged = true;
+                if (agentChanged) {
+                    agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
                     saveAgentRef();
                     rebuildAgentDropdown();
                     syncAllAgentsFromRef();
                     anyChanged = true;
-                    showToast('↓ Agent list updated from peer');
                 }
             }
 
@@ -2684,15 +2697,26 @@
             }
 
             if (msg.type === 'AGENT_REF_SYNC') {
-                if (msg.agentRef && Array.isArray(msg.agentRef) && msg.agentRef.length > 0) {
-                    const incomingTs = msg._ts || Math.max(...msg.agentRef.map(a => a._ts || 0), 0);
-                    const localTs    = agentRef.length > 0 ? Math.max(...agentRef.map(a => a._ts || 0)) : 0;
-                    if (incomingTs > localTs) {
-                        agentRef = msg.agentRef;
+                if (msg.agentRef && Array.isArray(msg.agentRef)) {
+                    if (msg.agentBlock && Array.isArray(msg.agentBlock)) {
+                        msg.agentBlock.forEach(v => agentBlock.add(v));
+                        saveAgentBlock();
+                    }
+                    let agentChanged = false;
+                    msg.agentRef.forEach(incoming => {
+                        if (agentBlock.has(incoming.value)) return;
+                        const existing = agentRef.find(a => a.value === incoming.value);
+                        if (!existing) { agentRef.push(incoming); agentChanged = true; }
+                        else if ((incoming._ts || 0) > (existing._ts || 0)) { Object.assign(existing, incoming); agentChanged = true; }
+                    });
+                    const before = agentRef.length;
+                    agentRef = agentRef.filter(a => !agentBlock.has(a.value));
+                    if (agentRef.length !== before) agentChanged = true;
+                    if (agentChanged) {
+                        agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
                         saveAgentRef();
                         rebuildAgentDropdown();
                         syncAllAgentsFromRef();
-                        showToast('↓ Agent list updated from peer');
                         if (activeRefTab === 'agents') renderRefList();
                     }
                 }
