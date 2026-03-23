@@ -543,6 +543,8 @@
         // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
         let scheduleData = {};
 
+        let agentBlock = new Set(); // value strings of defaults the user has deliberately removed
+
         // agentRef: [ { value, station, displayName, _ts }, ... ]
         // value = exact option value string e.g. "Michael Marques ,YYZ 905 405 4198"
         // This is stored verbatim so the dropdown, CSV export, and email all
@@ -550,6 +552,27 @@
         let agentRef = [];
         const AGENT_KEY        = 'yul_agent_name_session';
         const AGENT_REF_KEY    = 'yul_agent_ref_v1';
+        const AGENT_BLOCK_KEY  = 'yul_agent_block_v1'; // value strings of deliberately removed defaults
+
+        // Default agents — exact value strings matching the original hardcoded options.
+        // These are always merged into agentRef on load so they can never be lost.
+        const DEFAULT_AGENTS = [
+            { value: "Michael Marques ,YYZ 905 405 4198", station: "YYZ", displayName: "Michael Marques" },
+            { value: "Amar Atta ,YYZ 647 288 4509",       station: "YYZ", displayName: "Amar Atta" },
+            { value: "Amritheera Malhi ,YYZ 647 288 4509", station: "YYZ", displayName: "Amritheera Malhi" },
+            { value: "Muqeet Alam ,YYZ 647 288 4509",     station: "YYZ", displayName: "Muqeet Alam" },
+            { value: "Stan Beatty ,YYZ 647 825 1214",     station: "YYZ", displayName: "Stan Beatty" },
+            { value: "Gurjinder Mann ,YYZ 647 288 4509",  station: "YYZ", displayName: "Gurjinder Mann" },
+            { value: "Abdullah Atta ,YYZ 647 288 4509",   station: "YYZ", displayName: "Abdullah Atta" },
+            { value: "Jeff Eng ,YYC 403 312 8555",        station: "YYC", displayName: "Jeff Eng" },
+            { value: "Kevin Joly ,YYC 403 312 8555",      station: "YYC", displayName: "Kevin Joly" },
+            { value: "Kevin Brown ,YVR 604 830 0395",     station: "YVR", displayName: "Kevin Brown" },
+            { value: "Billy Yan ,YVR 604 830 0395",       station: "YVR", displayName: "Billy Yan" },
+            { value: "Ben Burgio ,YUL 514 977 5312",      station: "YUL", displayName: "Ben Burgio" },
+            { value: "Jean Cham ,YUL 514 977 5312",       station: "YUL", displayName: "Jean Cham" },
+            { value: "Joann Cortese ,YUL 514 977 5312",   station: "YUL", displayName: "Joann Cortese" },
+            { value: "Janine Ostaco ,YUL 514 977 5312",   station: "YUL", displayName: "Janine Margaret Ostaco" }
+        ];
         const STATION_KEY      = 'yul_station_id_session';
 
         // assetIndex: { "GGC0123": { fin: "AC101", ts: 1234567890 }, ... }
@@ -562,8 +585,29 @@
 
         // ─── Agent Ref Management ──────────────────────────────────────────────
 
+        // Ensure all DEFAULT_AGENTS are present in agentRef, unless deliberately blocked.
+        // Called on every load — safe to run even if agentRef already has custom entries.
+        function initAgentRef() {
+            const existingValues = new Set(agentRef.map(a => a.value));
+            let changed = false;
+            DEFAULT_AGENTS.forEach(def => {
+                if (!existingValues.has(def.value) && !agentBlock.has(def.value)) {
+                    agentRef.push({ ...def, _ts: 0 }); // _ts:0 so custom additions always win
+                    changed = true;
+                }
+            });
+            if (changed) {
+                agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
+                saveAgentRef();
+            }
+        }
+
         function saveAgentRef() {
             try { localStorage.setItem(AGENT_REF_KEY, JSON.stringify(agentRef)); } catch(e) { console.warn('Could not save agent ref:', e); }
+        }
+
+        function saveAgentBlock() {
+            try { localStorage.setItem(AGENT_BLOCK_KEY, JSON.stringify([...agentBlock])); } catch(e) { console.warn('Could not save agent block:', e); }
         }
 
         // Rebuild the agent dropdown from agentRef.
@@ -637,6 +681,12 @@
 
         function removeAgent(idx) {
             const removed = agentRef.splice(idx, 1)[0];
+            // If this is a default agent, add to blocklist so initAgentRef won't re-add it
+            const isDefault = DEFAULT_AGENTS.some(d => d.value === removed.value);
+            if (isDefault) {
+                agentBlock.add(removed.value);
+                saveAgentBlock();
+            }
             saveAgentRef();
             rebuildAgentDropdown();
             syncAllAgentsFromRef();
@@ -1614,7 +1664,12 @@
                 const savedAgentRef = localStorage.getItem(AGENT_REF_KEY);
                 if (savedAgentRef) agentRef = JSON.parse(savedAgentRef);
             } catch(e) { console.warn("Could not load agent ref:", e); }
+            try {
+                const savedBlock = localStorage.getItem(AGENT_BLOCK_KEY);
+                if (savedBlock) agentBlock = new Set(JSON.parse(savedBlock));
+            } catch(e) { console.warn("Could not load agent block:", e); }
 
+            initAgentRef();
             rebuildAgentDropdown();
             restoreAgent();
             updateCategoryOptions();
