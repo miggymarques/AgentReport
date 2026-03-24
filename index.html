@@ -433,6 +433,17 @@
                     </div>
                 </div>
             </div>
+
+            <div class="p-3 bg-slate-50 border-t hidden" id="add-synctable-ui">
+                <label id="history-drop-zone" for="history-file-input"
+                    class="flex items-center justify-center gap-3 border border-dashed border-emerald-200 rounded-lg px-3 py-2 cursor-pointer hover:bg-emerald-50 transition-colors"
+                    ondragover="event.preventDefault()" ondrop="handleHistoryDrop(event)">
+                    <svg class="w-5 h-5 text-emerald-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                    <span class="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Drop .csv or .xlsx to rebuild sync table</span>
+                </label>
+                <input type="file" id="history-file-input" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleHistoryFile(this.files[0])">
+                <div id="history-import-status" class="mt-1.5 text-[10px] text-center font-bold text-slate-400"></div>
+            </div>
         </div>
     </div>
 
@@ -443,7 +454,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.8";
+        const CURRENT_VERSION = "v2.8.9";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1007,6 +1018,7 @@
             document.getElementById('add-schedule-ui').classList.toggle('hidden', tab !== 'schedule');
             document.getElementById('add-agent-ui').classList.toggle('hidden', tab !== 'agents');
             document.getElementById('add-alldata-ui').classList.toggle('hidden', tab !== 'alldata');
+            document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             renderRefList();
         }
 
@@ -1853,6 +1865,149 @@
                 if (el) el.value = '';
             });
             renderRefList();
+        }
+
+        // ─── History Import (CSV / XLSX → sync table + priority rebuild) ─────────
+        function handleHistoryDrop(event) {
+            event.preventDefault();
+            const file = event.dataTransfer.files[0];
+            if (file) handleHistoryFile(file);
+        }
+
+        function handleHistoryFile(file) {
+            if (!file) return;
+            const statusEl = document.getElementById('history-import-status');
+            statusEl.textContent = 'Reading file…';
+            const ext = file.name.split('.').pop().toLowerCase();
+
+            if (ext === 'csv') {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    try {
+                        const rows = parseHistoryCSV(e.target.result);
+                        applyHistoryRows(rows, statusEl);
+                    } catch(err) {
+                        statusEl.textContent = '✗ Parse error: ' + err.message;
+                    }
+                };
+                reader.readAsText(file, 'UTF-8');
+            } else if (ext === 'xlsx' || ext === 'xls') {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    try {
+                        const wb = XLSX.read(e.target.result, { type: 'array', raw: false });
+                        const ws = wb.Sheets[wb.SheetNames[0]];
+                        const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+                        applyHistoryRows(rows, statusEl);
+                    } catch(err) {
+                        statusEl.textContent = '✗ Parse error: ' + err.message;
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                statusEl.textContent = '✗ Unsupported file type — use .csv or .xlsx';
+            }
+
+            // Reset file input so the same file can be re-imported after a clear
+            const inp = document.getElementById('history-file-input');
+            if (inp) inp.value = '';
+        }
+
+        // Parse a CSV string into an array of row objects keyed by CSV_HEADERS
+        function parseHistoryCSV(text) {
+            // Strip BOM if present
+            const clean = text.replace(/^\uFEFF/, '');
+            const lines = clean.split(/\r?\n/).filter(l => l.trim());
+            if (lines.length < 2) return [];
+
+            // Parse a single CSV line respecting quoted fields
+            function parseLine(line) {
+                const fields = [];
+                let cur = '', inQ = false;
+                for (let i = 0; i < line.length; i++) {
+                    const ch = line[i];
+                    if (inQ) {
+                        if (ch === '"' && line[i+1] === '"') { cur += '"'; i++; }
+                        else if (ch === '"') { inQ = false; }
+                        else { cur += ch; }
+                    } else {
+                        if (ch === '"') { inQ = true; }
+                        else if (ch === ',') { fields.push(cur); cur = ''; }
+                        else { cur += ch; }
+                    }
+                }
+                fields.push(cur);
+                return fields;
+            }
+
+            const headers = parseLine(lines[0]);
+            const rows = [];
+            for (let i = 1; i < lines.length; i++) {
+                const vals = parseLine(lines[i]);
+                const obj = {};
+                headers.forEach((h, idx) => { obj[h.trim()] = (vals[idx] || '').trim(); });
+                rows.push(obj);
+            }
+            return rows;
+        }
+
+        // Convert a parsed row into an entry object and feed it through updateFinTable
+        function applyHistoryRows(rows, statusEl) {
+            let processed = 0, skipped = 0;
+
+            rows.forEach((row, idx) => {
+                const fin = (row['FIN'] || '').trim().toUpperCase();
+                if (!fin || fin === 'INV' || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
+
+                // Build a timestamp from "Service Date" — fall back to index so ordering is preserved
+                let ts = 0;
+                const dateStr = row['Service Date'] || row['displayDate'] || '';
+                if (dateStr) {
+                    const d = new Date(dateStr);
+                    ts = isNaN(d) ? 0 : d.getTime();
+                }
+                // Use index as tie-breaker so row order is respected within same date
+                if (!ts) ts = idx + 1;
+
+                const entry = {
+                    id:             ts + idx,   // unique enough per row
+                    FIN:            fin,
+                    'Flight#':      row['Flight#']          || '',
+                    displayDate:    row['Service Date']     || row['displayDate'] || dateStr,
+                    displayTime:    row['Arrival Time']     || row['displayTime'] || '',
+                    'Service Station': row['Service Station'] || '',
+                    Agent:          row['Agent']            || '',
+                    Priority:       row['Priority']         || '1',
+                    Serviced:       row['Serviced']         || '',
+                    Case1:          row['Case1']            || '',
+                    HHD1:           row['HHD1']             || '',
+                    HHD2:           row['HHD2']             || '',
+                    Case2:          row['Case2']            || '',
+                    HHD3:           row['HHD3']             || '',
+                    HHD4:           row['HHD4']             || '',
+                    HD1Rmvd:        row['HD1Rmvd']          || '',
+                    HD2Rmvd:        row['HD2Rmvd']          || '',
+                    HD3Rmvd:        row['HD3Rmvd']          || '',
+                    HD4Rmvd:        row['HD4Rmvd']          || '',
+                    ASST:           row['ASST']             || '',
+                    Battery:        row['Battery']          || '',
+                    Rolls:          row['Rolls']            || '',
+                    SrvcIssCAT:     row['SrvcIssCAT']       || '',
+                    SrvcIss:        row['SrvcIss']          || '',
+                    IssueDetails:   row['Comments']         || '',
+                };
+
+                updateFinTable(entry);
+                processed++;
+            });
+
+            // Refresh the sync table view
+            renderRefList();
+            renderPriorityList();
+
+            const msg = `✓ ${processed} entries processed` + (skipped > 0 ? ` · ${skipped} skipped` : '');
+            if (statusEl) statusEl.textContent = msg;
+            showToast(`Sync table rebuilt — ${processed} entries`);
         }
 
         function renderScheduleList(container) {

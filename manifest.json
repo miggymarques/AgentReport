@@ -2,7 +2,7 @@
   "name": "Agent Service Report",
   "short_name": "ServiceReport",
   "description": "GGC Field Agent Service Reporting Tool",
-  "version": "v2.8.8",
+  "version": "v2.8.9",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0f172a",
