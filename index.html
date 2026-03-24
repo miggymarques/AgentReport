@@ -340,10 +340,6 @@
                     <button onclick="setPriorityFilter('priority','2')"   id="pf-priority-2"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-amber-500 border-amber-200 hover:bg-amber-50">P2</button>
                     <button onclick="setPriorityFilter('priority','3')"   id="pf-priority-3"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-emerald-500 border-emerald-200 hover:bg-emerald-50">P3</button>
                 </div>
-                <div class="w-px h-5 bg-slate-200 mx-1"></div>
-                <input id="pf-fin" type="text" placeholder="FIN" maxlength="6"
-                    oninput="renderPriorityList()"
-                    class="!w-20 !text-[10px] !py-1 !px-2 uppercase font-mono border border-slate-200 rounded-lg bg-white text-slate-700 focus:border-blue-400 focus:outline-none">
             </div>
             <div id="priority-list"></div>
         </section>
@@ -439,11 +435,6 @@
             </div>
 
             <div class="p-3 bg-slate-50 border-t hidden" id="add-synctable-ui">
-                <div class="flex flex-wrap gap-1.5 mb-2">
-                    <input id="st-fin"   type="text" placeholder="FIN"   maxlength="6" oninput="renderRefList()" class="!w-20 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="st-asset" type="text" placeholder="Asset#" maxlength="7" oninput="renderRefList()" class="!w-24 !text-[10px] !py-1 !px-2 font-mono">
-                    <button onclick="clearSyncTableFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1">✕ Clear</button>
-                </div>
                 <label id="history-drop-zone" for="history-file-input"
                     class="flex items-center justify-center gap-3 border border-dashed border-emerald-200 rounded-lg px-3 py-2 cursor-pointer hover:bg-emerald-50 transition-colors"
                     ondragover="event.preventDefault()" ondrop="handleHistoryDrop(event)">
@@ -1079,27 +1070,7 @@
         }
 
         function renderSyncTable(container) {
-            const stFin   = (document.getElementById('st-fin')?.value   || '').trim().toUpperCase();
-            const stAsset = (document.getElementById('st-asset')?.value || '').trim();
-
-            let fins = Object.keys(finTable).sort();
-
-            // FIN filter — simple substring match
-            if (stFin) fins = fins.filter(f => f.includes(stFin));
-
-            // Asset filter — keep only FINs whose lastOnboard or lastRemoved includes the asset
-            if (stAsset) {
-                fins = fins.filter(f => {
-                    const e = finTable[f];
-                    const onboard = e.lastOnboard || [];
-                    const removed = e.lastRemoved || [];
-                    // Also check assetIndex — asset may be tracked to this FIN even if not in last snapshot
-                    const inAssetIndex = assetIndex[stAsset] && assetIndex[stAsset].fin === f;
-                    return onboard.some(a => a.includes(stAsset)) ||
-                           removed.some(a => a.includes(stAsset)) ||
-                           inAssetIndex;
-                });
-            }
+            const fins = Object.keys(finTable).sort();
 
             if (fins.length === 0) {
                 container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No records saved yet</div>`;
@@ -1174,17 +1145,9 @@
             // Summary footer
             const nroTotal = Object.keys(nroIndex).length;
             const footer = document.createElement('div');
-            footer.className = "mt-3 pt-3 border-t border-slate-200 flex items-center justify-between gap-2";
-            footer.innerHTML = `
-                <span class="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
-                    ${fins.length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries · ${Object.keys(assetIndex).length} assets tracked`
-                    + (nroTotal > 0 ? ` · <span class="text-amber-500">${nroTotal} NRO</span>` : '') + `
-                </span>
-                <button onclick="exportSyncTableCSV()"
-                    class="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-black transition-all active:scale-95 shrink-0">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                    Export CSV
-                </button>`;
+            footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
+            footer.innerHTML = `${fins.length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries · ${Object.keys(assetIndex).length} assets tracked` +
+                (nroTotal > 0 ? ` · <span class="text-amber-500">${nroTotal} NRO</span>` : '');
             container.appendChild(footer);
         }
 
@@ -1897,11 +1860,6 @@
             reader.readAsArrayBuffer(file);
         }
 
-        function clearSyncTableFilters() {
-            ['st-fin','st-asset'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-            renderRefList();
-        }
-
         function clearScheduleFilters() {
             ['sf-fin','sf-airline','sf-stn','sf-istn','sf-ostn'].forEach(id => {
                 const el = document.getElementById(id);
@@ -2134,7 +2092,6 @@
         // Filter state for priority tab
         let priorityFilterAirline  = 'ALL';
         let priorityFilterPriority = 'ALL';
-        let priorityFilterFin      = '';
 
         function setPriorityFilter(type, val) {
             if (type === 'airline')  priorityFilterAirline  = val;
@@ -2216,11 +2173,9 @@
             });
 
             // Apply filters
-            const pfFin = (document.getElementById('pf-fin')?.value || '').trim().toUpperCase();
             const filtered = rows.filter(r => {
-                if (priorityFilterAirline  !== 'ALL' && r.airline  !== priorityFilterAirline)          return false;
+                if (priorityFilterAirline  !== 'ALL' && r.airline  !== priorityFilterAirline)       return false;
                 if (priorityFilterPriority !== 'ALL' && String(r.priority) !== priorityFilterPriority) return false;
-                if (pfFin && !r.fin.includes(pfFin))                                                   return false;
                 return true;
             });
 
@@ -2615,75 +2570,6 @@
             a.href = url; a.download = `ALL_AGENTS_${dateStr}.csv`;
             document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
             showToast("All-agents CSV exported!");
-        }
-
-        function exportSyncTableCSV() {
-            const allFins = Object.keys(finTable).sort();
-            if (allFins.length === 0) return showToast("Sync table is empty");
-
-            const escapeCSV = (v) => v === undefined || v === null ? '""' : `"${String(v).replace(/"/g, '""')}"`;
-
-            // CSV_HEADERS order — sync table populates what it knows, blanks for the rest
-            const rows = [CSV_HEADERS.join(",")];
-
-            allFins.forEach(fin => {
-                const e = finTable[fin] || {};
-                const onboard = (e.lastOnboard || []);
-                const removed = (e.lastRemoved || []);
-                // Spread onboard assets across HHD1-4 columns
-                const [hhd1='', hhd2='', hhd3='', hhd4=''] = onboard;
-                // Spread removed assets across HD1Rmvd-HD4Rmvd columns
-                const [hd1r='', hd2r='', hd3r='', hd4r=''] = removed;
-
-                // NRO assets for this FIN
-                const nroItems = Object.entries(nroIndex)
-                    .filter(([, rec]) => rec.lastFin === fin)
-                    .map(([assetId]) => assetId)
-                    .join(' ');
-
-                const row = {
-                    "FIN":              fin,
-                    "Flight#":          e.lastFlight     || '',
-                    "Arrival Time":     '',
-                    "Priority":         '',
-                    "Serviced":         '',
-                    "Case1":            '',
-                    "HHD1":             hhd1,
-                    "HHD2":             hhd2,
-                    "Case2":            '',
-                    "HHD3":             hhd3,
-                    "HHD4":             hhd4,
-                    "Case3":            '',
-                    "HHD5":             '',
-                    "HHD6":             '',
-                    "Battery":          '',
-                    "Rolls":            '',
-                    "SrvcIssCAT":       '',
-                    "SrvcIss":          '',
-                    "Comments":         nroItems ? `NRO: ${nroItems}` : '',
-                    "Service Date":     e.lastSeen       || '',
-                    "Service Station":  e.lastStation    || '',
-                    "Agent":            e.lastAgent      || '',
-                    "Rv":               CURRENT_VERSION,
-                    "ASST":             '',
-                    "HD1Rmvd":          hd1r,
-                    "HD2Rmvd":          hd2r,
-                    "HD3Rmvd":          hd3r,
-                    "HD4Rmvd":          hd4r,
-                    "HD5Rmvd":          '',
-                    "HD6Rmvd":          '',
-                };
-                rows.push(CSV_HEADERS.map(h => escapeCSV(row[h] !== undefined ? row[h] : '')).join(","));
-            });
-
-            const blob = new Blob(["﻿" + rows.join("
-")], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            const dateStr = new Date().toISOString().split('T')[0];
-            a.href = url; a.download = `SYNC_TABLE_${dateStr}.csv`;
-            document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-            showToast(`Sync table exported — ${allFins.length} aircraft`);
         }
 
         function clearSharedDb() {
