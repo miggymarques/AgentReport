@@ -148,7 +148,7 @@
                                 <input type="text" name="Flight#" id="field-flight" placeholder="e.g. 0123" pattern="^\d{1,4}$" class="font-mono" inputmode="numeric" maxlength="4" oninput="this.value = this.value.replace(/\D/g, '').slice(0, 4)" required>
                             </div>
                         </div>
-                        <div id="fin-rotation" class="mt-1 text-[12px] font-bold text-slate-500 leading-snug min-h-[2.5rem]"></div>
+                        <div id="fin-rotation" class="mt-1 text-base font-black text-slate-500 leading-snug min-h-[2.5rem]"></div>
 
                         <div class="grid grid-cols-3 gap-4 items-end">
                             <div class="form-group">
@@ -443,7 +443,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.7";
+        const CURRENT_VERSION = "v2.8.8";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1613,7 +1613,14 @@
             sessionStorage.setItem(STATION_KEY, stationField.value);
             // Kick off P2P whenever agent is selected
             if (agentField.value) initP2P(agentField.value);
-            updateFinPlaceholder();
+            // Defer FIN suggestion until P2P is open so the claim broadcast actually reaches peers.
+            // 3s fallback fires if P2P is slow or offline — the form never sits empty.
+            if (p2pReady) {
+                updateFinPlaceholder();
+            } else {
+                const fallbackTimer = setTimeout(() => updateFinPlaceholder(), 3000);
+                p2pPeer.once('open', () => { clearTimeout(fallbackTimer); updateFinPlaceholder(); });
+            }
         }
 
         function restoreAgent() {
@@ -2691,7 +2698,13 @@
                 const sinceTs = lastSyncTs[conn.peer] || 0;
                 const delta = buildDelta(sinceTs);
                 const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
-                conn.send({ type: msgType, sinceTs, ...delta });
+                // Include active (non-expired) claims so the peer knows which FINs are taken
+                const activeClaims = {};
+                const now = Date.now();
+                Object.entries(finClaims).forEach(([fin, c]) => {
+                    if (now - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
+                });
+                conn.send({ type: msgType, sinceTs, ...delta, finClaims: activeClaims });
                 flushP2PQueue();
             };
 
@@ -2812,6 +2825,27 @@
                 }
             }
 
+            // Merge incoming finClaims (piggybacked on FULL_SYNC / DELTA_SYNC)
+            if (msg.finClaims && typeof msg.finClaims === 'object') {
+                let claimChanged = false;
+                const now = Date.now();
+                Object.entries(msg.finClaims).forEach(([fin, c]) => {
+                    if (!c || !c.agent || !c.ts) return;
+                    if (now - c.ts > CLAIM_TTL_MS) return; // already expired
+                    const existing = finClaims[fin];
+                    if (!existing || c.ts > existing.ts) {
+                        finClaims[fin] = { agent: c.agent, ts: c.ts };
+                        claimChanged = true;
+                    }
+                });
+                // If our current suggestion was just claimed by someone else, pick a new one
+                if (claimChanged && updateFinPlaceholder._lastSuggested &&
+                    isFinClaimed(updateFinPlaceholder._lastSuggested)) {
+                    updateFinPlaceholder._lastSuggested = null;
+                    updateFinPlaceholder();
+                }
+            }
+
             return anyChanged;
         }
 
@@ -2835,7 +2869,13 @@
                                     Object.keys(replyDelta.nroIndex).length > 0 ||
                                     Object.keys(replyDelta.scheduleData).length > 0;
                     if (hasData || theirSinceTs === 0) {
-                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, ...replyDelta });
+                        // Include our active claims in the reply too
+                        const activeClaims = {};
+                        const replyNow = Date.now();
+                        Object.entries(finClaims).forEach(([fin, c]) => {
+                            if (replyNow - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
+                        });
+                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, ...replyDelta, finClaims: activeClaims });
                     }
                 }
                 return;
@@ -2941,11 +2981,16 @@
                 // Send a full sync to all currently connected peers
                 const peers = Object.keys(p2pConnections);
                 if (peers.length > 0) {
+                    const activeClaims = {};
+                    const nowClaims = Date.now();
+                    Object.entries(finClaims).forEach(([fin, c]) => {
+                        if (nowClaims - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
+                    });
                     peers.forEach(pid => {
                         const sinceTs = lastSyncTs[pid] || 0;
                         const delta = buildDelta(sinceTs);
                         const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
-                        conn_p2p_send(pid, { type: msgType, sinceTs, ...delta });
+                        conn_p2p_send(pid, { type: msgType, sinceTs, ...delta, finClaims: activeClaims });
                     });
                 }
             }, P2P_SYNC_INTERVAL_MS);
