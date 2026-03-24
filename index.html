@@ -1508,8 +1508,9 @@
                 const parts = entry.lastSeen.split('/');
                 let d;
                 if (parts.length === 3) {
-                    d = new Date(parts[2], parts[0]-1, parts[1]);
-                    if (isNaN(d)) d = new Date(parts[2], parts[1]-1, parts[0]);
+                    const yr1 = parts[2].length === 2 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
+                    d = new Date(yr1, parts[0]-1, parts[1]);
+                    if (isNaN(d)) d = new Date(yr1, parts[1]-1, parts[0]);
                 } else { d = new Date(entry.lastSeen); }
                 if (isNaN(d)) return 9999;
                 d.setHours(0,0,0,0);
@@ -2119,8 +2120,9 @@
             const parts = entry.lastSeen.split('/');
             let lastDate;
             if (parts.length === 3) {
-                lastDate = new Date(parts[2], parts[0]-1, parts[1]);
-                if (isNaN(lastDate)) lastDate = new Date(parts[2], parts[1]-1, parts[0]);
+                const yr2 = parts[2].length === 2 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
+                lastDate = new Date(yr2, parts[0]-1, parts[1]);
+                if (isNaN(lastDate)) lastDate = new Date(yr2, parts[1]-1, parts[0]);
             } else { lastDate = new Date(entry.lastSeen); }
             if (isNaN(lastDate)) return 1;
             lastDate.setHours(0,0,0,0);
@@ -2152,8 +2154,9 @@
                     const parts = entry.lastSeen.split('/');
                     let lastDate;
                     if (parts.length === 3) {
-                        lastDate = new Date(parts[2], parts[0]-1, parts[1]);
-                        if (isNaN(lastDate)) lastDate = new Date(parts[2], parts[1]-1, parts[0]);
+                        const yr3 = parts[2].length === 2 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
+                        lastDate = new Date(yr3, parts[0]-1, parts[1]);
+                        if (isNaN(lastDate)) lastDate = new Date(yr3, parts[1]-1, parts[0]);
                     } else { lastDate = new Date(entry.lastSeen); }
                     if (!isNaN(lastDate)) {
                         lastDate.setHours(0,0,0,0);
