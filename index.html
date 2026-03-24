@@ -1002,7 +1002,7 @@
             }
         }
 
-        function openRefEditor() { renderRefList(); document.getElementById('editor-modal').classList.add('open'); }
+        function openRefEditor() { switchRefTab(activeRefTab); document.getElementById('editor-modal').classList.add('open'); }
         function closeRefEditor() { document.getElementById('editor-modal').classList.remove('open'); }
 
         function switchRefTab(tab) {
