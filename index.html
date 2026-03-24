@@ -340,6 +340,14 @@
                     <button onclick="setPriorityFilter('priority','2')"   id="pf-priority-2"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-amber-500 border-amber-200 hover:bg-amber-50">P2</button>
                     <button onclick="setPriorityFilter('priority','3')"   id="pf-priority-3"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-emerald-500 border-emerald-200 hover:bg-emerald-50">P3</button>
                 </div>
+                <div class="w-px h-5 bg-slate-200 mx-1"></div>
+                <div class="relative flex items-center">
+                    <span class="absolute left-2 text-slate-400 text-[10px] font-black uppercase pointer-events-none select-none">#</span>
+                    <input id="pf-fin-input" type="text" inputmode="numeric" maxlength="4"
+                        placeholder="FIN#"
+                        class="!pl-6 !py-1 !text-xs !border-slate-200 font-mono w-20"
+                        oninput="this.value=this.value.replace(/\D/g,'').slice(0,4); setPriorityFilter('fin', this.value)">
+                </div>
             </div>
             <div id="priority-list"></div>
         </section>
@@ -361,6 +369,32 @@
                 <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Schedule</button>
                 <button onclick="switchRefTab('agents')" id="ref-tab-agents" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Agents</button>
                 <button onclick="switchRefTab('alldata')" id="ref-tab-alldata" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">All Data</button>
+            </div>
+            <div id="synctable-export-bar" class="hidden border-b border-slate-200">
+                <div class="flex gap-2 px-3 pt-2 pb-1 items-center">
+                    <div class="relative flex-1">
+                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-black uppercase pointer-events-none select-none">FIN</span>
+                        <input id="st-filter-fin" type="text" placeholder="e.g. AC101" maxlength="7"
+                            class="!pl-8 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); applySyncTableFilters()">
+                    </div>
+                    <div class="relative flex-1">
+                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-black uppercase pointer-events-none select-none">Asset</span>
+                        <input id="st-filter-asset" type="text" placeholder="e.g. 0123" maxlength="7"
+                            class="!pl-10 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); applySyncTableFilters()">
+                    </div>
+                    <button onclick="clearSyncTableFilters()" id="st-filter-clear" title="Clear filters"
+                        class="hidden text-slate-400 hover:text-red-500 transition-colors px-1 shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                    <button onclick="exportSyncTableCSV()" title="Export CSV"
+                        class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition-all text-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <span class="text-[10px] font-black">CSV</span>
+                    </button>
+                </div>
+                <div id="st-filter-hint" class="hidden px-3 pb-1.5 text-[9px] font-bold text-blue-500 uppercase tracking-widest"></div>
             </div>
 
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
@@ -454,7 +488,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.8.9";
+        const CURRENT_VERSION = "v2.9.0";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1019,6 +1053,8 @@
             document.getElementById('add-agent-ui').classList.toggle('hidden', tab !== 'agents');
             document.getElementById('add-alldata-ui').classList.toggle('hidden', tab !== 'alldata');
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
+            document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
+            if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; }
             renderRefList();
         }
 
@@ -1069,13 +1105,32 @@
             }
         }
 
-        function renderSyncTable(container) {
-            const fins = Object.keys(finTable).sort();
+        // ─── Sync Table filter state ─────────────────────────────────────────
+        let stFilterFin   = '';
+        let stFilterAsset = '';
 
-            if (fins.length === 0) {
-                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No records saved yet</div>`;
-                return;
-            }
+        function applySyncTableFilters() {
+            stFilterFin   = (document.getElementById('st-filter-fin')?.value   || '').trim().toUpperCase();
+            stFilterAsset = (document.getElementById('st-filter-asset')?.value || '').trim().toUpperCase();
+            const active  = stFilterFin || stFilterAsset;
+            const clearBtn = document.getElementById('st-filter-clear');
+            if (clearBtn) clearBtn.classList.toggle('hidden', !active);
+            if (activeRefTab === 'synctable') renderRefList();
+        }
+
+        function clearSyncTableFilters() {
+            stFilterFin = ''; stFilterAsset = '';
+            const finEl   = document.getElementById('st-filter-fin');
+            const assetEl = document.getElementById('st-filter-asset');
+            if (finEl)   finEl.value   = '';
+            if (assetEl) assetEl.value = '';
+            document.getElementById('st-filter-clear')?.classList.add('hidden');
+            document.getElementById('st-filter-hint')?.classList.add('hidden');
+            if (activeRefTab === 'synctable') renderRefList();
+        }
+
+        function renderSyncTable(container) {
+            const numSort = (a, b) => parseInt(a.replace(/\D/g,'')) - parseInt(b.replace(/\D/g,''));
 
             // Build a per-FIN NRO lookup: fin → [{assetId, lastSeen, ts}]
             const finNro = {};
@@ -1085,7 +1140,56 @@
                 finNro[rec.lastFin].push({ assetId, lastSeen: rec.lastSeen, ts: rec.ts });
             });
 
-            // Header — 5-column layout: FIN | Type | Assets on FIN | Last | NRO
+            // Build per-FIN asset index for the asset filter
+            const finAssetMap = buildFinAssets(); // fin → [assetId, ...]
+
+            let fins = Object.keys(finTable).sort();
+
+            if (fins.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No records saved yet</div>`;
+                return;
+            }
+
+            // Apply FIN filter (prefix match)
+            if (stFilterFin) {
+                fins = fins.filter(f => f.startsWith(stFilterFin));
+            }
+
+            // Apply asset filter — match against onboard, removed, NRO, and all tracked assets
+            if (stFilterAsset) {
+                const q = stFilterAsset.replace(/\D/g,''); // numeric portion for fuzzy match
+                fins = fins.filter(fin => {
+                    const entry = finTable[fin];
+                    const onboard  = entry.lastOnboard || [];
+                    const removed  = entry.lastRemoved || [];
+                    const nroList  = (finNro[fin] || []).map(n => n.assetId);
+                    const tracked  = finAssetMap[fin] || [];
+                    const all = [...onboard, ...removed, ...nroList, ...tracked];
+                    return all.some(a => {
+                        const an = a.replace(/\D/g,'');
+                        return a.toUpperCase().includes(stFilterAsset) || (q && an.includes(q));
+                    });
+                });
+            }
+
+            // Update hint bar
+            const hintEl = document.getElementById('st-filter-hint');
+            if (hintEl) {
+                const total = Object.keys(finTable).length;
+                if (stFilterFin || stFilterAsset) {
+                    hintEl.textContent = `${fins.length} of ${total} FIN${total !== 1 ? 's' : ''} shown`;
+                    hintEl.classList.remove('hidden');
+                } else {
+                    hintEl.classList.add('hidden');
+                }
+            }
+
+            if (fins.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs font-bold uppercase tracking-widest">No matching FINs</div>`;
+                return;
+            }
+
+            // Header
             const header = document.createElement('div');
             header.className = "grid gap-1 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
             header.style.gridTemplateColumns = "3rem 3.5rem 1fr 5rem 3rem 1fr";
@@ -1102,35 +1206,47 @@
                 const entry = finTable[fin];
                 const bodyColor = entry.body === 'WB' ? 'text-purple-600' : 'text-slate-400';
 
-                // Assets onboard from most recent entry only (HHD1–4 snapshot)
-                const numSort = (a, b) => parseInt(a.replace(/\D/g,'')) - parseInt(b.replace(/\D/g,''));
+                // Highlight helper — wraps matched text in a yellow span
+                const hl = (text) => {
+                    if (!stFilterAsset || !text) return text;
+                    const q = stFilterAsset.replace(/\D/g,'');
+                    const re = q ? new RegExp(q, 'g') : null;
+                    const numPart = text.replace(/\D/g,'');
+                    if (re && re.test(numPart)) {
+                        return `<span class="bg-yellow-200 rounded px-0.5 font-black">${text}</span>`;
+                    }
+                    return text;
+                };
+
                 const onboardAssets = (entry.lastOnboard || []).slice().sort(numSort);
                 const onboardHtml = onboardAssets.length > 0
-                    ? onboardAssets.map(a => `<span class="text-slate-600">${a}</span>`).join(', ')
+                    ? onboardAssets.map(a => `<span class="text-slate-600">${hl(a)}</span>`).join(', ')
                     : '<span class="text-slate-300">—</span>';
 
-                // Removed/flagged assets from last visit (HDxRmvd + ASST)
                 const removedAssets = (entry.lastRemoved || []).slice().sort(numSort);
                 const removedHtml = removedAssets.length > 0
                     ? '<span class="text-red-500 text-[8px] font-black uppercase tracking-wide block mt-0.5">Rmvd: </span>' +
-                      removedAssets.map(a => `<span class="text-red-600 font-black">${a}</span>`).join(', ')
+                      removedAssets.map(a => `<span class="text-red-600 font-black">${hl(a)}</span>`).join(', ')
                     : '';
 
-                // NRO items for this FIN, sorted numerically
                 const nroItems = (finNro[fin] || []).slice().sort((a, b) => parseInt(a.assetId.replace(/\D/g,'')) - parseInt(b.assetId.replace(/\D/g,'')));
                 const nroCell = nroItems.length > 0
-                    ? nroItems.map(n => `<span class="text-amber-600 font-black">${n.assetId}</span><span class="text-amber-600 ml-0.5 text-[8px]">${n.lastSeen || ''}</span>`).join('<br>')
+                    ? nroItems.map(n => `<span class="text-amber-600 font-black">${hl(n.assetId)}</span><span class="text-amber-600 ml-0.5 text-[8px]">${n.lastSeen || ''}</span>`).join('<br>')
                     : '<span class="text-slate-200">—</span>';
 
                 const agentDisplay = entry.lastAgent
                     ? `<span class="font-bold text-slate-600">${entry.lastAgent}</span>${entry.lastStation ? `<span class="block text-[8px] font-black text-slate-400">${entry.lastStation}</span>` : ''}`
                     : '<span class="text-slate-200">—</span>';
 
+                const finDisplay = stFilterFin && fin.startsWith(stFilterFin)
+                    ? `<span class="bg-yellow-200 rounded px-0.5">${fin}</span>`
+                    : fin;
+
                 const div = document.createElement('div');
                 div.className = "grid gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
                 div.style.gridTemplateColumns = "3rem 3.5rem 1fr 5rem 3rem 1fr";
                 div.innerHTML = `
-                    <span class="font-mono font-black text-blue-600">${fin}</span>
+                    <span class="font-mono font-black text-blue-600">${finDisplay}</span>
                     <span class="font-bold text-slate-700">
                         ${entry.type || '—'}
                         ${entry.body ? `<span class="block text-[8px] font-black ${bodyColor}">${entry.body}</span>` : ''}
@@ -1146,9 +1262,71 @@
             const nroTotal = Object.keys(nroIndex).length;
             const footer = document.createElement('div');
             footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
-            footer.innerHTML = `${fins.length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries · ${Object.keys(assetIndex).length} assets tracked` +
+            footer.innerHTML = `${Object.keys(finTable).length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries · ${Object.keys(assetIndex).length} assets tracked` +
                 (nroTotal > 0 ? ` · <span class="text-amber-500">${nroTotal} NRO</span>` : '');
             container.appendChild(footer);
+        }
+
+        function exportSyncTableCSV() {
+            const fins = Object.keys(finTable).sort();
+            if (fins.length === 0) return showToast('No FIN data to export');
+
+            // Build per-FIN NRO lookup
+            const finNro = {};
+            Object.entries(nroIndex).forEach(([assetId, rec]) => {
+                if (!rec.lastFin) return;
+                if (!finNro[rec.lastFin]) finNro[rec.lastFin] = [];
+                finNro[rec.lastFin].push(assetId);
+            });
+
+            // Build per-FIN asset list from assetIndex
+            const finAssets = buildFinAssets();
+
+            // CSV helper — wraps a value in quotes and escapes any internal quotes
+            const esc = (v) => {
+                const s = (v == null ? '' : String(v)).replace(/"/g, '""');
+                return `"${s}"`;
+            };
+
+            const numSort = (a, b) => parseInt(a.replace(/\D/g,'')) - parseInt(b.replace(/\D/g,''));
+
+            const headers = ['FIN', 'Type', 'Body', 'Assets Onboard (Last Visit)', 'All Tracked Assets', 'Removed/Flagged (Last Visit)', 'Last Agent', 'Station', 'Last Seen', 'Last Flight', 'NRO Assets'];
+            const rows = [headers.map(esc).join(',')];
+
+            fins.forEach(fin => {
+                const entry = finTable[fin];
+                const onboard  = (entry.lastOnboard  || []).slice().sort(numSort).join(', ');
+                const removed  = (entry.lastRemoved  || []).slice().sort(numSort).join(', ');
+                const tracked  = (finAssets[fin]     || []).slice().sort(numSort).join(', ');
+                const nroItems = (finNro[fin]         || []).slice().sort(numSort).join(', ');
+                rows.push([
+                    fin,
+                    entry.type        || '',
+                    entry.body        || '',
+                    onboard,
+                    tracked,
+                    removed,
+                    entry.lastAgent   || '',
+                    entry.lastStation || '',
+                    entry.lastSeen    || '',
+                    entry.lastFlight  || '',
+                    nroItems
+                ].map(esc).join(','));
+            });
+
+            // UTF-8 with BOM — recognised by Excel, OnlyOffice, LibreOffice and
+            // Google Sheets without needing the import wizard
+            const csv = rows.join('\r\n');
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            const date = new Date().toISOString().slice(0, 10);
+            a.href     = url;
+            a.download = `FIN_SyncTable_${date}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+            showToast(`Exported ${fins.length} FINs`);
         }
 
         function addNewRef() {
@@ -2092,10 +2270,12 @@
         // Filter state for priority tab
         let priorityFilterAirline  = 'ALL';
         let priorityFilterPriority = 'ALL';
+        let priorityFilterFin      = '';
 
         function setPriorityFilter(type, val) {
             if (type === 'airline')  priorityFilterAirline  = val;
             if (type === 'priority') priorityFilterPriority = val;
+            if (type === 'fin')      priorityFilterFin      = val.trim();
 
             // Update button styles
             document.querySelectorAll('.pf-airline').forEach(btn => {
@@ -2174,8 +2354,13 @@
 
             // Apply filters
             const filtered = rows.filter(r => {
-                if (priorityFilterAirline  !== 'ALL' && r.airline  !== priorityFilterAirline)       return false;
+                if (priorityFilterAirline  !== 'ALL' && r.airline  !== priorityFilterAirline)          return false;
                 if (priorityFilterPriority !== 'ALL' && String(r.priority) !== priorityFilterPriority) return false;
+                if (priorityFilterFin) {
+                    // Match the numeric suffix of the FIN (e.g. "101" matches "AC101", "QK101", "RV101")
+                    const finNum = r.fin.replace(/\D/g, '');
+                    if (!finNum.includes(priorityFilterFin)) return false;
+                }
                 return true;
             });
 
@@ -2707,7 +2892,10 @@
             const schedTs = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
             const sched = schedTs > sinceTs ? scheduleData : {};
 
-            const agents = agentRef.length > 0 ? agentRef : [];
+            // On full sync send everything; on delta send only agents changed since sinceTs
+            const agents = sinceTs === 0
+                ? (agentRef.length > 0 ? agentRef : [])
+                : agentRef.filter(a => (a._ts || 0) > sinceTs);
             return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock };
         }
 
@@ -2824,7 +3012,9 @@
             ALL_AGENTS.forEach(name => {
                 const theirId = `ggcsync-${name.toLowerCase().replace(/\s+/g, '-')}`;
                 if (theirId === myPeerId) return;              // skip self
-                if (p2pConnections[theirId]) return;           // already connected
+                // Skip if already connected to this canonical ID or any suffix variant of it
+                const alreadyConnected = Object.keys(p2pConnections).some(pid => pid === theirId || pid.startsWith(theirId + '-'));
+                if (alreadyConnected) return;
                 attemptConnect(theirId);
             });
         }
@@ -2886,6 +3076,7 @@
                         finTable[fin] = { ...incoming };
                         changed = true;
                     } else if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
+                        // Incoming is strictly newer — overwrite
                         finTable[fin].lastSeen      = incoming.lastSeen;
                         finTable[fin].lastFlight    = incoming.lastFlight;
                         finTable[fin].lastAgent     = incoming.lastAgent   || finTable[fin].lastAgent   || '';
@@ -2897,6 +3088,7 @@
                         finTable[fin]._ts           = incoming._ts;
                         changed = true;
                     }
+                    // Equal _ts: keep local copy (no-op) — avoids flip-flopping between two peers
                 });
                 if (changed) { saveFinTable(); anyChanged = true; }
             }
@@ -3011,7 +3203,8 @@
             if (msg.type === 'FULL_SYNC' || msg.type === 'DELTA_SYNC') {
                 const changed = applyIncomingSyncMsg(msg, fromPeer);
 
-                // Record when we last synced with this peer
+                // Record when we last synced with this peer — only after successful apply
+                // so a future delta won't skip records if apply threw or was partial
                 const nowTs = Date.now();
                 lastSyncTs[fromPeer] = nowTs;
 
@@ -3044,6 +3237,10 @@
                 // Only update backend tables — do NOT add to db or history tab
                 updateFinTable(inEntry);
                 addToSharedDb(inEntry);
+                // Advance the peer's sync cursor so the next delta doesn't re-send this entry
+                if (inEntry.id && inEntry.id > (lastSyncTs[fromPeer] || 0)) {
+                    lastSyncTs[fromPeer] = inEntry.id;
+                }
                 setSyncStatus('synced', Object.keys(p2pConnections).length);
             }
 
@@ -3227,6 +3424,7 @@
         function showInstallBanner() {
             if (window.matchMedia('(display-mode: standalone)').matches) return;
             if (document.getElementById('pwa-install-banner')) return;
+            if (localStorage.getItem('pwa-install-dismissed')) return;
             const banner = document.createElement('div');
             banner.id = 'pwa-install-banner';
             banner.style.cssText = [
@@ -3263,11 +3461,13 @@
         function dismissInstallBanner() {
             const b = document.getElementById('pwa-install-banner');
             if (b) b.remove();
+            localStorage.setItem('pwa-install-dismissed', '1');
         }
 
         window.addEventListener('appinstalled', () => {
             showToast('Service Report installed!');
             dismissInstallBanner();
+            localStorage.setItem('pwa-install-dismissed', '1');
         });
     </script>
 
