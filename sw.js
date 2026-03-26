@@ -1,5 +1,5 @@
 // Service Worker for Agent Service Report PWA
-// v2.8.9 — matches app version
+// v2.9.3 — matches app version
 
 const CACHE_NAME = 'service-report-v2.9.2';
 const RUNTIME_CACHE = 'service-report-runtime-v1';
