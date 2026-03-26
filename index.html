@@ -488,7 +488,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.9.0";
+        const CURRENT_VERSION = "v2.9.1";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -824,7 +824,7 @@
 
             // Ensure finTable row exists
             if (!finTable[fin]) {
-                finTable[fin] = { type: '', body: '', lastSeen: '', lastFlight: '', lastAgent: '', lastStation: '', _ts: 0 };
+                finTable[fin] = { type: '', body: '', lastSeen: '', lastFlight: '', lastAgent: '', lastStation: '', lastTime: '', _ts: 0 };
             }
             // Resolve aircraft type
             const match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
@@ -836,6 +836,7 @@
                 finTable[fin].lastFlight  = entry['Flight#']  || '';
                 finTable[fin].lastAgent   = entry.Agent ? entry.Agent.split(',')[0].trim() : '';
                 finTable[fin].lastStation = entry['Service Station'] || '';
+                finTable[fin].lastTime    = entry.displayTime || '';
                 finTable[fin]._ts         = entryTs;
 
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
@@ -1253,7 +1254,7 @@
                     </span>
                     <span class="font-mono text-[9px] leading-relaxed">${onboardHtml}${removedHtml}</span>
                     <span class="text-[9px] leading-relaxed">${agentDisplay}</span>
-                    <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}</span>
+                    <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}${entry.lastTime ? `<span class="block text-slate-300">${entry.lastTime}</span>` : ''}</span>
                     <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
                 container.appendChild(div);
             });
@@ -2349,7 +2350,10 @@
                 else if (daysAgo <= 2)   priority = 2;
                 else                     priority = 1;
 
-                return { fin, type, body, airline, lastSeen, daysAgo, priority };
+                const lastTime    = (entry && entry.lastTime)    || '';
+                const lastStation = (entry && entry.lastStation) || '';
+
+                return { fin, type, body, airline, lastSeen, daysAgo, priority, lastTime, lastStation };
             });
 
             // Apply filters
@@ -2411,6 +2415,7 @@
                     const daysLabel  = r.daysAgo === null ? 'Never' : r.daysAgo === 0 ? 'Today' : r.daysAgo === 1 ? 'Yesterday' : `${r.daysAgo}d ago`;
                     const dateStr    = r.lastSeen || '—';
                     const pColor     = p === 1 ? 'text-red-500' : p === 2 ? 'text-amber-500' : 'text-emerald-500';
+                    const timeStnStr = [r.lastTime, r.lastStation].filter(Boolean).join(' · ');
                     const row = document.createElement('div');
                     row.className = "grid gap-2 px-4 py-2.5 text-[11px] border-b border-slate-50 hover:bg-slate-50 items-center last:border-0";
                     row.style.gridTemplateColumns = "4rem 4.5rem 2.5rem 1fr 2rem";
@@ -2418,7 +2423,7 @@
                         <span class="font-mono font-black text-blue-600">${r.fin}</span>
                         <span class="font-bold text-slate-700">${r.type}</span>
                         <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
-                        <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span></span>
+                        <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
                         <span class="text-center font-black text-[13px] ${pColor}">${p}</span>`;
                     section.appendChild(row);
                 });
@@ -3081,6 +3086,7 @@
                         finTable[fin].lastFlight    = incoming.lastFlight;
                         finTable[fin].lastAgent     = incoming.lastAgent   || finTable[fin].lastAgent   || '';
                         finTable[fin].lastStation   = incoming.lastStation || finTable[fin].lastStation || '';
+                        finTable[fin].lastTime      = incoming.lastTime    || finTable[fin].lastTime    || '';
                         finTable[fin].lastOnboard   = incoming.lastOnboard;
                         finTable[fin].lastRemoved   = incoming.lastRemoved;
                         finTable[fin].type          = incoming.type || finTable[fin].type;
