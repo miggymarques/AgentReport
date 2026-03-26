@@ -87,35 +87,39 @@
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-900">
 
-    <header class="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-30">
-        <div class="container mx-auto flex justify-between items-center">
-            <div class="flex items-center gap-2">
-                <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-lg">A</div>
-                <h1 class="text-xl font-bold tracking-tight">Service Report</h1>
+    <header class="bg-slate-900 text-white px-4 pt-3 pb-3 shadow-lg sticky top-0 z-30">
+        <div class="container mx-auto flex flex-col gap-2">
+            <!-- Row 1: Title full width -->
+            <div class="flex items-center gap-2 w-full">
+                <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-lg shrink-0">A</div>
+                <h1 class="text-xl font-bold tracking-tight flex-1">Service Report</h1>
             </div>
-            <button id="export-btn" onclick="exportToCSV()" class="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Export CSV
-            </button>
-            <button id="email-btn" onclick="emailCSV()" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                Email
-            </button>
-            <div id="sync-status" title="P2P Sync Status" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold font-mono cursor-default select-none">
-                <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-600 inline-block shrink-0"></span>
-                <div class="flex flex-col leading-tight">
-                    <span id="sync-label" class="text-slate-500">P2P</span>
-                    <span id="sync-peers" class="text-[9px] font-bold text-slate-500 leading-tight"></span>
+            <!-- Row 2: Export CSV, Email, P2P — equal height boxes -->
+            <div class="flex gap-2 w-full">
+                <button id="export-btn" onclick="exportToCSV()" class="flex-1 h-10 bg-emerald-500 hover:bg-emerald-600 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Export CSV
+                </button>
+                <button id="email-btn" onclick="emailCSV()" class="flex-1 h-10 bg-blue-500 hover:bg-blue-600 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    Email
+                </button>
+                <div id="sync-status" title="P2P Sync Status" class="flex-1 h-10 flex items-center justify-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold font-mono cursor-default select-none">
+                    <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-600 inline-block shrink-0"></span>
+                    <div class="flex flex-col leading-tight">
+                        <span id="sync-label" class="text-slate-500">P2P</span>
+                        <span id="sync-peers" class="text-[9px] font-bold text-slate-500 leading-tight"></span>
+                    </div>
                 </div>
             </div>
         </div>
     </header>
 
-    <nav class="bg-white border-b flex sticky top-[68px] z-20 shadow-sm">
+    <nav class="bg-white border-b flex sticky top-[104px] z-20 shadow-sm">
         <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-4 text-center font-bold transition-colors">NEW ENTRY</button>
         <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
         <button id="tab-priority" onclick="switchTab('priority')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">PRIORITY</button>
@@ -374,9 +378,9 @@
                 <div class="flex gap-2 px-3 pt-2 pb-1 items-center">
                     <div class="relative flex-1">
                         <span class="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-black uppercase pointer-events-none select-none">FIN</span>
-                        <input id="st-filter-fin" type="text" placeholder="e.g. AC101" maxlength="7"
-                            class="!pl-8 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
-                            oninput="this.value=this.value.toUpperCase(); applySyncTableFilters()">
+                        <input id="st-filter-fin" type="text" placeholder="e.g. 101" maxlength="4"
+                            inputmode="numeric" class="!pl-8 !py-1.5 !text-xs !border-slate-200 font-mono w-full"
+                            oninput="this.value=this.value.replace(/\D/g,'').slice(0,4); applySyncTableFilters()">
                     </div>
                     <div class="relative flex-1">
                         <span class="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-black uppercase pointer-events-none select-none">Asset</span>
@@ -488,7 +492,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.9.2";
+        const CURRENT_VERSION = "v2.9.3";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1151,9 +1155,9 @@
                 return;
             }
 
-            // Apply FIN filter (prefix match)
+            // Apply FIN filter (digits-only match against numeric portion of FIN)
             if (stFilterFin) {
-                fins = fins.filter(f => f.startsWith(stFilterFin));
+                fins = fins.filter(f => f.replace(/[^0-9]/g, "").startsWith(stFilterFin));
             }
 
             // Apply asset filter — match against onboard, removed, NRO, and all tracked assets
@@ -1291,7 +1295,7 @@
 
             const numSort = (a, b) => parseInt(a.replace(/\D/g,'')) - parseInt(b.replace(/\D/g,''));
 
-            const headers = ['FIN', 'Type', 'Body', 'Assets Onboard (Last Visit)', 'All Tracked Assets', 'Removed/Flagged (Last Visit)', 'Last Agent', 'Station', 'Last Seen', 'Last Flight', 'NRO Assets'];
+            const headers = ['FIN', 'Type', 'Body', 'Assets Onboard (Last Visit)', 'All Tracked Assets', 'Removed/Flagged (Last Visit)', 'Last Agent', 'Station', 'Last Seen', 'Last Time', 'Last Flight', 'NRO Assets'];
             const rows = [headers.map(esc).join(',')];
 
             fins.forEach(fin => {
@@ -1310,6 +1314,7 @@
                     entry.lastAgent   || '',
                     entry.lastStation || '',
                     entry.lastSeen    || '',
+                    entry.lastTime    || '',
                     entry.lastFlight  || '',
                     nroItems
                 ].map(esc).join(','));
@@ -1974,7 +1979,8 @@
         function fmtDate(val) {
             const d = xlDateToDate(val);
             if (!d) return '';
-            return d.toLocaleDateString();
+            // Explicit M/D/YYYY with 4-digit year — never locale-dependent 2-digit year
+            return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;
         }
 
         function handleScheduleFile(file) {
@@ -2146,6 +2152,32 @@
             return rows;
         }
 
+        // Normalise any date string to M/D/YYYY (4-digit year), matching toLocaleDateString() output.
+        // Handles: M/D/YY, M/D/YYYY, YYYY-MM-DD, or any string parseable by Date().
+        function normaliseDateStr(raw) {
+            if (!raw) return '';
+            const trimmed = raw.trim();
+            if (!trimmed) return '';
+            // Already slash-separated — check year length
+            const slashParts = trimmed.split('/');
+            if (slashParts.length === 3) {
+                const yr = slashParts[2].trim();
+                if (yr.length === 4) return trimmed;                    // already 4-digit
+                if (yr.length === 2) {
+                    const fullYr = 2000 + parseInt(yr, 10);
+                    return `${slashParts[0].trim()}/${slashParts[1].trim()}/${fullYr}`;
+                }
+            }
+            // ISO YYYY-MM-DD or any other parseable format
+            const d = new Date(trimmed);
+            if (!isNaN(d)) {
+                // Add 12h to avoid DST/timezone boundary off-by-one
+                const safe = new Date(trimmed.includes('T') ? d : d.getTime() + 12 * 3600000);
+                return safe.toLocaleDateString();
+            }
+            return trimmed; // unparseable — pass through unchanged
+        }
+
         // Convert a parsed row into an entry object and feed it through updateFinTable
         function applyHistoryRows(rows, statusEl) {
             let processed = 0, skipped = 0;
@@ -2154,9 +2186,10 @@
                 const fin = (row['FIN'] || '').trim().toUpperCase();
                 if (!fin || fin === 'INV' || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
 
-                // Build a timestamp from "Service Date" — fall back to index so ordering is preserved
+                // Build a timestamp from "Service Date" — normalise to 4-digit year first
                 let ts = 0;
-                const dateStr = row['Service Date'] || row['displayDate'] || '';
+                const rawDateStr = row['Service Date'] || row['displayDate'] || '';
+                const dateStr = normaliseDateStr(rawDateStr);
                 if (dateStr) {
                     const d = new Date(dateStr);
                     ts = isNaN(d) ? 0 : d.getTime();
@@ -2168,8 +2201,8 @@
                     id:             ts + idx,   // unique enough per row
                     FIN:            fin,
                     'Flight#':      row['Flight#']          || '',
-                    displayDate:    row['Service Date']     || row['displayDate'] || dateStr,
-                    displayTime:    row['Arrival Time']     || row['displayTime'] || '',
+                    displayDate:    dateStr || rawDateStr,
+                    displayTime:    row['Last Time'] || row['Arrival Time'] || row['displayTime'] || '',
                     'Service Station': row['Service Station'] || '',
                     Agent:          row['Agent']            || '',
                     Priority:       row['Priority']         || '1',
@@ -3421,16 +3454,94 @@
     </script>
 
     <script>
-        // ─── PWA: Service Worker Registration ───────────────────────────────
+        // ─── PWA: Service Worker Registration + Update Lifecycle ────────────
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js')
                     .then(reg => {
                         console.log('[PWA] SW registered:', reg.scope);
+
+                        // Check for updates immediately on every load
                         reg.update();
+
+                        // A new SW has installed and is waiting to activate
+                        const onUpdateFound = () => {
+                            const newWorker = reg.installing;
+                            if (!newWorker) return;
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // New version is ready — show update banner
+                                    showUpdateBanner(reg);
+                                }
+                            });
+                        };
+
+                        reg.addEventListener('updatefound', onUpdateFound);
+
+                        // If a SW is already waiting on page load (e.g. user had the page open
+                        // when an update was detected), show the banner immediately.
+                        if (reg.waiting && navigator.serviceWorker.controller) {
+                            showUpdateBanner(reg);
+                        }
                     })
                     .catch(err => console.warn('[PWA] SW registration failed:', err));
+
+                // When the SW controller changes (new SW took over), reload to get fresh files
+                let reloading = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (reloading) return;
+                    reloading = true;
+                    console.log('[PWA] Controller changed — reloading for latest version');
+                    window.location.reload();
+                });
             });
+        }
+
+        function showUpdateBanner(reg) {
+            if (document.getElementById('pwa-update-banner')) return;
+            const banner = document.createElement('div');
+            banner.id = 'pwa-update-banner';
+            banner.style.cssText = [
+                'position:fixed','bottom:80px','left:50%','transform:translateX(-50%)',
+                'background:#0f172a','border:1px solid #3b82f6','color:white',
+                'padding:12px 16px','border-radius:16px','z-index:10000',
+                'display:flex','align-items:center','gap:12px',
+                'box-shadow:0 8px 32px rgba(0,0,0,0.5)',
+                'max-width:340px','width:calc(100% - 32px)',
+                'font-family:sans-serif','font-size:13px'
+            ].join(';');
+            banner.innerHTML = `
+                <div style="width:34px;height:34px;background:#3b82f6;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:16px;flex-shrink:0;">↑</div>
+                <div style="flex:1;">
+                    <div style="font-weight:700;margin-bottom:2px;">Update available</div>
+                    <div style="color:#94a3b8;font-size:11px;">New version ready — tap to reload</div>
+                </div>
+                <button onclick="applyPWAUpdate()" id="pwa-update-btn"
+                    style="background:#3b82f6;color:white;border:none;padding:8px 14px;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer;flex-shrink:0;">
+                    Update
+                </button>
+                <button onclick="document.getElementById('pwa-update-banner').remove()"
+                    style="background:transparent;color:#475569;border:none;padding:4px;cursor:pointer;font-size:18px;line-height:1;flex-shrink:0;">×</button>
+            `;
+            document.body.appendChild(banner);
+
+            // Store reg reference so applyPWAUpdate can use it
+            banner._swReg = reg;
+        }
+
+        function applyPWAUpdate() {
+            const banner = document.getElementById('pwa-update-banner');
+            const reg    = banner?._swReg;
+            const btn    = document.getElementById('pwa-update-btn');
+            if (btn) btn.textContent = 'Updating…';
+
+            if (reg?.waiting) {
+                // Tell the waiting SW to skip waiting — controllerchange fires → reload
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            } else {
+                // Fallback: hard reload bypassing cache
+                window.location.reload(true);
+            }
         }
 
         // ─── PWA: Install Prompt ─────────────────────────────────────────────
