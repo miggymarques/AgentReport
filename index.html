@@ -492,7 +492,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.9.3";
+        const CURRENT_VERSION = "v2.9.4";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -3165,7 +3165,7 @@
                 let changed = false;
                 Object.entries(msg.nroIndex).forEach(([assetId, incoming]) => {
                     const inAsset = assetIndex[assetId];
-                    if (inAsset && (inAsset.ts || 0) >= (incoming.ts || 0)) return;
+                    if (inAsset && (inAsset.ts || 0) > (incoming.ts || 0)) return;
                     const existing = nroIndex[assetId];
                     if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
                         nroIndex[assetId] = incoming;
@@ -3174,7 +3174,7 @@
                 });
                 Object.keys(nroIndex).forEach(assetId => {
                     const inAsset = assetIndex[assetId];
-                    if (inAsset && (inAsset.ts || 0) >= (nroIndex[assetId].ts || 0)) {
+                    if (inAsset && (inAsset.ts || 0) > (nroIndex[assetId].ts || 0)) {
                         delete nroIndex[assetId]; changed = true;
                     }
                 });
