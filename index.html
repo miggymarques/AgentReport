@@ -90,9 +90,8 @@
     <header class="bg-slate-900 text-white px-4 pt-3 pb-3 shadow-lg sticky top-0 z-30">
         <div class="container mx-auto flex flex-col gap-2">
             <!-- Row 1: Title full width -->
-            <div class="flex items-center gap-2 w-full">
-                <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center font-bold text-lg shrink-0">A</div>
-                <h1 class="text-xl font-bold tracking-tight flex-1">Service Report</h1>
+            <div class="flex items-center w-full">
+                <h1 class="text-base font-bold tracking-tight w-full text-center">Agent Service Report</h1>
             </div>
             <!-- Row 2: Export CSV, Email, P2P — equal height boxes -->
             <div class="flex gap-2 w-full">
@@ -117,13 +116,12 @@
                 </div>
             </div>
         </div>
+        <nav class="flex bg-white -mx-4 -mb-3 mt-2 border-t border-slate-700">
+            <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-3 text-center font-bold transition-colors text-slate-900">NEW ENTRY</button>
+            <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-3 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
+            <button id="tab-priority" onclick="switchTab('priority')" class="tab-btn flex-1 py-3 text-center font-bold transition-colors text-slate-500">PRIORITY</button>
+        </nav>
     </header>
-
-    <nav class="bg-white border-b flex sticky top-[104px] z-20 shadow-sm">
-        <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-4 text-center font-bold transition-colors">NEW ENTRY</button>
-        <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
-        <button id="tab-priority" onclick="switchTab('priority')" class="tab-btn flex-1 py-4 text-center font-bold transition-colors text-slate-500">PRIORITY</button>
-    </nav>
 
     <main class="container mx-auto p-4 pb-24 max-w-2xl">
         <section id="section-form" class="space-y-4">
@@ -492,7 +490,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.9.7";
+        const CURRENT_VERSION = "v2.9.8";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
