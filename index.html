@@ -2836,7 +2836,26 @@
                 csvRows.push(headers.map(h => {
                     let v = r[h] !== undefined ? r[h] : "";
                     if (h === "Arrival Time") v = r.displayTime;
-                    if (h === "Service Date") v = r.displayDate;
+                    if (h === "Service Date") {
+                        // Format: DD/MM/YYYY H:MM AM/PM — only in CSV, does not alter stored fields
+                        const rawDate = r.displayDate || "";
+                        const rawTime = r.displayTime || "";
+                        if (rawDate) {
+                            const parts = rawDate.split("/");
+                            // toLocaleDateString() gives M/D/YYYY or M/D/YY
+                            let month = "", day = "", year = "";
+                            if (parts.length === 3) {
+                                month = parts[0].padStart(2, "0");
+                                day   = parts[1].padStart(2, "0");
+                                year  = parts[2].length === 2 ? "20" + parts[2] : parts[2];
+                            }
+                            v = (month && day && year)
+                                ? `${day}/${month}/${year}${rawTime ? " " + rawTime : ""}`
+                                : rawDate + (rawTime ? " " + rawTime : "");
+                        } else {
+                            v = rawTime;
+                        }
+                    }
                     if (h === "Rv") v = CURRENT_VERSION; 
                     return escapeCSV(v);
                 }).join(","));
