@@ -492,7 +492,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.9.4";
+        const CURRENT_VERSION = "v2.9.5";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -879,33 +879,42 @@
             });
             if (entry.ASST && !SKIP.has(entry.ASST) && !reportedNow.has(entry.ASST)) accountedFor.add(entry.ASST);
 
-            // Check assets previously on this FIN — flag any that are unaccounted for as NRO
-            Object.entries(assetIndex).forEach(([assetId, rec]) => {
-                if (rec.fin !== fin) return;           // not previously on this FIN
-                if (reportedNow.has(assetId)) return;  // still onboard — fine
-                if (accountedFor.has(assetId)) return; // explicitly moved or flagged — fine
-                // Asset was expected but missing with no explanation
-                const existingNro = nroIndex[assetId];
-                if (!existingNro || entryTs > (existingNro.ts || 0)) {
-                    nroIndex[assetId] = { lastFin: fin, lastSeen: entry.displayDate || '', ts: entryTs };
-                }
-            });
-
-            // Update assetIndex — reported assets move to this FIN
+            // ── Step 1: Update assetIndex with what we know from THIS entry ──────
+            // Reported onboard — asset confirmed on this FIN
             reportedNow.forEach(a => {
                 const existing = assetIndex[a];
                 if (!existing || entryTs >= existing.ts) {
                     assetIndex[a] = { fin, ts: entryTs };
-                    // Clear NRO if this asset is now confirmed somewhere
-                    if (nroIndex[a]) delete nroIndex[a];
                 }
             });
 
-            // Clear NRO and remove from assetIndex for anything explicitly accounted for
-            // — they are no longer expected on this FIN so future visits won't re-flag them
+            // Accounted for (removed / with issue) — asset is known about on this FIN;
+            // keep it in assetIndex so future visits can detect if it goes missing again.
+            // Only update if this entry is newer than whatever we already know.
             accountedFor.forEach(a => {
-                if (nroIndex[a]) delete nroIndex[a];
-                if (assetIndex[a] && assetIndex[a].fin === fin) delete assetIndex[a];
+                const existing = assetIndex[a];
+                if (!existing || entryTs >= existing.ts) {
+                    assetIndex[a] = { fin, ts: entryTs, accounted: true };
+                }
+            });
+
+            // ── Step 2: Clear NRO for anything now accounted for ─────────────────
+            // An asset is NOT NRO if it is onboard, removed, or flagged with an issue.
+            reportedNow.forEach(a => { if (nroIndex[a]) delete nroIndex[a]; });
+            accountedFor.forEach(a => { if (nroIndex[a]) delete nroIndex[a]; });
+
+            // ── Step 3: Flag NRO for assets previously on this FIN that are now
+            //           missing without explanation ──────────────────────────────
+            // We use the already-updated assetIndex so every asset appears exactly once.
+            Object.entries(assetIndex).forEach(([assetId, rec]) => {
+                if (rec.fin !== fin) return;           // not on this FIN
+                if (reportedNow.has(assetId)) return;  // confirmed onboard — fine
+                if (accountedFor.has(assetId)) return; // removed / with issue — fine
+                // Asset was expected but missing with no explanation → NRO
+                const existingNro = nroIndex[assetId];
+                if (!existingNro || entryTs > (existingNro.ts || 0)) {
+                    nroIndex[assetId] = { lastFin: fin, lastSeen: entry.displayDate || '', ts: entryTs };
+                }
             });
 
             saveFinTable();
@@ -3164,6 +3173,10 @@
             if (msg.nroIndex && typeof msg.nroIndex === 'object') {
                 let changed = false;
                 Object.entries(msg.nroIndex).forEach(([assetId, incoming]) => {
+                    // Reject incoming NRO if our assetIndex already has a newer record for
+                    // this asset — it is either onboard or explicitly accounted for (removed /
+                    // with issue), so it must not be treated as NRO regardless of the peer's
+                    // opinion. The accounted:true flag covers the removed/flagged case.
                     const inAsset = assetIndex[assetId];
                     if (inAsset && (inAsset.ts || 0) > (incoming.ts || 0)) return;
                     const existing = nroIndex[assetId];
@@ -3172,9 +3185,12 @@
                         changed = true;
                     }
                 });
+                // After merge, sweep out any NRO entry contradicted by assetIndex.
+                // An asset is NOT NRO if assetIndex has a record at least as recent —
+                // whether onboard (no flag) or accounted for (accounted: true).
                 Object.keys(nroIndex).forEach(assetId => {
                     const inAsset = assetIndex[assetId];
-                    if (inAsset && (inAsset.ts || 0) > (nroIndex[assetId].ts || 0)) {
+                    if (inAsset && (inAsset.ts || 0) >= (nroIndex[assetId].ts || 0)) {
                         delete nroIndex[assetId]; changed = true;
                     }
                 });
