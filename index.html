@@ -490,7 +490,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.10.0";
+        const CURRENT_VERSION = "v2.10.1";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -2992,7 +2992,12 @@
             const agents = sinceTs === 0
                 ? (agentRef.length > 0 ? agentRef : [])
                 : agentRef.filter(a => (a._ts || 0) > sinceTs);
-            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock };
+            // Bug fix: include sharedDb in full syncs so newly connecting peers receive all
+            // existing shared records — on delta syncs send only entries newer than sinceTs.
+            const sharedEntries = sinceTs === 0
+                ? sharedDb
+                : sharedDb.filter(e => (e.id || 0) > sinceTs);
+            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock, sharedDb: sharedEntries };
         }
 
         // Derive a short stable peer ID from an agent name
@@ -3300,6 +3305,26 @@
                 }
             }
 
+            // Bug fix: merge incoming sharedDb entries (present on FULL_SYNC and DELTA_SYNC)
+            // so newly connecting peers receive all existing shared records from peers.
+            if (msg.sharedDb && Array.isArray(msg.sharedDb) && msg.sharedDb.length > 0) {
+                let sharedChanged = false;
+                msg.sharedDb.forEach(entry => {
+                    if (!entry || !entry.id) return;
+                    if (!sharedDb.find(r => r.id === entry.id)) {
+                        sharedDb.unshift(entry);
+                        sharedChanged = true;
+                    }
+                });
+                if (sharedChanged) {
+                    sharedDb.sort((a, b) => (b.id || 0) - (a.id || 0));
+                    saveSharedDb();
+                    updateSharedCount();
+                    if (activeRefTab === 'alldata') renderSharedTable();
+                    anyChanged = true;
+                }
+            }
+
             return anyChanged;
         }
 
@@ -3341,13 +3366,20 @@
                 // Only update backend tables — do NOT add to db or history tab
                 updateFinTable(inEntry);
                 addToSharedDb(inEntry);
-                // Advance the peer's sync cursor so the next delta doesn't re-send this entry
-                if (inEntry.id && inEntry.id > (lastSyncTs[fromPeer] || 0)) {
-                    lastSyncTs[fromPeer] = inEntry.id;
-                }
+                // Bug fix: do NOT advance lastSyncTs by entry.id — entry IDs are not reliable
+                // sync cursors and clobber the finTable/assetIndex delta window. Leave lastSyncTs
+                // as-is so the next delta correctly covers any table records updated right now.
                 setSyncStatus('synced', Object.keys(p2pConnections).length);
                 // Re-render All Data table live if it's currently open
                 if (activeRefTab === 'alldata') renderSharedTable();
+                // Bug fix: forward derived table updates to all OTHER connected peers so that
+                // peers which weren't the original sender also get the finTable/assetIndex changes.
+                Object.keys(p2pConnections).forEach(pid => {
+                    if (pid === fromPeer) return; // don't echo back to sender
+                    const sinceTs = lastSyncTs[pid] || 0;
+                    const delta = buildDelta(sinceTs);
+                    conn_p2p_send(pid, { type: 'DELTA_SYNC', sinceTs, ...delta });
+                });
             }
 
             if (msg.type === 'AGENT_REF_SYNC') {
@@ -3428,9 +3460,21 @@
             if (p2pOfflineQueue.length === 0) return;
             const peers = Object.keys(p2pConnections);
             if (peers.length === 0) return;
-            p2pOfflineQueue.forEach(msg => peers.forEach(pid => conn_p2p_send(pid, msg)));
-            p2pOfflineQueue = [];
-            try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify([])); } catch(e) {}
+            // Bug fix: send each queued message to all currently connected peers, but only
+            // remove entries that were successfully dispatched. Do not clear the entire queue —
+            // peers that connect later also need these entries. Instead we track which entries
+            // have been sent at least once and remove only those, leaving the rest for next flush.
+            const stillPending = [];
+            p2pOfflineQueue.forEach(msg => {
+                let sent = false;
+                peers.forEach(pid => {
+                    const conn = p2pConnections[pid];
+                    if (conn && conn.open) { conn.send(msg); sent = true; }
+                });
+                if (!sent) stillPending.push(msg);
+            });
+            p2pOfflineQueue = stillPending;
+            try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
         }
 
         function startPeriodicSync(agentValue) {
@@ -3500,7 +3544,7 @@
 
         function updateSyncCount() {
             const count = Object.keys(p2pConnections).length;
-            setSyncStatus(count > 0 ? 'online' : 'online', count);
+            setSyncStatus(count > 0 ? 'online' : 'offline', count);
         }
 
     </script>
