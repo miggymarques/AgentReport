@@ -99,7 +99,7 @@
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    Export CSV
+                    Export
                 </button>
                 <button id="email-btn" onclick="emailCSV()" class="flex-1 h-10 bg-blue-500 hover:bg-blue-600 rounded-lg text-sm font-bold transition-all shadow-md active:scale-95 flex items-center justify-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -317,6 +317,12 @@
         </section>
 
         <section id="section-records" class="hidden space-y-4">
+            <div class="flex justify-end">
+                <button onclick="deleteAllRecords()" id="clear-all-btn" class="hidden text-[10px] font-black uppercase tracking-wide text-red-400 hover:text-red-600 border border-red-200 hover:border-red-400 bg-white hover:bg-red-50 px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    Clear All
+                </button>
+            </div>
             <div id="no-records" class="text-center py-16 bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -350,6 +356,10 @@
                         class="!pl-6 !py-1 !text-xs !border-slate-200 font-mono w-20"
                         oninput="this.value=this.value.replace(/\D/g,'').slice(0,4); setPriorityFilter('fin', this.value)">
                 </div>
+                <button onclick="clearPriorityFilters()" id="pf-clear" title="Clear filters"
+                    class="hidden text-slate-400 hover:text-red-500 transition-colors px-1 shrink-0">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
             </div>
             <div id="priority-list"></div>
         </section>
@@ -490,7 +500,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.10.1";
+        const CURRENT_VERSION = "v2.10.2";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -878,9 +888,27 @@
             if (entry.ASST && !SKIP.has(entry.ASST) && !reportedNow.has(entry.ASST)) accountedFor.add(entry.ASST);
 
             // ── Step 1: Update assetIndex with what we know from THIS entry ──────
-            // Reported onboard — asset confirmed on this FIN
+            // Reported onboard — asset confirmed on this FIN.
+            // If it was previously tracked on a DIFFERENT FIN and this entry is NEWER,
+            // evict it from that FIN's snapshots — an asset can only be in one place.
+            // Timestamp guard applies in both directions: an older out-of-order sync
+            // must never displace a more recent confirmed location.
             reportedNow.forEach(a => {
                 const existing = assetIndex[a];
+                if (existing && existing.fin && existing.fin !== fin && entryTs >= (existing.ts || 0)) {
+                    // This entry is newer — asset has moved, evict from previous FIN's snapshots
+                    const prevFin = existing.fin;
+                    if (finTable[prevFin]) {
+                        if (finTable[prevFin].lastOnboard) {
+                            finTable[prevFin].lastOnboard = finTable[prevFin].lastOnboard.filter(id => id !== a);
+                        }
+                        if (finTable[prevFin].lastRemoved) {
+                            finTable[prevFin].lastRemoved = finTable[prevFin].lastRemoved.filter(id => id !== a);
+                        }
+                    }
+                    // Clear NRO — asset is now accounted for on the new FIN
+                    if (nroIndex[a]) delete nroIndex[a];
+                }
                 if (!existing || entryTs >= existing.ts) {
                     assetIndex[a] = { fin, ts: entryTs };
                 }
@@ -888,9 +916,21 @@
 
             // Accounted for (removed / with issue) — asset is known about on this FIN;
             // keep it in assetIndex so future visits can detect if it goes missing again.
-            // Only update if this entry is newer than whatever we already know.
+            // Also evict from any previous FIN if this entry is newer.
             accountedFor.forEach(a => {
                 const existing = assetIndex[a];
+                if (existing && existing.fin && existing.fin !== fin && entryTs >= (existing.ts || 0)) {
+                    const prevFin = existing.fin;
+                    if (finTable[prevFin]) {
+                        if (finTable[prevFin].lastOnboard) {
+                            finTable[prevFin].lastOnboard = finTable[prevFin].lastOnboard.filter(id => id !== a);
+                        }
+                        if (finTable[prevFin].lastRemoved) {
+                            finTable[prevFin].lastRemoved = finTable[prevFin].lastRemoved.filter(id => id !== a);
+                        }
+                    }
+                    if (nroIndex[a]) delete nroIndex[a];
+                }
                 if (!existing || entryTs >= existing.ts) {
                     assetIndex[a] = { fin, ts: entryTs, accounted: true };
                 }
@@ -1815,6 +1855,8 @@
             if (station) stationField.value = station;
             sessionStorage.setItem(AGENT_KEY, agentField.value);
             sessionStorage.setItem(STATION_KEY, stationField.value);
+            localStorage.setItem(AGENT_KEY, agentField.value);
+            localStorage.setItem(STATION_KEY, stationField.value);
             // Kick off P2P whenever agent is selected
             if (agentField.value) initP2P(agentField.value);
             // Defer FIN suggestion until P2P is open so the claim broadcast actually reaches peers.
@@ -1828,8 +1870,8 @@
         }
 
         function restoreAgent() {
-            const savedAgent = sessionStorage.getItem(AGENT_KEY);
-            const savedStation = sessionStorage.getItem(STATION_KEY);
+            const savedAgent   = localStorage.getItem(AGENT_KEY)   || sessionStorage.getItem(AGENT_KEY);
+            const savedStation = localStorage.getItem(STATION_KEY) || sessionStorage.getItem(STATION_KEY);
             if (savedAgent) document.getElementById('agent-field').value = savedAgent;
             if (savedStation) document.getElementById('station-field').value = savedStation;
             // Auto-connect on restore
@@ -2189,6 +2231,13 @@
         function applyHistoryRows(rows, statusEl) {
             let processed = 0, skipped = 0;
 
+            // Build entry objects first so we can sort by timestamp before processing.
+            // updateFinTable uses entryTs >= existing.ts to decide which record wins,
+            // so rows must arrive oldest-first — that way the newest row always wins
+            // and the single-location eviction logic works correctly regardless of
+            // the order rows appear in the imported file.
+            const entries = [];
+
             rows.forEach((row, idx) => {
                 const fin = (row['FIN'] || '').trim().toUpperCase();
                 if (!fin || fin === 'INV' || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
@@ -2204,7 +2253,7 @@
                 // Use index as tie-breaker so row order is respected within same date
                 if (!ts) ts = idx + 1;
 
-                const entry = {
+                entries.push({
                     id:             ts + idx,   // unique enough per row
                     FIN:            fin,
                     'Flight#':      row['Flight#']          || '',
@@ -2230,8 +2279,14 @@
                     SrvcIssCAT:     row['SrvcIssCAT']       || '',
                     SrvcIss:        row['SrvcIss']          || '',
                     IssueDetails:   row['Comments']         || '',
-                };
+                });
+            });
 
+            // Sort oldest → newest so each call to updateFinTable can correctly
+            // evict stale asset placements using the timestamp guard.
+            entries.sort((a, b) => (a.id || 0) - (b.id || 0));
+
+            entries.forEach(entry => {
                 updateFinTable(entry);
                 processed++;
             });
@@ -2333,6 +2388,13 @@
             if (type === 'priority') priorityFilterPriority = val;
             if (type === 'fin')      priorityFilterFin      = val.trim();
 
+            // Show/hide the clear X button
+            const clearBtn = document.getElementById('pf-clear');
+            if (clearBtn) {
+                const active = priorityFilterAirline !== 'ALL' || priorityFilterPriority !== 'ALL' || priorityFilterFin !== '';
+                clearBtn.classList.toggle('hidden', !active);
+            }
+
             // Update button styles
             document.querySelectorAll('.pf-airline').forEach(btn => {
                 const active = btn.id === `pf-airline-${priorityFilterAirline}`;
@@ -2345,6 +2407,26 @@
                 btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white ' + (colors[key] || colors['ALL'])}`;
             });
 
+            renderPriorityList();
+        }
+
+        function clearPriorityFilters() {
+            priorityFilterAirline  = 'ALL';
+            priorityFilterPriority = 'ALL';
+            priorityFilterFin      = '';
+            const finInput = document.getElementById('pf-fin-input');
+            if (finInput) finInput.value = '';
+            document.getElementById('pf-clear')?.classList.add('hidden');
+            document.querySelectorAll('.pf-airline').forEach(btn => {
+                const active = btn.id === 'pf-airline-ALL';
+                btn.className = `pf-airline px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`;
+            });
+            document.querySelectorAll('.pf-priority').forEach(btn => {
+                const key = btn.id.replace('pf-priority-','');
+                const active = btn.id === 'pf-priority-ALL';
+                const colors = { '1':'text-red-400 border-red-200 hover:bg-red-50', '2':'text-amber-500 border-amber-200 hover:bg-amber-50', '3':'text-emerald-500 border-emerald-200 hover:bg-emerald-50', 'ALL':'text-slate-500 border-slate-200 hover:bg-slate-50' };
+                btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white ' + (colors[key] || colors['ALL'])}`;
+            });
             renderPriorityList();
         }
 
@@ -2641,8 +2723,15 @@
         function updateUI() {
             const list = document.getElementById('records-list');
             document.getElementById('count').innerText = db.length;
-            if (db.length === 0) { list.innerHTML = ''; document.getElementById('no-records').classList.remove('hidden'); return; }
+            const clearAllBtn = document.getElementById('clear-all-btn');
+            if (db.length === 0) {
+                list.innerHTML = '';
+                document.getElementById('no-records').classList.remove('hidden');
+                if (clearAllBtn) clearAllBtn.classList.add('hidden');
+                return;
+            }
             document.getElementById('no-records').classList.add('hidden');
+            if (clearAllBtn) clearAllBtn.classList.remove('hidden');
 
             const skip = new Set(['N/A', 'NtRqrd', 'Msng', '', undefined, null]);
             const fmtA = (...vals) => vals.filter(v => !skip.has(v)).join(', ') || '---';
@@ -2700,8 +2789,15 @@
         function deleteRecord(id) {
             db = db.filter(r => r.id !== id);
             try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
-            removeFromSharedDb(id);
             updateUI();
+        }
+
+        function deleteAllRecords() {
+            if (!confirm(`Delete all ${db.length} record${db.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+            db = [];
+            try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
+            updateUI();
+            showToast("All records cleared");
         }
 
         // ─── Shared DB (all agents) ───────────────────────────────────────────
@@ -3192,6 +3288,27 @@
                     }
                     // Equal _ts: keep local copy (no-op) — avoids flip-flopping between two peers
                 });
+                // After merging finTable, scrub any asset from lastOnboard/lastRemoved that
+                // our assetIndex places on a DIFFERENT FIN with a newer or equal timestamp.
+                // This enforces single-location ownership after a peer sync.
+                Object.entries(finTable).forEach(([fin, row]) => {
+                    if (row.lastOnboard) {
+                        row.lastOnboard = row.lastOnboard.filter(assetId => {
+                            const rec = assetIndex[assetId];
+                            // Keep if no index record, or index agrees this FIN owns it,
+                            // or the finTable snapshot is newer than the index record
+                            if (!rec || rec.fin === fin) return true;
+                            return (row._ts || 0) > (rec.ts || 0);
+                        });
+                    }
+                    if (row.lastRemoved) {
+                        row.lastRemoved = row.lastRemoved.filter(assetId => {
+                            const rec = assetIndex[assetId];
+                            if (!rec || rec.fin === fin) return true;
+                            return (row._ts || 0) > (rec.ts || 0);
+                        });
+                    }
+                });
                 if (changed) { saveFinTable(); anyChanged = true; }
             }
 
@@ -3201,6 +3318,19 @@
                 Object.entries(msg.assetIndex).forEach(([assetId, incoming]) => {
                     const existing = assetIndex[assetId];
                     if (!existing || (incoming.ts || 0) > (existing.ts || 0)) {
+                        // If asset is moving to a different FIN, evict it from the old FIN's snapshots
+                        if (existing && existing.fin && incoming.fin && existing.fin !== incoming.fin) {
+                            const prevFin = existing.fin;
+                            if (finTable[prevFin]) {
+                                if (finTable[prevFin].lastOnboard) {
+                                    finTable[prevFin].lastOnboard = finTable[prevFin].lastOnboard.filter(id => id !== assetId);
+                                }
+                                if (finTable[prevFin].lastRemoved) {
+                                    finTable[prevFin].lastRemoved = finTable[prevFin].lastRemoved.filter(id => id !== assetId);
+                                }
+                            }
+                            if (nroIndex[assetId]) delete nroIndex[assetId];
+                        }
                         assetIndex[assetId] = incoming;
                         changed = true;
                     }
