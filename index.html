@@ -500,7 +500,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.10.3";
+        const CURRENT_VERSION = "v2.10.4";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1311,7 +1311,8 @@
                 const q = stFilterAsset.replace(/\D/g,''); // numeric portion for fuzzy match
                 fins = fins.filter(fin => {
                     const entry = finTable[fin];
-                    const onboard  = finAssetMap[fin] || [];   // from assetIndex — authoritative
+                    const nroSet   = new Set((finNro[fin] || []).map(n => n.assetId));
+                    const onboard  = (finAssetMap[fin] || []).filter(a => !nroSet.has(a)); // exclude NRO from onboard
                     const removed  = entry.lastRemoved || [];
                     const nroList  = (finNro[fin] || []).map(n => n.assetId);
                     const all = [...onboard, ...removed, ...nroList];
@@ -1368,8 +1369,11 @@
                     return text;
                 };
 
-                // Onboard: driven by assetIndex via finAssetMap — guaranteed single-location
-                const onboardAssets = (finAssetMap[fin] || []).slice().sort(numSort);
+                // Onboard: driven by assetIndex via finAssetMap — guaranteed single-location.
+                // Exclude any asset that is in nroIndex — NRO means it was NOT reported
+                // onboard on the last visit so it must only appear in the NRO column.
+                const nroSet = new Set((finNro[fin] || []).map(n => n.assetId));
+                const onboardAssets = (finAssetMap[fin] || []).filter(a => !nroSet.has(a)).sort(numSort);
                 const onboardHtml = onboardAssets.length > 0
                     ? onboardAssets.map(a => `<span class="text-slate-600">${hl(a)}</span>`).join(', ')
                     : '<span class="text-slate-300">—</span>';
