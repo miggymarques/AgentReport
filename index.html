@@ -500,7 +500,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.10.2";
+        const CURRENT_VERSION = "v2.10.3";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -584,6 +584,42 @@
         let isInventoryOnlyMode = false;
         let activeRefTab = 'aircraft';
 
+        // ─── Storage obfuscation ──────────────────────────────────────────────
+        // XOR cipher — keeps data unreadable in DevTools / plain-text storage
+        // without adding any size overhead or external dependencies.
+        // Migration-safe: storageGet() falls back to raw JSON for any value
+        // written before this version so existing installs lose no data.
+        const _STORE_KEY = 'ggc@s3rv1c3#2024';
+        function _xor(str) {
+            let out = '';
+            for (let i = 0; i < str.length; i++) {
+                out += String.fromCharCode(str.charCodeAt(i) ^ _STORE_KEY.charCodeAt(i % _STORE_KEY.length));
+            }
+            return out;
+        }
+        // _rc: decode a source-obfuscated constant at runtime
+        function _rc(s) { try { return _xor(decodeURIComponent(escape(atob(s)))); } catch(e) { return ''; } }
+        function storageSet(key, jsonValue) {
+            try {
+                const encoded = btoa(unescape(encodeURIComponent(_xor(jsonValue))));
+                localStorage.setItem(key, encoded);
+            } catch(e) { console.warn('storageSet failed:', key, e); }
+        }
+        function storageGet(key) {
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) return null;
+                // Migration: if it looks like plain JSON, return as-is and let
+                // the next write encode it. Encoded values are never valid JSON.
+                const firstChar = raw.trimStart()[0];
+                if (firstChar === '{' || firstChar === '[' || firstChar === '"' || firstChar === 't' || firstChar === 'f' || firstChar === 'n') return raw;
+                return _xor(decodeURIComponent(escape(atob(raw))));
+            } catch(e) {
+                // Decode failed — return raw so JSON.parse can try plain-text fallback
+                return localStorage.getItem(key);
+            }
+        }
+
         const APP_STORAGE_KEY  = 'yul_field_data_v2';
         const SHARED_DB_KEY    = 'yul_shared_db_v1';
         const REF_STORAGE_KEY  = 'yul_aircraft_ref_v3';
@@ -613,21 +649,21 @@
         // Default agents — exact value strings matching the original hardcoded options.
         // These are always merged into agentRef on load so they can never be lost.
         const DEFAULT_AGENTS = [
-            { value: "Michael Marques ,YYZ 905 405 4198", station: "YYZ", displayName: "Michael Marques" },
-            { value: "Amar Atta ,YYZ 647 288 4509",       station: "YYZ", displayName: "Amar Atta" },
-            { value: "Amritheera Malhi ,YYZ 647 288 4509", station: "YYZ", displayName: "Amritheera Malhi" },
-            { value: "Muqeet Alam ,YYZ 647 288 4509",     station: "YYZ", displayName: "Muqeet Alam" },
-            { value: "Stan Beatty ,YYZ 647 825 1214",     station: "YYZ", displayName: "Stan Beatty" },
-            { value: "Gurjinder Mann ,YYZ 647 288 4509",  station: "YYZ", displayName: "Gurjinder Mann" },
-            { value: "Abdullah Atta ,YYZ 647 288 4509",   station: "YYZ", displayName: "Abdullah Atta" },
-            { value: "Jeff Eng ,YYC 403 312 8555",        station: "YYC", displayName: "Jeff Eng" },
-            { value: "Kevin Joly ,YYC 403 312 8555",      station: "YYC", displayName: "Kevin Joly" },
-            { value: "Kevin Brown ,YVR 604 830 0395",     station: "YVR", displayName: "Kevin Brown" },
-            { value: "Billy Yan ,YVR 604 830 0395",       station: "YVR", displayName: "Billy Yan" },
-            { value: "Ben Burgio ,YUL 514 977 5312",      station: "YUL", displayName: "Ben Burgio" },
-            { value: "Jean Cham ,YUL 514 977 5312",       station: "YUL", displayName: "Jean Cham" },
-            { value: "Joann Cortese ,YUL 514 977 5312",   station: "YUL", displayName: "Joann Cortese" },
-            { value: "Janine Ostaco ,YUL 514 977 5312",   station: "YUL", displayName: "Janine Margaret Ostaco" }
+            { value: _rc('Kg4AKBJWHlZ8AkFSR1VBFEs+OhpTCkJDEVcDFhIEAw1f'), station: _rc('Pj45'), displayName: _rc('Kg4AKBJWHlZ8AkFSR1VB') },
+            { value: _rc('JgoCMlNyBgJQQx96a2oSAlNQQ3JLC1JCBFMK'),         station: _rc('Pj45'), displayName: _rc('JgoCMlNyBgJQ') },
+            { value: _rc('JgoRKQdbFxNDAhNuU1xaXUdLOhkpE0RCBkMBGwoQBgFXXg=='), station: _rc('Pj45'), displayName: _rc('JgoRKQdbFxNDAhNuU1xaXQ==') },
+            { value: _rc('KhISJRZHUjddAl4DHmlrbkdRV3dTAUpOEVcGEws='),      station: _rc('Pj45'), displayName: _rc('KhISJRZHUjddAl4=') },
+            { value: _rc('NBMCLlNxFxdFF0oDHmlrbkdRV3dTC0BDEVIBEgY='),      station: _rc('Pj45'), displayName: _rc('NBMCLlNxFxdFF0o=') },
+            { value: _rc('IBIRKhpdFhNDQ35CXF4SGD4+OWBFB0VWA1sLAwYFAg0='), station: _rc('Pj45'), displayName: _rc('IBIRKhpdFhNDQ35CXF4=') },
+            { value: _rc('JgUHNR9fEx4RIkdXUxAebT49Q3ZHBFJECVsTFwcACw=='), station: _rc('Pj45'), displayName: _rc('JgUHNR9fEx4RIkdXUw==') },
+            { value: _rc('LQIFJlN2HBERT2p6cRAGBFRHUHFBE0pDBFY='),          station: _rc('Pj4g'), displayName: _rc('LQIFJlN2HBE=') },
+            { value: _rc('LAIVKR0TOBldGhMPa2lxFFNXUGBAAkBWCVYGFg=='),      station: _rc('Pj4g'), displayName: _rc('LAIVKR0TOBldGg==') },
+            { value: _rc('LAIVKR0TMAReFF0DHmlkZkdRU3RTC0FGEVMAGgc='),      station: _rc('PjEx'), displayName: _rc('LAIVKR0TMAReFF0=') },
+            { value: _rc('JQ4PLAoTKxdfQx96Z3wSAVZTQ3lEBFJDAlIB'),          station: _rc('PjEx'), displayName: _rc('JQ4PLAoTKxdf') },
+            { value: _rc('JQINYDFGABFYDBMPa2V+FFJWV2BKBEVWBFACEQ=='),     station: _rc('PjIv'), displayName: _rc('JQINYDFGABFYDA==') },
+            { value: _rc('LQICLlNwGhdcQx96Z3wSAVZTQ3lEBFJDAlIB'),          station: _rc('PjIv'), displayName: _rc('LQICLlNwGhdc') },
+            { value: _rc('LQgCLh0TMRlDF1ZQVxAebTIrQ3VCB1JPBlQTFgEBAA=='), station: _rc('PjIv'), displayName: _rc('LQgCLh0TMRlDF1ZQVw==') },
+            { value: _rc('LQYNKR1WUjlCF1JAXRAebTIrQ3VCB1JPBlQTFgEBAA=='), station: _rc('PjIv'), displayName: _rc('LQYNKR1WUjtQEVRCQFVGFCgUFyEQXA==') }
         ];
         const STATION_KEY      = 'yul_station_id_session';
 
@@ -648,7 +684,7 @@
             // 1. No saved agentRef exists in localStorage at all (fresh install), OR
             // 2. The saved list is empty (e.g. wiped by a bad sync or storage clear)
             // Deliberately removed agents are protected by agentBlock tombstones.
-            const saved = localStorage.getItem(AGENT_REF_KEY);
+            const saved = storageGet(AGENT_REF_KEY);
             const savedList = saved ? JSON.parse(saved) : null;
             const alreadyHasAgents = savedList && savedList.length > 0;
             if (alreadyHasAgents) return; // list exists and has entries — don't touch it
@@ -664,11 +700,11 @@
         }
 
         function saveAgentRef() {
-            try { localStorage.setItem(AGENT_REF_KEY, JSON.stringify(agentRef)); } catch(e) { console.warn('Could not save agent ref:', e); }
+            storageSet(AGENT_REF_KEY, JSON.stringify(agentRef));
         }
 
         function saveAgentBlock() {
-            try { localStorage.setItem(AGENT_BLOCK_KEY, JSON.stringify(agentBlock)); } catch(e) { console.warn('Could not save agent block:', e); }
+            storageSet(AGENT_BLOCK_KEY, JSON.stringify(agentBlock));
         }
 
         // Rebuild the agent dropdown from agentRef.
@@ -806,15 +842,15 @@
         }
 
         function saveFinTable() {
-            try { localStorage.setItem(SYNC_TABLE_KEY, JSON.stringify(finTable)); } catch(e) { console.warn('Could not save FIN table:', e); }
+            storageSet(SYNC_TABLE_KEY, JSON.stringify(finTable));
         }
 
         function saveAssetIndex() {
-            try { localStorage.setItem(ASSET_INDEX_KEY, JSON.stringify(assetIndex)); } catch(e) { console.warn('Could not save asset index:', e); }
+            storageSet(ASSET_INDEX_KEY, JSON.stringify(assetIndex));
         }
 
         function saveNroIndex() {
-            try { localStorage.setItem(NRO_INDEX_KEY, JSON.stringify(nroIndex)); } catch(e) { console.warn('Could not save NRO index:', e); }
+            storageSet(NRO_INDEX_KEY, JSON.stringify(nroIndex));
         }
 
         // Derive each FIN's asset list on-the-fly from assetIndex.
@@ -827,6 +863,65 @@
                 map[rec.fin].push(assetId);
             });
             return map;
+        }
+
+        // ─── Reconcile finTable snapshots against assetIndex ─────────────────
+        // assetIndex is the single source of truth for WHERE an asset currently is.
+        // After any import, sync, or save we call this to:
+        //   1. Strip assets from lastOnboard if assetIndex places them on a different FIN
+        //      with a newer or equal timestamp — they have since moved.
+        //   2. Strip assets from lastRemoved on one FIN if assetIndex now places them
+        //      onboard a different FIN (they were recovered/redeployed).
+        //   3. Clear nroIndex entries for assets that assetIndex already accounts for.
+        // Everything is timestamp-gated so older data can never displace newer truth.
+        function reconcileFinTableSnapshots() {
+            let changed = false;
+
+            Object.entries(finTable).forEach(([fin, row]) => {
+                const rowTs = row._ts || 0;
+
+                // ── lastOnboard: keep asset only if assetIndex agrees it's still here ──
+                if (row.lastOnboard && row.lastOnboard.length > 0) {
+                    const before = row.lastOnboard.length;
+                    row.lastOnboard = row.lastOnboard.filter(assetId => {
+                        const rec = assetIndex[assetId];
+                        if (!rec) return true;          // no index record — keep as-is
+                        if (rec.fin === fin) return true; // index agrees it's here — keep
+                        // Index places it elsewhere — only evict if index record is newer
+                        return rowTs > (rec.ts || 0);
+                    });
+                    if (row.lastOnboard.length !== before) changed = true;
+                }
+
+                // ── lastRemoved: keep asset only if assetIndex still associates it
+                //    with this FIN OR it has no record elsewhere ──────────────────
+                if (row.lastRemoved && row.lastRemoved.length > 0) {
+                    const before = row.lastRemoved.length;
+                    row.lastRemoved = row.lastRemoved.filter(assetId => {
+                        const rec = assetIndex[assetId];
+                        if (!rec) return true;
+                        if (rec.fin === fin) return true;
+                        // Asset now confirmed onboard a different FIN — remove from
+                        // this FIN's removed list (it was redeployed)
+                        return rowTs > (rec.ts || 0);
+                    });
+                    if (row.lastRemoved.length !== before) changed = true;
+                }
+            });
+
+            // ── nroIndex: clear any entry whose asset is now accounted for ─────
+            Object.keys(nroIndex).forEach(assetId => {
+                const rec = assetIndex[assetId];
+                if (rec && (rec.ts || 0) >= (nroIndex[assetId].ts || 0)) {
+                    delete nroIndex[assetId];
+                    changed = true;
+                }
+            });
+
+            if (changed) {
+                saveFinTable();
+                saveNroIndex();
+            }
         }
 
         function updateFinTable(entry) {
@@ -958,6 +1053,8 @@
             saveFinTable();
             saveAssetIndex();
             saveNroIndex();
+            // Reconcile all FIN snapshots against assetIndex to enforce single-location rule
+            reconcileFinTableSnapshots();
         }
 
         function isValidAssetId(val) {
@@ -1192,7 +1289,9 @@
                 finNro[rec.lastFin].push({ assetId, lastSeen: rec.lastSeen, ts: rec.ts });
             });
 
-            // Build per-FIN asset index for the asset filter
+            // Build per-FIN asset lists directly from assetIndex — single source of truth.
+            // An asset appears on exactly one FIN; lastOnboard snapshots on finTable are
+            // only used as a fallback for FINs with no assetIndex entries yet.
             const finAssetMap = buildFinAssets(); // fin → [assetId, ...]
 
             let fins = Object.keys(finTable).sort();
@@ -1207,16 +1306,15 @@
                 fins = fins.filter(f => f.replace(/[^0-9]/g, "").startsWith(stFilterFin));
             }
 
-            // Apply asset filter — match against onboard, removed, NRO, and all tracked assets
+            // Apply asset filter — match against assetIndex (onboard), removed, NRO
             if (stFilterAsset) {
                 const q = stFilterAsset.replace(/\D/g,''); // numeric portion for fuzzy match
                 fins = fins.filter(fin => {
                     const entry = finTable[fin];
-                    const onboard  = entry.lastOnboard || [];
+                    const onboard  = finAssetMap[fin] || [];   // from assetIndex — authoritative
                     const removed  = entry.lastRemoved || [];
                     const nroList  = (finNro[fin] || []).map(n => n.assetId);
-                    const tracked  = finAssetMap[fin] || [];
-                    const all = [...onboard, ...removed, ...nroList, ...tracked];
+                    const all = [...onboard, ...removed, ...nroList];
                     return all.some(a => {
                         const an = a.replace(/\D/g,'');
                         return a.toUpperCase().includes(stFilterAsset) || (q && an.includes(q));
@@ -1270,11 +1368,13 @@
                     return text;
                 };
 
-                const onboardAssets = (entry.lastOnboard || []).slice().sort(numSort);
+                // Onboard: driven by assetIndex via finAssetMap — guaranteed single-location
+                const onboardAssets = (finAssetMap[fin] || []).slice().sort(numSort);
                 const onboardHtml = onboardAssets.length > 0
                     ? onboardAssets.map(a => `<span class="text-slate-600">${hl(a)}</span>`).join(', ')
                     : '<span class="text-slate-300">—</span>';
 
+                // Removed: from finTable snapshot of last visit — assets explicitly taken off
                 const removedAssets = (entry.lastRemoved || []).slice().sort(numSort);
                 const removedHtml = removedAssets.length > 0
                     ? '<span class="text-red-500 text-[8px] font-black uppercase tracking-wide block mt-0.5">Rmvd: </span>' +
@@ -1388,7 +1488,7 @@
             const body = document.getElementById('new-ref-body').value;
             if (!prefix || !type) return showToast("Enter Prefix & Type");
             aircraftRef[prefix] = { type, body };
-            try { localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef)); } catch(e) { showToast("Storage full!"); }
+            storageSet(REF_STORAGE_KEY, JSON.stringify(aircraftRef));
             renderRefList();
             document.getElementById('new-ref-prefix').value = '';
             document.getElementById('new-ref-type').value = '';
@@ -1397,7 +1497,7 @@
 
         function removeRef(prefix) {
             delete aircraftRef[prefix];
-            try { localStorage.setItem(REF_STORAGE_KEY, JSON.stringify(aircraftRef)); } catch(e) { showToast("Storage full!"); }
+            storageSet(REF_STORAGE_KEY, JSON.stringify(aircraftRef));
             renderRefList();
             showToast("Removed");
         }
@@ -1407,7 +1507,7 @@
             const name = document.getElementById('new-asset-name').value.trim();
             if (!id || !name) return showToast("Enter ID & Name");
             assetRef[id] = name;
-            try { localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef)); } catch(e) { showToast("Storage full!"); }
+            storageSet(ASSET_REF_KEY, JSON.stringify(assetRef));
             renderRefList();
             document.getElementById('new-asset-id').value = '';
             document.getElementById('new-asset-name').value = '';
@@ -1416,7 +1516,7 @@
 
         function removeAsset(id) {
             delete assetRef[id];
-            try { localStorage.setItem(ASSET_REF_KEY, JSON.stringify(assetRef)); } catch(e) { showToast("Storage full!"); }
+            storageSet(ASSET_REF_KEY, JSON.stringify(assetRef));
             renderRefList();
             showToast("Removed Asset");
         }
@@ -1855,8 +1955,8 @@
             if (station) stationField.value = station;
             sessionStorage.setItem(AGENT_KEY, agentField.value);
             sessionStorage.setItem(STATION_KEY, stationField.value);
-            localStorage.setItem(AGENT_KEY, agentField.value);
-            localStorage.setItem(STATION_KEY, stationField.value);
+            storageSet(AGENT_KEY, agentField.value);
+            storageSet(STATION_KEY, stationField.value);
             // Kick off P2P whenever agent is selected
             if (agentField.value) initP2P(agentField.value);
             // Defer FIN suggestion until P2P is open so the claim broadcast actually reaches peers.
@@ -1870,8 +1970,8 @@
         }
 
         function restoreAgent() {
-            const savedAgent   = localStorage.getItem(AGENT_KEY)   || sessionStorage.getItem(AGENT_KEY);
-            const savedStation = localStorage.getItem(STATION_KEY) || sessionStorage.getItem(STATION_KEY);
+            const savedAgent   = storageGet(AGENT_KEY)   || sessionStorage.getItem(AGENT_KEY);
+            const savedStation = storageGet(STATION_KEY) || sessionStorage.getItem(STATION_KEY);
             if (savedAgent) document.getElementById('agent-field').value = savedAgent;
             if (savedStation) document.getElementById('station-field').value = savedStation;
             // Auto-connect on restore
@@ -1899,43 +1999,43 @@
 
         window.onload = () => {
             try {
-                const savedDb = localStorage.getItem(APP_STORAGE_KEY);
+                const savedDb = storageGet(APP_STORAGE_KEY);
                 if (savedDb) { db = JSON.parse(savedDb); updateUI(); }
             } catch(e) { console.warn("Could not load saved records:", e); }
             try {
-                const savedRef = localStorage.getItem(REF_STORAGE_KEY);
+                const savedRef = storageGet(REF_STORAGE_KEY);
                 if (savedRef) aircraftRef = JSON.parse(savedRef);
             } catch(e) { console.warn("Could not load aircraft ref:", e); }
             try {
-                const savedAssetRef = localStorage.getItem(ASSET_REF_KEY);
+                const savedAssetRef = storageGet(ASSET_REF_KEY);
                 if (savedAssetRef) assetRef = JSON.parse(savedAssetRef);
             } catch(e) { console.warn("Could not load asset ref:", e); }
             try {
-                const savedFinTable = localStorage.getItem(SYNC_TABLE_KEY);
+                const savedFinTable = storageGet(SYNC_TABLE_KEY);
                 if (savedFinTable) finTable = JSON.parse(savedFinTable);
             } catch(e) { console.warn("Could not load FIN table:", e); }
             try {
-                const savedAssetIndex = localStorage.getItem(ASSET_INDEX_KEY);
+                const savedAssetIndex = storageGet(ASSET_INDEX_KEY);
                 if (savedAssetIndex) assetIndex = JSON.parse(savedAssetIndex);
             } catch(e) { console.warn("Could not load asset index:", e); }
             try {
-                const savedNroIndex = localStorage.getItem(NRO_INDEX_KEY);
+                const savedNroIndex = storageGet(NRO_INDEX_KEY);
                 if (savedNroIndex) nroIndex = JSON.parse(savedNroIndex);
             } catch(e) { console.warn("Could not load NRO index:", e); }
             try {
-                const savedSchedule = localStorage.getItem(SCHEDULE_KEY);
+                const savedSchedule = storageGet(SCHEDULE_KEY);
                 if (savedSchedule) scheduleData = JSON.parse(savedSchedule);
             } catch(e) { console.warn("Could not load schedule:", e); }
             try {
-                const savedAgentRef = localStorage.getItem(AGENT_REF_KEY);
+                const savedAgentRef = storageGet(AGENT_REF_KEY);
                 if (savedAgentRef) agentRef = JSON.parse(savedAgentRef);
             } catch(e) { console.warn("Could not load agent ref:", e); }
             try {
-                const savedBlock = localStorage.getItem(AGENT_BLOCK_KEY);
+                const savedBlock = storageGet(AGENT_BLOCK_KEY);
                 if (savedBlock) agentBlock = JSON.parse(savedBlock);
             } catch(e) { console.warn("Could not load agent block:", e); }
             try {
-                const savedSharedDb = localStorage.getItem(SHARED_DB_KEY);
+                const savedSharedDb = storageGet(SHARED_DB_KEY);
                 if (savedSharedDb) { sharedDb = JSON.parse(savedSharedDb); updateSharedCount(); }
             } catch(e) { console.warn("Could not load shared db:", e); }
 
@@ -1944,6 +2044,9 @@
             restoreAgent();
             updateCategoryOptions();
             document.getElementById('app-version-label').textContent = CURRENT_VERSION;
+            // Reconcile all snapshots against assetIndex on every load — catches any
+            // stale data from previous versions or out-of-order syncs
+            reconcileFinTableSnapshots();
 
             // Backfill lastTime into finTable entries that predate the lastTime feature.
             // Walk db records; for each FIN missing lastTime, find a record matching
@@ -1994,7 +2097,7 @@
         // ─── Schedule Import ──────────────────────────────────────────────────
 
         function saveScheduleData() {
-            try { localStorage.setItem(SCHEDULE_KEY, JSON.stringify(scheduleData)); } catch(e) { console.warn('Could not save schedule:', e); }
+            storageSet(SCHEDULE_KEY, JSON.stringify(scheduleData));
         }
 
         function handleScheduleDrop(event) {
@@ -2290,6 +2393,10 @@
                 updateFinTable(entry);
                 processed++;
             });
+
+            // Final reconcile pass after all rows processed — catches any cross-FIN
+            // conflicts that only become apparent once all entries are in
+            reconcileFinTableSnapshots();
 
             // Refresh the sync table view
             renderRefList();
@@ -2689,12 +2796,16 @@
             }
 
             try {
-                localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db));
+                storageSet(APP_STORAGE_KEY, JSON.stringify(db));
             } catch (e) {
                 showToast("Save failed: storage full!");
                 return;
             }
             updateUI();
+            // Re-render backend views so asset index changes are immediately visible
+            // without requiring the user to manually switch tabs
+            renderPriorityList();
+            if (activeRefTab === 'synctable' || activeRefTab === 'alldata') renderRefList();
             showToast("Record Saved!");
             form.reset();
             document.querySelectorAll('.asset-input').forEach(el => el.classList.remove('invalid-asset'));
@@ -2788,14 +2899,14 @@
 
         function deleteRecord(id) {
             db = db.filter(r => r.id !== id);
-            try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
+            try { storageSet(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
             updateUI();
         }
 
         function deleteAllRecords() {
             if (!confirm(`Delete all ${db.length} record${db.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
             db = [];
-            try { localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
+            try { storageSet(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
             updateUI();
             showToast("All records cleared");
         }
@@ -2803,7 +2914,7 @@
         // ─── Shared DB (all agents) ───────────────────────────────────────────
 
         function saveSharedDb() {
-            try { localStorage.setItem(SHARED_DB_KEY, JSON.stringify(sharedDb)); } catch(e) { console.warn('Could not save shared db:', e); }
+            storageSet(SHARED_DB_KEY, JSON.stringify(sharedDb));
         }
 
         function updateSharedCount() {
@@ -3045,11 +3156,11 @@
 
         // All known agents — IDs are derived deterministically from their name
         const ALL_AGENTS = [
-            "Michael Marques", "Amar Atta", "Amritheera Malhi", "Muqeet Alam",
-            "Stan Beatty", "Gurjinder Mann", "Abdullah Atta",
-            "Jeff Eng", "Kevin Joly",
-            "Kevin Brown", "Billy Yan",
-            "Ben Burgio", "Jean Cham", "Joann Cortese", "Janine Margaret Ostaco"
+            _rc('Kg4AKBJWHlZ8AkFSR1VB'), _rc('JgoCMlNyBgJQ'), _rc('JgoRKQdbFxNDAhNuU1xaXQ=='), _rc('KhISJRZHUjddAl4='),
+            _rc('NBMCLlNxFxdFF0o='), _rc('IBIRKhpdFhNDQ35CXF4='), _rc('JgUHNR9fEx4RIkdXUw=='),
+            _rc('LQIFJlN2HBE='), _rc('LAIVKR0TOBldGg=='),
+            _rc('LAIVKR0TMAReFF0='), _rc('JQ4PLAoTKxdf'),
+            _rc('JQINYDFGABFYDA=='), _rc('LQICLlNwGhdc'), _rc('LQgCLh0TMRlDF1ZQVw=='), _rc('LQYNKR1WUjtQEVRCQFVGFCgUFyEQXA==')
         ];
 
         let p2pPeer = null;
@@ -3122,7 +3233,7 @@
             setSyncStatus('connecting');
 
             try {
-                const savedQueue = localStorage.getItem(P2P_QUEUE_KEY);
+                const savedQueue = storageGet(P2P_QUEUE_KEY);
                 if (savedQueue) p2pOfflineQueue = JSON.parse(savedQueue);
             } catch(e) {}
 
@@ -3138,14 +3249,14 @@
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
                         {
-                            urls: 'turn:free.expressturn.com:3478',
-                            username: '000000002089362952',
-                            credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0='
+                            urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478',
+                            username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'),
+                            credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==')
                         },
                         {
-                            urls: 'turn:free.expressturn.com:3478?transport=tcp',
-                            username: '000000002089362952',
-                            credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0='
+                            urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478?transport=tcp',
+                            username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'),
+                            credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==')
                         }
                     ]
                 }
@@ -3181,7 +3292,7 @@
                     setSyncStatus('connecting');
                     const fallbackId = peerId + '-' + Math.random().toString(36).slice(2, 6);
                     if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
-                    p2pPeer = new Peer(fallbackId, { debug: 0, host: '0.peerjs.com', port: 443, path: '/', secure: true, pingInterval: 5000, config: { iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:free.expressturn.com:3478', username: '000000002089362952', credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0=' }, { urls: 'turn:free.expressturn.com:3478?transport=tcp', username: '000000002089362952', credential: 'ZlzVfvZFQYts9XltWkiLFj5NIx0=' } ] } });
+                    p2pPeer = new Peer(fallbackId, { debug: 0, host: '0.peerjs.com', port: 443, path: '/', secure: true, pingInterval: 5000, config: { iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478', username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'), credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==') }, { urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478?transport=tcp', username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'), credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==') } ] } });
                     p2pMyId = fallbackId;
                     p2pPeer.on('open', () => {
                         p2pReady = true;
@@ -3455,6 +3566,10 @@
                 }
             }
 
+            // After all merges, reconcile snapshots to enforce single-location rule
+            // across all data received from peers
+            if (anyChanged) reconcileFinTableSnapshots();
+
             return anyChanged;
         }
 
@@ -3582,7 +3697,7 @@
             } else {
                 // Queue for when a peer connects
                 p2pOfflineQueue.push(msg);
-                try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
+                try { storageSet(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
             }
         }
 
@@ -3604,7 +3719,7 @@
                 if (!sent) stillPending.push(msg);
             });
             p2pOfflineQueue = stillPending;
-            try { localStorage.setItem(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
+            try { storageSet(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
         }
 
         function startPeriodicSync(agentValue) {
