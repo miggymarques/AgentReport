@@ -578,6 +578,7 @@
 
         let db = [];
         let sharedDb = [];  // all agents' entries — accumulates via P2P, cleared manually
+        let sharedDbClearTs = 0; // tombstone: entries with id <= this were cleared; persisted & synced
         let finTable = {};  // persistent FIN → { type, body, assets, lastSeen, lastFlight }
         let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
         let assetRef = { ...INITIAL_ASSETS };
@@ -620,9 +621,10 @@
             }
         }
 
-        const APP_STORAGE_KEY  = 'yul_field_data_v2';
-        const SHARED_DB_KEY    = 'yul_shared_db_v1';
-        const REF_STORAGE_KEY  = 'yul_aircraft_ref_v3';
+        const APP_STORAGE_KEY      = 'yul_field_data_v2';
+        const SHARED_DB_KEY        = 'yul_shared_db_v1';
+        const SHARED_DB_CLEAR_KEY  = 'yul_shared_db_clear_v1'; // tombstone timestamp for clear-all
+        const REF_STORAGE_KEY      = 'yul_aircraft_ref_v3';
         const ASSET_REF_KEY    = 'yul_asset_ref_v2';
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
         const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
@@ -2042,6 +2044,16 @@
                 const savedSharedDb = storageGet(SHARED_DB_KEY);
                 if (savedSharedDb) { sharedDb = JSON.parse(savedSharedDb); updateSharedCount(); }
             } catch(e) { console.warn("Could not load shared db:", e); }
+            try {
+                const savedClearTs = storageGet(SHARED_DB_CLEAR_KEY);
+                if (savedClearTs) { sharedDbClearTs = parseInt(JSON.parse(savedClearTs), 10) || 0; }
+                // On load, purge any entries that predate the stored clear timestamp
+                if (sharedDbClearTs > 0) {
+                    const before = sharedDb.length;
+                    sharedDb = sharedDb.filter(r => (r.id || 0) > sharedDbClearTs);
+                    if (sharedDb.length !== before) saveSharedDb();
+                }
+            } catch(e) { console.warn("Could not load shared clear ts:", e); }
 
             initAgentRef();
             rebuildAgentDropdown();
@@ -2926,9 +2938,10 @@
             if (lbl) lbl.textContent = sharedDb.length + ' record' + (sharedDb.length !== 1 ? 's' : '');
         }
 
-        // Add entry to sharedDb — deduplicate by id
+        // Add entry to sharedDb — deduplicate by id; reject if older than the clear tombstone
         function addToSharedDb(entry) {
             if (!entry || !entry.id) return;
+            if ((entry.id || 0) <= sharedDbClearTs) return; // predates the last clear — discard
             if (sharedDb.find(r => r.id === entry.id)) return; // already present
             sharedDb.unshift(entry);
             saveSharedDb();
@@ -3046,12 +3059,20 @@
         }
 
         function clearSharedDb() {
-            if (!confirm(`Clear all ${sharedDb.length} shared records? This cannot be undone.`)) return;
+            if (!confirm(`Clear all ${sharedDb.length} shared records? This will also clear them on all connected peers and cannot be undone.`)) return;
+            // Timestamp the clear so any entry created before this moment is permanently excluded —
+            // even if a peer hasn't synced yet and sends old entries later, they will be rejected.
+            const clearTs = Date.now();
+            sharedDbClearTs = clearTs;
+            storageSet(SHARED_DB_CLEAR_KEY, JSON.stringify(clearTs));
             sharedDb = [];
             saveSharedDb();
             updateSharedCount();
             renderSharedTable();
-            showToast("Shared data cleared");
+            // Broadcast the timestamped clear to all peers so they apply it immediately
+            const clearMsg = { type: 'CLEAR_SHARED_DB', clearTs };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, clearMsg));
+            showToast("Shared data cleared & synced to peers");
         }
         function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.classList.add('opacity-100', '-translate-y-2'); setTimeout(() => t.classList.remove('opacity-100', '-translate-y-2'), 2000); }
 
@@ -3208,7 +3229,7 @@
             const sharedEntries = sinceTs === 0
                 ? sharedDb
                 : sharedDb.filter(e => (e.id || 0) > sinceTs);
-            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock, sharedDb: sharedEntries };
+            return { finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched, agentRef: agents, agentBlock, sharedDb: sharedEntries, sharedDbClearTs };
         }
 
         // Derive a short stable peer ID from an agent name
@@ -3550,6 +3571,17 @@
                 }
             }
 
+            // Apply incoming clear tombstone BEFORE merging shared entries — ensures
+            // that records pre-dating the clear are never re-added via sync.
+            if (typeof msg.sharedDbClearTs === 'number' && msg.sharedDbClearTs > sharedDbClearTs) {
+                sharedDbClearTs = msg.sharedDbClearTs;
+                storageSet(SHARED_DB_CLEAR_KEY, JSON.stringify(sharedDbClearTs));
+                // Purge any local entries that predate the new tombstone
+                const before = sharedDb.length;
+                sharedDb = sharedDb.filter(r => (r.id || 0) > sharedDbClearTs);
+                if (sharedDb.length !== before) { saveSharedDb(); updateSharedCount(); anyChanged = true; }
+            }
+
             // Bug fix: merge incoming sharedDb entries (present on FULL_SYNC and DELTA_SYNC)
             // so newly connecting peers receive all existing shared records from peers.
             if (msg.sharedDb && Array.isArray(msg.sharedDb) && msg.sharedDb.length > 0) {
@@ -3687,6 +3719,24 @@
                     if (!document.getElementById('field-fin')?.value) {
                         updateFinPlaceholder();
                     }
+                }
+            }
+
+            if (msg.type === 'CLEAR_SHARED_DB') {
+                const incomingClearTs = msg.clearTs || 0;
+                if (incomingClearTs > sharedDbClearTs) {
+                    sharedDbClearTs = incomingClearTs;
+                    storageSet(SHARED_DB_CLEAR_KEY, JSON.stringify(sharedDbClearTs));
+                    sharedDb = sharedDb.filter(r => (r.id || 0) > sharedDbClearTs);
+                    saveSharedDb();
+                    updateSharedCount();
+                    if (activeRefTab === 'alldata') renderSharedTable();
+                    showToast("All Data table cleared by peer");
+                    // Forward the clear to any other connected peers (relay broadcast)
+                    Object.keys(p2pConnections).forEach(pid => {
+                        if (pid === fromPeer) return;
+                        conn_p2p_send(pid, msg);
+                    });
                 }
             }
         }
