@@ -267,7 +267,7 @@
                     </div>
                     <div class="form-group">
                         <label>Issue Details</label>
-                        <textarea name="IssueDetails" rows="2" placeholder="Describe fault..."></textarea>
+                        <textarea name="IssueDetails" rows="2" placeholder="Describe Issue..."></textarea>
                     </div>
 
                     <h2 class="text-sm font-black mb-4 mt-8 text-slate-400 uppercase tracking-[0.2em] border-b pb-2">Identification</h2>
@@ -500,7 +500,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.10.5";
+        const CURRENT_VERSION = "v2.10.6";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1999,7 +1999,7 @@
             "Other": ["Other"],
             "RM ( INV REM Base )": ["For OPS Backup", "For Repair", "For Use In Service", "For Use in Training", "Transfer ( Other Station )"],
             "RT ( INV RTN Base )": ["Damaged Hardware ( Body )", "Damaged Hardware ( LCD )", "Damaged Hardware ( Printer )", "Damaged Hardware ( Unknown )", "Damaged Hardware ( Water Damage )", "Damaged Hardware ( WIFI )", "Not Required", "Repaired In-House", "Returned From Repair", "Software", "Transfer ( Received )"],
-            "Service Calls": ["False Issue", "Short Notice"],
+            "Service Calls": ["False Call", "Short Notice"],
             "Software Issues": ["Data Pack Doesn't Install", "Data Upload Failed", "Program Corrupt", "WIFI Not Working"]
         };
 
@@ -2763,7 +2763,10 @@
             if (!entry.SrvcIss || entry.SrvcIss.trim() === "") entry.SrvcIss = "---";
             
             entry.id = Date.now() + Math.floor(Math.random() * 1000);
-            entry.displayDate = now.toLocaleDateString();
+            const _mm = String(now.getMonth() + 1).padStart(2, '0');
+            const _dd = String(now.getDate()).padStart(2, '0');
+            const _yyyy = now.getFullYear();
+            entry.displayDate = `${_mm}/${_dd}/${_yyyy}`;
             entry.displayTime = timeStr;
 
             const buildComments = (rec) => {
