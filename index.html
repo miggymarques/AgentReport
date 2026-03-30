@@ -861,6 +861,7 @@
             const map = {};
             Object.entries(assetIndex).forEach(([assetId, rec]) => {
                 if (!rec.fin || rec.fin === 'INV') return;
+                if (rec.accounted) return; // removed/flagged — not currently onboard; shows in lastRemoved instead
                 if (!map[rec.fin]) map[rec.fin] = [];
                 map[rec.fin].push(assetId);
             });
@@ -889,8 +890,9 @@
                         const rec = assetIndex[assetId];
                         if (!rec) return true;          // no index record — keep as-is
                         if (rec.fin === fin) return true; // index agrees it's here — keep
-                        // Index places it elsewhere — only evict if index record is newer
-                        return rowTs > (rec.ts || 0);
+                        // Index places it elsewhere — only evict if index record is strictly newer
+                        // (>= keeps the snapshot on exact ties — neither side is definitively newer)
+                        return rowTs >= (rec.ts || 0);
                     });
                     if (row.lastOnboard.length !== before) changed = true;
                 }
@@ -905,7 +907,7 @@
                         if (rec.fin === fin) return true;
                         // Asset now confirmed onboard a different FIN — remove from
                         // this FIN's removed list (it was redeployed)
-                        return rowTs > (rec.ts || 0);
+                        return rowTs >= (rec.ts || 0);
                     });
                     if (row.lastRemoved.length !== before) changed = true;
                 }
@@ -1045,7 +1047,9 @@
                 if (rec.fin !== fin) return;           // not on this FIN
                 if (reportedNow.has(assetId)) return;  // confirmed onboard — fine
                 if (accountedFor.has(assetId)) return; // removed / with issue — fine
-                // Asset was expected but missing with no explanation → NRO
+                if (rec.accounted) return;             // was deliberately removed from this FIN on a prior
+                                                       // visit — not expected onboard, must not become NRO
+                // Asset was expected onboard but missing with no explanation → NRO
                 const existingNro = nroIndex[assetId];
                 if (!existingNro || entryTs > (existingNro.ts || 0)) {
                     nroIndex[assetId] = { lastFin: fin, lastSeen: entry.displayDate || '', ts: entryTs };
@@ -3435,16 +3439,16 @@
                         row.lastOnboard = row.lastOnboard.filter(assetId => {
                             const rec = assetIndex[assetId];
                             // Keep if no index record, or index agrees this FIN owns it,
-                            // or the finTable snapshot is newer than the index record
+                            // or the finTable snapshot is at least as new as the index record
                             if (!rec || rec.fin === fin) return true;
-                            return (row._ts || 0) > (rec.ts || 0);
+                            return (row._ts || 0) >= (rec.ts || 0);
                         });
                     }
                     if (row.lastRemoved) {
                         row.lastRemoved = row.lastRemoved.filter(assetId => {
                             const rec = assetIndex[assetId];
                             if (!rec || rec.fin === fin) return true;
-                            return (row._ts || 0) > (rec.ts || 0);
+                            return (row._ts || 0) >= (rec.ts || 0);
                         });
                     }
                 });
@@ -3468,8 +3472,10 @@
                                     finTable[prevFin].lastRemoved = finTable[prevFin].lastRemoved.filter(id => id !== assetId);
                                 }
                             }
-                            if (nroIndex[assetId]) delete nroIndex[assetId];
                         }
+                        // Clear NRO whenever a newer assetIndex record arrives — a newer record means
+                        // the asset was sighted (onboard or accounted-for) regardless of FIN change.
+                        if (nroIndex[assetId]) delete nroIndex[assetId];
                         assetIndex[assetId] = incoming;
                         changed = true;
                     }
