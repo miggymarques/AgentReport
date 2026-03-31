@@ -500,7 +500,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.10.7";
+        const CURRENT_VERSION = "v2.10.8";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1603,9 +1603,9 @@
             const ifltNum = (iflt || '').replace(/\D/g, '');
             if (!iflt || ifltNum === '0000' || iflt === 'AC0000') routeParts.push('ORG');
             else routeParts.push(iflt);
-            if (inGt) routeParts.push('IGT:' + inGt);
+            if (inGt) routeParts.push('G:' + inGt);
             routeParts.push(iStn + ' → ' + rotStn + ' → ' + oStn);
-            if (oGt)  routeParts.push('OGT:' + oGt);
+            if (oGt)  routeParts.push('G:' + oGt);
             if (oflt) routeParts.push(oflt);
             if (!atStation) routeParts.push('[' + rotStn + ']');
 
@@ -1615,6 +1615,43 @@
 
             return `<span class="block text-slate-500">${routeParts.join('  ')}</span>`
                  + `<span class="block text-[13px] font-black text-blue-600 mt-0.5">${timeParts.join('   ')}</span>`;
+        }
+
+        // Returns compact turn info string for priority list: ITM | ISTN | STN | OSTN | OTM
+        // Times are shown in the service station's tz; if STN ≠ agentStation, agent-local time appended in ()
+        function getTurnInfoCompact(fin) {
+            const rot = getNextRotation(fin);
+            if (!rot) return '';
+
+            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            const agentTz = STATION_TZ[agentStation] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+            const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
+
+            const rotStn = (rot.stn  || '').toUpperCase();
+            const iStn   = (rot.iStn || '').toUpperCase();
+            const oStn   = (rot.oStn || '').toUpperCase();
+            const rotTz  = STATION_TZ[rotStn] || agentTz;
+            const iStnTz = STATION_TZ[iStn]   || agentTz;
+
+            const odtDate = parseT(rot.odt);
+            const idtDate = parseT(rot.idt);
+
+            // ITM: arrival time at STN, in ISTN tz; agent-local appended if different
+            let itmStr = '—';
+            if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
+                itmStr = fmtInTz(idtDate, iStnTz);
+                if (iStnTz !== agentTz) itmStr += '(' + fmtInTz(idtDate, agentTz) + ')';
+            }
+
+            // OTM: departure time from STN, in STN tz; agent-local appended if different
+            let otmStr = '—';
+            if (odtDate) {
+                otmStr = fmtInTz(odtDate, rotTz);
+                if (rotTz !== agentTz) otmStr += '(' + fmtInTz(odtDate, agentTz) + ')';
+            }
+
+            return [itmStr, iStn || '—', rotStn || '—', oStn || '—', otmStr].join(' | ');
         }
 
         function handleFinInput(el) {
@@ -2670,8 +2707,8 @@
 
                 const colHead = document.createElement('div');
                 colHead.className = "grid gap-2 px-4 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100";
-                colHead.style.gridTemplateColumns = "4rem 4.5rem 2.5rem 1fr 2rem";
-                colHead.innerHTML = `<span>FIN</span><span>Type</span><span>Body</span><span>Last Serviced</span><span class="text-center">P</span>`;
+                colHead.style.gridTemplateColumns = "4rem 4rem 2rem 1fr 1fr 2rem";
+                colHead.innerHTML = `<span>FIN</span><span>Type</span><span>Body</span><span>Last Serviced</span><span>Turn</span><span class="text-center">P</span>`;
                 section.appendChild(colHead);
 
                 groups[p].forEach(r => {
@@ -2682,12 +2719,14 @@
                     const timeStnStr = [r.lastTime, r.lastStation].filter(Boolean).join(' · ');
                     const row = document.createElement('div');
                     row.className = "grid gap-2 px-4 py-2.5 text-[11px] border-b border-slate-50 hover:bg-slate-50 items-center last:border-0";
-                    row.style.gridTemplateColumns = "4rem 4.5rem 2.5rem 1fr 2rem";
+                    row.style.gridTemplateColumns = "4rem 4rem 2rem 1fr 1fr 2rem";
+                    const turnInfo = getTurnInfoCompact(r.fin);
                     row.innerHTML = `
                         <span class="font-mono font-black text-blue-600">${r.fin}</span>
                         <span class="font-bold text-slate-700">${r.type}</span>
                         <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
                         <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
+                        <span class="text-[9px] font-mono text-slate-500 leading-tight">${turnInfo || '<span class="text-slate-300">—</span>'}</span>
                         <span class="text-center font-black text-[13px] ${pColor}">${p}</span>`;
                     section.appendChild(row);
                 });
