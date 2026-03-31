@@ -500,7 +500,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.10.8";
+        const CURRENT_VERSION = "v2.10.9";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1637,21 +1637,21 @@
             const odtDate = parseT(rot.odt);
             const idtDate = parseT(rot.idt);
 
-            // ITM: arrival time at STN, in ISTN tz; agent-local appended if different
+            // ITM: time in ISTN tz; peer-local appended in () only if tz differs
             let itmStr = '—';
             if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
                 itmStr = fmtInTz(idtDate, iStnTz);
                 if (iStnTz !== agentTz) itmStr += '(' + fmtInTz(idtDate, agentTz) + ')';
             }
 
-            // OTM: departure time from STN, in STN tz; agent-local appended if different
+            // OTM: time in STN tz; peer-local appended in () only if tz differs
             let otmStr = '—';
             if (odtDate) {
                 otmStr = fmtInTz(odtDate, rotTz);
                 if (rotTz !== agentTz) otmStr += '(' + fmtInTz(odtDate, agentTz) + ')';
             }
 
-            return [itmStr, iStn || '—', rotStn || '—', oStn || '—', otmStr].join(' | ');
+            return [itmStr, iStn || '—', rotStn || '—', oStn || '—', otmStr].join('|');
         }
 
         function handleFinInput(el) {
