@@ -3697,6 +3697,7 @@
                 let sharedChanged = false;
                 msg.sharedDb.forEach(entry => {
                     if (!entry || !entry.id) return;
+                    if ((entry.id || 0) <= sharedDbClearTs) return; // predates the last clear — discard
                     if (!sharedDb.find(r => r.id === entry.id)) {
                         sharedDb.unshift(entry);
                         sharedChanged = true;
