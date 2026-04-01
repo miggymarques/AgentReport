@@ -2546,20 +2546,30 @@
 
             // Column header
             const colHead = document.createElement('div');
-            colHead.className = "grid gap-1 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
-            colHead.style.gridTemplateColumns = "3.2rem 3.5rem 3.5rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3rem";
+            colHead.className = "grid gap-0.5 px-1.5 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
+            colHead.style.gridTemplateColumns = "2.6rem 2.2rem 2.2rem 2.5rem 1.8rem 1.6rem 1.6rem 1.6rem 1.8rem 2.5rem";
             colHead.innerHTML = `<span>FIN</span><span>IDT</span><span>ODT</span><span>IFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>OFLT</span>`;
             container.appendChild(colHead);
+
+            // Format a raw datetime value to HH:MM in the agent's station tz (or device tz)
+            const _schedTz = STATION_TZ[(document.getElementById('station-field')?.value || '').toUpperCase()]
+                          || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const fmtSchedTime = (v) => {
+                if (!v) return '—';
+                const d = new Date(v);
+                if (isNaN(d)) return String(v).slice(0, 5) || '—'; // already a short string, trim to 5 chars
+                return d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _schedTz });
+            };
 
             filtered.forEach(({ fin, rots }) => {
                 rots.forEach((rot, idx) => {
                     const row = document.createElement('div');
-                    row.className = `grid gap-1 px-2 py-1.5 text-[9px] items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
-                    row.style.gridTemplateColumns = "3.2rem 3.5rem 3.5rem 3rem 2.2rem 2.2rem 2.2rem 2.2rem 2.2rem 3rem";
+                    row.className = `grid gap-0.5 px-1.5 py-1.5 text-[8px] items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
+                    row.style.gridTemplateColumns = "2.6rem 2.2rem 2.2rem 2.5rem 1.8rem 1.6rem 1.6rem 1.6rem 1.8rem 2.5rem";
                     row.innerHTML = `
                         <span class="font-mono font-black ${idx === 0 ? 'text-blue-600' : 'text-slate-200'}">${idx === 0 ? fin : ''}</span>
-                        <span class="text-slate-400">${rot.idt   || '—'}</span>
-                        <span class="text-violet-600 font-bold">${rot.odt  || '—'}</span>
+                        <span class="text-slate-400">${fmtSchedTime(rot.idt)}</span>
+                        <span class="text-violet-600 font-bold">${fmtSchedTime(rot.odt)}</span>
                         <span class="font-mono text-slate-400">${rot.iflt  || '—'}</span>
                         <span class="text-slate-500">${rot.inGt  || '—'}</span>
                         <span class="text-slate-500">${rot.iStn  || '—'}</span>
