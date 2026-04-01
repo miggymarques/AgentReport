@@ -583,6 +583,8 @@
         let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
         let assetRef = { ...INITIAL_ASSETS };
         let isInventoryOnlyMode = false;
+        let invLastCat = '';   // remembered within an inventory session only
+        let invLastIss = '';
         let activeRefTab = 'aircraft';
 
         // ─── Storage obfuscation ──────────────────────────────────────────────
@@ -1567,7 +1569,12 @@
             if (!rot) return '';
 
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
-            const agentTz = STATION_TZ[agentStation] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            // agentKnownTz: strictly the selected-station tz — used for comparison and () content.
+            // Undefined when no station is selected so () is never shown against the device tz.
+            const agentKnownTz = STATION_TZ[agentStation];
+            // fallbackTz: only used when a rotation/inbound station isn't in STATION_TZ so the
+            // primary time still renders something sensible.
+            const fallbackTz   = agentKnownTz || Intl.DateTimeFormat().resolvedOptions().timeZone;
             const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
             const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
 
@@ -1578,19 +1585,24 @@
             const rotStn = (rot.stn  || '').toUpperCase();
             const iStn   = (rot.iStn || '').toUpperCase();
             const oStn   = (rot.oStn || '').toUpperCase();
-            const rotTz  = STATION_TZ[rotStn] || agentTz;
-            const iStnTz = STATION_TZ[iStn]   || agentTz;
+            // Primary display tz: station's own tz, fallbackTz only for rendering — never for comparison.
+            const rotTz  = STATION_TZ[rotStn] || fallbackTz;
+            const iStnTz = STATION_TZ[iStn]   || fallbackTz;
             const atStation = agentStation && rotStn === agentStation;
 
-            // ODT: show in rotation's station tz, with agent-local equivalent if different
+            // ODT: show in rotation's station tz.
+            // () only when agent has a known station tz AND it differs from rotTz.
             const odtRot   = fmtInTz(odtDate, rotTz);
-            const odtLocal = (rotTz !== agentTz) ? ' (' + fmtInTz(odtDate, agentTz) + ' ' + agentStation + ')' : '';
+            const odtLocal = (agentKnownTz && rotTz !== agentKnownTz)
+                ? ' (' + fmtInTz(odtDate, agentKnownTz) + ' ' + agentStation + ')' : '';
 
             // IDT: only show if it has a meaningful time (non-midnight UTC)
             let idtStr = '';
             if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
                 idtStr = fmtInTz(idtDate, iStnTz);
-                if (iStnTz !== agentTz) idtStr += ' (' + fmtInTz(idtDate, agentTz) + ' ' + agentStation + ')';
+                // () only when agent has a known station tz AND it differs from iStnTz.
+                if (agentKnownTz && iStnTz !== agentKnownTz)
+                    idtStr += ' (' + fmtInTz(idtDate, agentKnownTz) + ' ' + agentStation + ')';
             }
 
             const iflt = (rot.iflt || '');
@@ -1624,31 +1636,32 @@
             if (!rot) return '';
 
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
-            const agentTz = STATION_TZ[agentStation] || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const agentKnownTz = STATION_TZ[agentStation];
+            const fallbackTz   = agentKnownTz || Intl.DateTimeFormat().resolvedOptions().timeZone;
             const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
             const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
 
             const rotStn = (rot.stn  || '').toUpperCase();
             const iStn   = (rot.iStn || '').toUpperCase();
             const oStn   = (rot.oStn || '').toUpperCase();
-            const rotTz  = STATION_TZ[rotStn] || agentTz;
-            const iStnTz = STATION_TZ[iStn]   || agentTz;
+            const rotTz  = STATION_TZ[rotStn] || fallbackTz;
+            const iStnTz = STATION_TZ[iStn]   || fallbackTz;
 
             const odtDate = parseT(rot.odt);
             const idtDate = parseT(rot.idt);
 
-            // ITM: time in ISTN tz; peer-local appended in () only if tz differs
+            // ITM: time in ISTN tz; agent-local in () only if agent has a known station tz AND it differs
             let itmStr = '—';
             if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
                 itmStr = fmtInTz(idtDate, iStnTz);
-                if (iStnTz !== agentTz) itmStr += '(' + fmtInTz(idtDate, agentTz) + ')';
+                if (agentKnownTz && iStnTz !== agentKnownTz) itmStr += '(' + fmtInTz(idtDate, agentKnownTz) + ')';
             }
 
-            // OTM: time in STN tz; peer-local appended in () only if tz differs
+            // OTM: time in STN tz; agent-local in () only if agent has a known station tz AND it differs
             let otmStr = '—';
             if (odtDate) {
                 otmStr = fmtInTz(odtDate, rotTz);
-                if (rotTz !== agentTz) otmStr += '(' + fmtInTz(odtDate, agentTz) + ')';
+                if (agentKnownTz && rotTz !== agentKnownTz) otmStr += '(' + fmtInTz(odtDate, agentKnownTz) + ')';
             }
 
             return [itmStr, iStn || '—', rotStn || '—', oStn || '—', otmStr].join('|');
@@ -1781,6 +1794,9 @@
                 finField.setAttribute('required', '');
                 flightField.setAttribute('required', '');
                 refArea.classList.remove('invisible');
+                // Clear remembered inventory issue so they don't bleed into full-service mode
+                invLastCat = '';
+                invLastIss = '';
             }
             updateCategoryOptions();
         }
@@ -2721,8 +2737,8 @@
 
                 const colHead = document.createElement('div');
                 colHead.className = "grid gap-2 px-4 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100";
-                colHead.style.gridTemplateColumns = "4rem 4rem 2rem 1fr 1fr 2rem";
-                colHead.innerHTML = `<span>FIN</span><span>Type</span><span>Body</span><span>Last Serviced</span><span>Turn</span><span class="text-center">P</span>`;
+                colHead.style.gridTemplateColumns = "4rem 4rem 2rem 1fr 2rem";
+                colHead.innerHTML = `<span>FIN</span><span>Type</span><span>Body</span><span>Last Serviced</span><span class="text-center">P</span>`;
                 section.appendChild(colHead);
 
                 groups[p].forEach(r => {
@@ -2731,18 +2747,33 @@
                     const dateStr    = r.lastSeen || '—';
                     const pColor     = p === 1 ? 'text-red-500' : p === 2 ? 'text-amber-500' : 'text-emerald-500';
                     const timeStnStr = [r.lastTime, r.lastStation].filter(Boolean).join(' · ');
-                    const row = document.createElement('div');
-                    row.className = "grid gap-2 px-4 py-2.5 text-[11px] border-b border-slate-50 hover:bg-slate-50 items-center last:border-0";
-                    row.style.gridTemplateColumns = "4rem 4rem 2rem 1fr 1fr 2rem";
+
                     const turnInfo = getTurnInfoCompact(r.fin);
-                    row.innerHTML = `
-                        <span class="font-mono font-black text-blue-600">${r.fin}</span>
-                        <span class="font-bold text-slate-700">${r.type}</span>
-                        <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
-                        <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
-                        <span class="text-[9px] font-mono text-slate-500 leading-tight">${turnInfo || '<span class="text-slate-300">—</span>'}</span>
-                        <span class="text-center font-black text-[13px] ${pColor}">${p}</span>`;
-                    section.appendChild(row);
+                    let turnHtml = '';
+                    if (turnInfo) {
+                        const [itm, iStn, stn, oStn, otm] = turnInfo.split('|');
+                        const hasTimes = itm && itm !== '—';
+                        turnHtml = `
+                            <div class="px-4 pb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono border-b border-slate-50">
+                                <span class="text-slate-300 text-[8px] font-black uppercase tracking-widest mr-1">Turn</span>
+                                ${hasTimes ? `<span class="text-slate-500">✈in <span class="font-black text-slate-600">${itm}</span></span>` : ''}
+                                <span class="text-slate-500 font-black">${iStn || '—'} → ${stn || '—'} → ${oStn || '—'}</span>
+                                <span class="text-slate-500">✈out <span class="font-black text-blue-600">${otm}</span></span>
+                            </div>`;
+                    }
+
+                    const wrapper = document.createElement('div');
+                    wrapper.className = "border-b border-slate-50 hover:bg-slate-50 last:border-0";
+                    wrapper.innerHTML = `
+                        <div class="grid gap-2 px-4 pt-2.5 ${turnInfo ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
+                            <span class="font-mono font-black text-blue-600">${r.fin}</span>
+                            <span class="font-bold text-slate-700">${r.type}</span>
+                            <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
+                            <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
+                            <span class="text-center font-black text-[13px] ${pColor}">${p}</span>
+                        </div>
+                        ${turnHtml}`;
+                    section.appendChild(wrapper);
                 });
 
                 container.appendChild(section);
@@ -2883,6 +2914,11 @@
             renderPriorityList();
             if (activeRefTab === 'synctable' || activeRefTab === 'alldata') renderRefList();
             showToast("Record Saved!");
+            // Remember inventory issue selection before form.reset() wipes it
+            if (isInventoryOnlyMode) {
+                invLastCat = entry.SrvcIssCAT && entry.SrvcIssCAT !== '---' ? entry.SrvcIssCAT : invLastCat;
+                invLastIss = entry.SrvcIss    && entry.SrvcIss    !== '---' ? entry.SrvcIss    : invLastIss;
+            }
             form.reset();
             document.querySelectorAll('.asset-input').forEach(el => el.classList.remove('invalid-asset'));
             restoreAgent();
@@ -2904,6 +2940,17 @@
             document.getElementById('field-hhd4').placeholder  = "0000 or Msng";
             document.getElementById('field-battery').placeholder = "0";
             if (isInventoryOnlyMode) applyModeUI();
+            // Restore remembered inventory issue category + specific issue after the
+            // form reset and dropdown rebuild — session only, cleared on mode toggle.
+            if (isInventoryOnlyMode && invLastCat) {
+                const catEl = document.getElementById('srvc-iss-cat-field');
+                const issEl = document.getElementById('srvc-iss-field');
+                if (catEl) {
+                    catEl.value = invLastCat;
+                    updateIssueOptions();           // rebuild specific-issue options for this cat
+                    if (issEl && invLastIss) issEl.value = invLastIss;
+                }
+            }
             window.scrollTo({top: 0, behavior: 'smooth'});
         }
 
