@@ -409,6 +409,45 @@
                 <div id="st-filter-hint" class="hidden px-3 pb-1.5 text-[9px] font-bold text-blue-500 uppercase tracking-widest"></div>
             </div>
 
+            <div id="schedule-filter-bar" class="hidden border-b border-slate-200">
+                <div class="flex gap-2 px-3 pt-2 pb-2 items-center">
+                    <div class="relative flex-1">
+                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-violet-400 text-[10px] font-black uppercase pointer-events-none select-none">FIN</span>
+                        <input id="sf-fin" type="text" placeholder="e.g. AC101" maxlength="6"
+                            class="!pl-8 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); renderRefList()">
+                    </div>
+                    <div class="relative flex-1">
+                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-violet-400 text-[10px] font-black uppercase pointer-events-none select-none">Airline</span>
+                        <input id="sf-airline" type="text" placeholder="e.g. AC"
+                            class="!pl-12 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); renderRefList()">
+                    </div>
+                    <div class="relative flex-1">
+                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-violet-400 text-[10px] font-black uppercase pointer-events-none select-none">ISTN</span>
+                        <input id="sf-istn" type="text" placeholder="YUL"
+                            class="!pl-9 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); renderRefList()">
+                    </div>
+                    <div class="relative flex-1">
+                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-violet-400 text-[10px] font-black uppercase pointer-events-none select-none">STN</span>
+                        <input id="sf-stn" type="text" placeholder="YYZ"
+                            class="!pl-8 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); renderRefList()">
+                    </div>
+                    <div class="relative flex-1">
+                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-violet-400 text-[10px] font-black uppercase pointer-events-none select-none">OSTN</span>
+                        <input id="sf-ostn" type="text" placeholder="YVR"
+                            class="!pl-10 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); renderRefList()">
+                    </div>
+                    <button onclick="clearScheduleFilters()" title="Clear filters"
+                        class="text-slate-400 hover:text-red-500 transition-colors px-1 shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
             
             <div class="p-4 bg-slate-50 border-t flex gap-2" id="add-aircraft-ui">
@@ -444,15 +483,6 @@
             </div>
 
             <div class="p-3 bg-slate-50 border-t hidden" id="add-schedule-ui">
-                <!-- Filter bar -->
-                <div class="flex flex-wrap gap-1.5 mb-2">
-                    <input id="sf-fin"    type="text" placeholder="FIN"    oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-airline" type="text" placeholder="Airline" oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-istn"   type="text" placeholder="ISTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-stn"    type="text" placeholder="STN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-ostn"   type="text" placeholder="OSTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <button onclick="clearScheduleFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1">✕ Clear</button>
-                </div>
                 <!-- Drop zone -->
                 <label id="schedule-drop-zone" for="schedule-file-input"
                     class="flex items-center justify-center gap-3 border border-dashed border-blue-200 rounded-lg px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors"
@@ -1211,6 +1241,7 @@
             document.getElementById('add-alldata-ui').classList.toggle('hidden', tab !== 'alldata');
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
+            document.getElementById('schedule-filter-bar').classList.toggle('hidden', tab !== 'schedule');
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; }
             renderRefList();
         }
