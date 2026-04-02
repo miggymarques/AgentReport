@@ -416,6 +416,7 @@
                 <div id="st-filter-hint" class="hidden px-3 pb-1.5 text-[9px] font-bold text-blue-500 uppercase tracking-widest"></div>
             </div>
 
+            <div id="synctable-col-header" class="hidden border-b border-slate-200 bg-white"></div>
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
             
             <div class="p-4 bg-slate-50 border-t flex gap-2" id="add-aircraft-ui">
@@ -1230,6 +1231,7 @@
             document.getElementById('add-alldata-ui').classList.toggle('hidden', tab !== 'alldata');
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
+            const _colHdr = document.getElementById('synctable-col-header'); if (tab !== 'synctable') { _colHdr.classList.add('hidden'); _colHdr.innerHTML = ''; }
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; }
             // Schedule tab: let ref-editor-list own the horizontal scroll so the
             // scrollbar is always visible at the bottom of the modal, not buried
@@ -1378,18 +1380,19 @@
                 return;
             }
 
-            // Header
-            const header = document.createElement('div');
-            header.className = "grid gap-1 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white";
-            header.style.gridTemplateColumns = "3rem 3.5rem 1fr 5rem 3rem 1fr";
-            header.innerHTML = `
+            // Header — rendered outside the scroll container so it stays pinned
+            // below the filter bar regardless of filter height changes.
+            const colHdr = document.getElementById('synctable-col-header');
+            colHdr.className = "grid gap-1 px-2 py-1.5 text-[9px] font-black uppercase tracking-widest text-slate-400 bg-white border-b border-slate-200";
+            colHdr.style.gridTemplateColumns = "3rem 3.5rem 1fr 5rem 3rem 1fr";
+            colHdr.innerHTML = `
                 <span>FIN</span>
                 <span>Type</span>
                 <span>Assets Onboard</span>
                 <span>Agent / Stn</span>
                 <span>Last</span>
                 <span class="text-amber-500">NRO</span>`;
-            container.appendChild(header);
+            colHdr.classList.remove('hidden');
 
             fins.forEach(fin => {
                 const entry = finTable[fin];
@@ -2640,6 +2643,12 @@
                 const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true,  timeZone: _schedTz });
                 return `${datePart} ${timePart}`;
             };
+            const fmtSchedDate = (v) => {
+                if (!v) return '—';
+                const d = new Date(v);
+                if (isNaN(d)) return String(v).slice(0, 5) || '—';
+                return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: _schedTz });
+            };
 
             // Build a <table> so every column auto-sizes to its content.
             // padding: 1px 1ch gives exactly one character-width of space on each side.
@@ -2678,8 +2687,8 @@
                         : `<td style="${CELL_STYLE} color:#e2e8f0;"></td>`;
                     tr.innerHTML = `
                         ${finCell}
-                        <td style="${CELL_STYLE} font-family:monospace; color:#94a3b8;">${fmtSchedTime(rot.idt)}</td>
-                        <td style="${CELL_STYLE} font-family:monospace; font-weight:700; color:#7c3aed;">${fmtSchedTime(rot.odt)}</td>
+                        <td style="${CELL_STYLE} font-family:monospace; color:#94a3b8;" title="${fmtSchedTime(rot.idt)}">${fmtSchedDate(rot.idt)}</td>
+                        <td style="${CELL_STYLE} font-family:monospace; font-weight:700; color:#7c3aed;" title="${fmtSchedTime(rot.odt)}">${fmtSchedDate(rot.odt)}</td>
                         <td style="${CELL_STYLE} font-family:monospace; color:#94a3b8;">${rot.iflt  || '—'}</td>
                         <td style="${CELL_STYLE} color:#64748b;">${rot.inGt  || '—'}</td>
                         <td style="${CELL_STYLE} color:#64748b;">${rot.iStn  || '—'}</td>
