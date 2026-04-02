@@ -1919,15 +1919,15 @@
             return claim.agent !== myName;
         }
 
-        // Returns the FIN of the highest-priority P1 aircraft with an upcoming rotation at the agent's station
-        // Priority: 1) most days since last serviced (never = highest), 2) airline AC > RV > QK, 3) earliest ODT
-        function getNextP1Fin() {
+        // Returns { fin, priority } for the best available aircraft at the agent's station.
+        // Tries P1 first; falls back to P2, then P3 if no higher-priority candidates exist.
+        // Within each priority bucket: most overdue → airline rank (AC > RV > QK) → earliest ODT.
+        function getNextSuggestedFin() {
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
             if (!agentStation) return null;
 
             const now    = new Date();
             const today  = new Date(now); today.setHours(0,0,0,0);
-            const grace  = new Date(now.getTime() - 30 * 60000);
             const parseT = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
 
             const AIRLINE_RANK = { 'AC': 0, 'RV': 1, 'QK': 2 };
@@ -1949,10 +1949,10 @@
             };
 
             const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
-            const candidates = [];
+            const byPriority = { 1: [], 2: [], 3: [] };
 
             allFins.forEach(fin => {
-                if (computeFinPriority(fin) !== 1) return;
+                const priority = computeFinPriority(fin);
                 const rotations = scheduleData[fin];
                 if (!rotations || rotations.length === 0) return;
 
@@ -1962,11 +1962,11 @@
                     .sort((a, b) => parseT(a.odt) - parseT(b.odt));
                 if (upcoming.length === 0) return;
 
-                const airline = fin.substring(0, 2).toUpperCase();
                 // Skip FINs claimed by another active agent
                 if (isFinClaimed(fin)) return;
 
-                candidates.push({
+                const airline = fin.substring(0, 2).toUpperCase();
+                byPriority[priority].push({
                     fin,
                     days:        daysOverdue(fin),
                     airlineRank: AIRLINE_RANK[airline] !== undefined ? AIRLINE_RANK[airline] : 99,
@@ -1974,33 +1974,38 @@
                 });
             });
 
-            if (candidates.length === 0) return null;
+            // Sort each bucket: most overdue → airline rank → earliest ODT
+            const sortFn = (a, b) => b.days - a.days || a.airlineRank - b.airlineRank || a.odt - b.odt;
 
-            // Sort: most overdue first, then airline rank, then earliest ODT
-            candidates.sort((a, b) =>
-                b.days - a.days ||
-                a.airlineRank - b.airlineRank ||
-                a.odt - b.odt
-            );
+            for (const p of [1, 2, 3]) {
+                if (byPriority[p].length > 0) {
+                    byPriority[p].sort(sortFn);
+                    return { fin: byPriority[p][0].fin, priority: p };
+                }
+            }
 
-            return candidates[0].fin;
+            return null;
         }
 
-        // Set FIN and Flight# placeholders to next P1 aircraft at agent's station
-        // Also shows rotation info under the FIN field until the user types
+        // Set FIN and Flight# placeholders to the best available aircraft at the agent's station.
+        // Tries P1 first, then P2, then P3. Updates the priority dropdown to match the suggestion.
+        // Also shows rotation info under the FIN field until the user types.
         function updateFinPlaceholder() {
-            const finField    = document.getElementById('field-fin');
-            const flightField = document.getElementById('field-flight');
-            const rotationEl  = document.getElementById('fin-rotation');
+            const finField      = document.getElementById('field-fin');
+            const flightField   = document.getElementById('field-flight');
+            const rotationEl    = document.getElementById('fin-rotation');
+            const priorityField = document.getElementById('priority-field');
 
             if (!finField || finField.value) return; // don't overwrite if user has typed something
 
-            const p1Fin = getNextP1Fin();
-            finField.placeholder = p1Fin ? p1Fin : 'e.g. AC101';
+            const suggestion    = getNextSuggestedFin();
+            const suggestedFin  = suggestion ? suggestion.fin : null;
+            finField.placeholder = suggestedFin ? suggestedFin : 'e.g. AC101';
 
-            if (!p1Fin) {
+            if (!suggestedFin) {
                 if (flightField && !flightField.value) flightField.placeholder = 'e.g. 0123';
                 if (rotationEl) rotationEl.innerHTML = '';
+                if (priorityField) priorityField.value = '1';
                 const rt = document.getElementById('ref-type');
                 const rb = document.getElementById('ref-body');
                 if (rt) rt.textContent = '';
@@ -2008,9 +2013,12 @@
                 return;
             }
 
+            // Update priority dropdown to reflect the suggested FIN's actual priority
+            if (priorityField) priorityField.value = String(suggestion.priority);
+
             // Flight# placeholder
             if (flightField && !flightField.value) {
-                const rot = getNextRotation(p1Fin);
+                const rot = getNextRotation(suggestedFin);
                 if (rot) {
                     const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '');
                     const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '');
@@ -2021,16 +2029,16 @@
                 }
             }
 
-            // Rotation info line — show for the suggested P1 FIN
+            // Rotation info line — show for the suggested FIN
             if (rotationEl) {
-                rotationEl.innerHTML = getNextRotationLine(p1Fin);
+                rotationEl.innerHTML = getNextRotationLine(suggestedFin);
             }
 
             // Populate aircraft type/body reference spans
             const refType = document.getElementById('ref-type');
             const refBody = document.getElementById('ref-body');
             if (refType && refBody) {
-                const match = aircraftRef[p1Fin.substring(0,5)] || aircraftRef[p1Fin.substring(0,4)];
+                const match = aircraftRef[suggestedFin.substring(0,5)] || aircraftRef[suggestedFin.substring(0,4)];
                 if (match) {
                     refType.textContent = match.type;
                     refBody.textContent = match.body;
@@ -2044,8 +2052,8 @@
             }
 
             // Claim this FIN so other agents skip it
-            claimFin(p1Fin);
-            updateFinPlaceholder._lastSuggested = p1Fin;
+            claimFin(suggestedFin);
+            updateFinPlaceholder._lastSuggested = suggestedFin;
         }
 
         function onAgentChange() {
@@ -2197,6 +2205,11 @@
                 }
             });
             if (backfillChanged) saveFinTable();
+
+            // Bug fix: re-run placeholder suggestion now that finTable is fully loaded and
+            // reconciled. restoreAgent() runs before reconcileFinTableSnapshots() and the
+            // backfill above, so the first call may have used stale priority data.
+            updateFinPlaceholder();
         };
 
         function formatGGCId(val, isRemovalField = false) {
@@ -2605,51 +2618,43 @@
                 return;
             }
 
-            // Column header
-            const colHead = document.createElement('div');
-            colHead.className = "grid gap-0.5 px-1.5 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 sticky top-0 bg-white z-10";
-            colHead.style.gridTemplateColumns = "2.6rem 2.2rem 2.2rem 2.5rem 1.8rem 1.6rem 1.6rem 1.6rem 1.8rem 2.5rem";
-            // Neutralise the p-4 container padding and space-y-4 sibling margin so the
-            // header pins flush with the scroll container top — no hardcoded pixel value
-            // needed because top-0 is already relative to ref-editor-list's visible area.
-            colHead.style.marginTop  = '0';
-            colHead.style.marginLeft = '-1rem';  // cancel container px-4
-            colHead.style.marginRight = '-1rem';
-            colHead.style.paddingLeft = '1rem';  // restore visual alignment
-            colHead.style.paddingRight = '1rem';
-            colHead.innerHTML = `<span>FIN</span><span>IDT</span><span>ODT</span><span>IFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>OFLT</span>`;
-            container.appendChild(colHead);
-
-            // Pin the header dynamically: negate whatever padding-top the scroll
-            // container currently has so the header sits flush with its visible top.
-            // ResizeObserver re-fires whenever the container resizes (e.g. tabs wrap).
-            const _pinColHead = () => {
-                const pt = parseFloat(getComputedStyle(container).paddingTop) || 0;
-                colHead.style.top = `-${pt}px`;
-            };
-            _pinColHead();
-            const _colHeadObserver = new ResizeObserver(_pinColHead);
-            _colHeadObserver.observe(container);
-
-            // Format a raw datetime value to HH:MM in the agent's station tz (or device tz)
+            // Format a raw datetime value to MM/DD/YYYY HH:MM AM/PM in the agent's station tz (or device tz)
             const _schedTz = STATION_TZ[(document.getElementById('station-field')?.value || '').toUpperCase()]
                           || Intl.DateTimeFormat().resolvedOptions().timeZone;
             const fmtSchedTime = (v) => {
                 if (!v) return '—';
                 const d = new Date(v);
-                if (isNaN(d)) return String(v).slice(0, 5) || '—'; // already a short string, trim to 5 chars
-                return d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _schedTz });
+                if (isNaN(d)) return String(v).slice(0, 16) || '—';
+                const datePart = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: _schedTz });
+                const timePart = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true,  timeZone: _schedTz });
+                return `${datePart} ${timePart}`;
             };
+
+            // Wrap the header + all rows in a horizontally-scrollable container so the
+            // wider IDT/ODT date+time columns don't overflow the modal.
+            const COLS = "2.6rem 9.5rem 9.5rem 3rem 1.8rem 1.6rem 1.6rem 1.6rem 1.8rem 3rem";
+            const scrollWrap = document.createElement('div');
+            scrollWrap.style.cssText = 'overflow-x:auto; margin-left:-1rem; margin-right:-1rem;';
+            container.appendChild(scrollWrap);
+
+            // Column header (inside scroll wrapper so it moves with horizontal scroll)
+            const colHead = document.createElement('div');
+            colHead.className = "grid gap-0.5 px-4 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 bg-white";
+            colHead.style.gridTemplateColumns = COLS;
+            colHead.style.minWidth = 'max-content';
+            colHead.innerHTML = `<span>FIN</span><span>IDT</span><span>ODT</span><span>IFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>OFLT</span>`;
+            scrollWrap.appendChild(colHead);
 
             filtered.forEach(({ fin, rots }) => {
                 rots.forEach((rot, idx) => {
                     const row = document.createElement('div');
-                    row.className = `grid gap-0.5 px-1.5 py-1.5 text-[8px] items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
-                    row.style.gridTemplateColumns = "2.6rem 2.2rem 2.2rem 2.5rem 1.8rem 1.6rem 1.6rem 1.6rem 1.8rem 2.5rem";
+                    row.className = `grid gap-0.5 px-4 py-0.5 text-[8px] leading-tight items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
+                    row.style.gridTemplateColumns = COLS;
+                    row.style.minWidth = 'max-content';
                     row.innerHTML = `
                         <span class="font-mono font-black ${idx === 0 ? 'text-blue-600' : 'text-slate-200'}">${idx === 0 ? fin : ''}</span>
-                        <span class="text-slate-400">${fmtSchedTime(rot.idt)}</span>
-                        <span class="text-violet-600 font-bold">${fmtSchedTime(rot.odt)}</span>
+                        <span class="font-mono text-slate-400">${fmtSchedTime(rot.idt)}</span>
+                        <span class="font-mono text-violet-600 font-bold">${fmtSchedTime(rot.odt)}</span>
                         <span class="font-mono text-slate-400">${rot.iflt  || '—'}</span>
                         <span class="text-slate-500">${rot.inGt  || '—'}</span>
                         <span class="text-slate-500">${rot.iStn  || '—'}</span>
@@ -2657,7 +2662,7 @@
                         <span class="text-slate-500">${rot.oStn  || '—'}</span>
                         <span class="text-slate-500">${rot.oGt   || '—'}</span>
                         <span class="font-mono text-slate-600">${rot.oflt  || '—'}</span>`;
-                    container.appendChild(row);
+                    scrollWrap.appendChild(row);
                 });
             });
         }
@@ -3682,7 +3687,20 @@
                         });
                     }
                 });
-                if (changed) { saveFinTable(); anyChanged = true; }
+                if (changed) {
+                    saveFinTable();
+                    anyChanged = true;
+                    // Bug fix: if the currently suggested FIN's priority worsened (e.g. a peer
+                    // just serviced it, making it P3), clear the stale suggestion and re-evaluate.
+                    const suggested = updateFinPlaceholder._lastSuggested;
+                    if (suggested && finTable[suggested]) {
+                        const nowPriority = computeFinPriority(suggested);
+                        if (nowPriority !== 1) {
+                            updateFinPlaceholder._lastSuggested = null;
+                            updateFinPlaceholder();
+                        }
+                    }
+                }
             }
 
             // Merge assetIndex
