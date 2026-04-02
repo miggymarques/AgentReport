@@ -1231,6 +1231,17 @@
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; }
+            // Schedule tab: let ref-editor-list own the horizontal scroll so the
+            // scrollbar is always visible at the bottom of the modal, not buried
+            // at the bottom of the content. Remove padding so table bleeds edge-to-edge.
+            const _list = document.getElementById('ref-editor-list');
+            if (tab === 'schedule') {
+                _list.style.overflowX = 'auto';
+                _list.style.padding   = '0';
+            } else {
+                _list.style.overflowX = '';
+                _list.style.padding   = '';
+            }
             renderRefList();
         }
 
@@ -2630,41 +2641,57 @@
                 return `${datePart} ${timePart}`;
             };
 
-            // Wrap the header + all rows in a horizontally-scrollable container so the
-            // wider IDT/ODT date+time columns don't overflow the modal.
-            const COLS = "2.6rem 9.5rem 9.5rem 3rem 1.8rem 1.6rem 1.6rem 1.6rem 1.8rem 3rem";
-            const scrollWrap = document.createElement('div');
-            scrollWrap.style.cssText = 'overflow-x:auto; margin-left:-1rem; margin-right:-1rem;';
-            container.appendChild(scrollWrap);
+            // Build a <table> so every column auto-sizes to its content.
+            // padding: 1px 1ch gives exactly one character-width of space on each side.
+            // white-space: nowrap prevents any wrapping inside cells.
+            const tbl = document.createElement('table');
+            tbl.style.cssText = 'border-collapse:collapse; font-size:8px; white-space:nowrap; width:100%;';
 
-            // Column header (inside scroll wrapper so it moves with horizontal scroll)
-            const colHead = document.createElement('div');
-            colHead.className = "grid gap-0.5 px-4 py-1 text-[8px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 bg-white";
-            colHead.style.gridTemplateColumns = COLS;
-            colHead.style.minWidth = 'max-content';
-            colHead.innerHTML = `<span>FIN</span><span>IDT</span><span>ODT</span><span>IFLT</span><span>InGt</span><span>ISTN</span><span>STN</span><span>OSTN</span><span>OGt</span><span>OFLT</span>`;
-            scrollWrap.appendChild(colHead);
+            const CELL_STYLE  = 'padding:1px 1ch; vertical-align:middle;';
+            const HEAD_STYLE  = CELL_STYLE + 'font-weight:900; text-transform:uppercase; letter-spacing:0.1em; color:#94a3b8; border-bottom:2px solid #e2e8f0; position:sticky; top:0; background:#fff; z-index:2;';
+            const thead = document.createElement('thead');
+            thead.innerHTML = `<tr>
+                <th style="${HEAD_STYLE}">FIN</th>
+                <th style="${HEAD_STYLE}">IDT</th>
+                <th style="${HEAD_STYLE}">ODT</th>
+                <th style="${HEAD_STYLE}">IFLT</th>
+                <th style="${HEAD_STYLE}">InGt</th>
+                <th style="${HEAD_STYLE}">ISTN</th>
+                <th style="${HEAD_STYLE}">STN</th>
+                <th style="${HEAD_STYLE}">OSTN</th>
+                <th style="${HEAD_STYLE}">OGt</th>
+                <th style="${HEAD_STYLE}">OFLT</th>
+            </tr>`;
+            tbl.appendChild(thead);
 
+            const tbody = document.createElement('tbody');
             filtered.forEach(({ fin, rots }) => {
                 rots.forEach((rot, idx) => {
-                    const row = document.createElement('div');
-                    row.className = `grid gap-0.5 px-4 py-0.5 text-[8px] leading-tight items-center ${idx === rots.length - 1 ? 'border-b border-slate-200' : 'border-b border-slate-50'} hover:bg-slate-50`;
-                    row.style.gridTemplateColumns = COLS;
-                    row.style.minWidth = 'max-content';
-                    row.innerHTML = `
-                        <span class="font-mono font-black ${idx === 0 ? 'text-blue-600' : 'text-slate-200'}">${idx === 0 ? fin : ''}</span>
-                        <span class="font-mono text-slate-400">${fmtSchedTime(rot.idt)}</span>
-                        <span class="font-mono text-violet-600 font-bold">${fmtSchedTime(rot.odt)}</span>
-                        <span class="font-mono text-slate-400">${rot.iflt  || '—'}</span>
-                        <span class="text-slate-500">${rot.inGt  || '—'}</span>
-                        <span class="text-slate-500">${rot.iStn  || '—'}</span>
-                        <span class="font-bold text-slate-700">${rot.stn   || '—'}</span>
-                        <span class="text-slate-500">${rot.oStn  || '—'}</span>
-                        <span class="text-slate-500">${rot.oGt   || '—'}</span>
-                        <span class="font-mono text-slate-600">${rot.oflt  || '—'}</span>`;
-                    scrollWrap.appendChild(row);
+                    const isLast = idx === rots.length - 1;
+                    const rowBorder = isLast ? 'border-bottom:1px solid #e2e8f0;' : 'border-bottom:1px solid #f8fafc;';
+                    const tr = document.createElement('tr');
+                    tr.style.cssText = rowBorder;
+                    tr.onmouseenter = () => tr.style.background = '#f8fafc';
+                    tr.onmouseleave = () => tr.style.background = '';
+                    const finCell = idx === 0
+                        ? `<td style="${CELL_STYLE} font-family:monospace; font-weight:900; color:#2563eb;">${fin}</td>`
+                        : `<td style="${CELL_STYLE} color:#e2e8f0;"></td>`;
+                    tr.innerHTML = `
+                        ${finCell}
+                        <td style="${CELL_STYLE} font-family:monospace; color:#94a3b8;">${fmtSchedTime(rot.idt)}</td>
+                        <td style="${CELL_STYLE} font-family:monospace; font-weight:700; color:#7c3aed;">${fmtSchedTime(rot.odt)}</td>
+                        <td style="${CELL_STYLE} font-family:monospace; color:#94a3b8;">${rot.iflt  || '—'}</td>
+                        <td style="${CELL_STYLE} color:#64748b;">${rot.inGt  || '—'}</td>
+                        <td style="${CELL_STYLE} color:#64748b;">${rot.iStn  || '—'}</td>
+                        <td style="${CELL_STYLE} font-weight:700; color:#334155;">${rot.stn   || '—'}</td>
+                        <td style="${CELL_STYLE} color:#64748b;">${rot.oStn  || '—'}</td>
+                        <td style="${CELL_STYLE} color:#64748b;">${rot.oGt   || '—'}</td>
+                        <td style="${CELL_STYLE} font-family:monospace; color:#475569;">${rot.oflt  || '—'}</td>`;
+                    tbody.appendChild(tr);
                 });
             });
+            tbl.appendChild(tbody);
+            container.appendChild(tbl);
         }
 
         // Filter state for priority tab
