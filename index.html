@@ -2832,21 +2832,19 @@
                     if (!finNum.includes(priorityFilterFin)) return false;
                 }
                 if (priorityFilterTurn.length > 0) {
-                    // Linear left-to-right prefix match across concatenated station pairs.
-                    // As the user types, check if iStn+stn or stn+oStn starts with the typed string.
-                    // e.g. typing "YUL" matches any rotation where iStn or stn starts with "YUL",
-                    //      typing "YULYYZ" matches rotations where iStn+stn === "YULYYZ..." or stn+oStn === "YULYYZ..."
+                    // Match only against the single next upcoming rotation (same one shown on the card).
+                    // Typing "YULYYZ" left-to-right matches:
+                    //   pair1: ISTN=YUL and STN=YYZ  (iStn+stn starts with query)
+                    //   pair2: STN=YUL and OSTN=YYZ  (stn+oStn starts with query)
                     const q = priorityFilterTurn;
-                    const rots = scheduleData[r.fin] || [];
-                    const match = rots.some(rot => {
-                        const iStn = (rot.iStn || '').toUpperCase();
-                        const stn  = (rot.stn  || '').toUpperCase();
-                        const oStn = (rot.oStn || '').toUpperCase();
-                        const pair1 = iStn + stn;   // e.g. "YULYYZ"
-                        const pair2 = stn  + oStn;  // e.g. "YYZLAX"
-                        return pair1.startsWith(q) || pair2.startsWith(q);
-                    });
-                    if (!match) return false;
+                    const rot = getNextRotation(r.fin);
+                    if (!rot) return false;
+                    const iStn  = (rot.iStn || '').toUpperCase();
+                    const stn   = (rot.stn  || '').toUpperCase();
+                    const oStn  = (rot.oStn || '').toUpperCase();
+                    const pair1 = iStn + stn;   // ISTN+STN  e.g. "YULYYZ"
+                    const pair2 = stn  + oStn;  // STN+OSTN  e.g. "YULYYZ"
+                    if (!pair1.startsWith(q) && !pair2.startsWith(q)) return false;
                 }
                 return true;
             });
