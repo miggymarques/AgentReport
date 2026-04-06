@@ -646,9 +646,16 @@
         const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
         const NRO_INDEX_KEY    = 'yul_nro_index_v1';
         const SCHEDULE_KEY     = 'yul_schedule_v1';
+        const P_PLUS_KEY       = 'yul_p_plus_flags_v1'; // P+ escalated priority flags
+        const P_PLUS_TS_KEY    = 'yul_p_plus_ts_v1';    // per-FIN timestamps for P+ last-write-wins
 
         // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
         let scheduleData = {};
+
+        // pPlusFlags: { "AC101": true, ... } — FINs manually escalated to top priority
+        let pPlusFlags = {};
+        // pPlusFlagTs: { "AC101": 1234567890, ... } — timestamp of last change per FIN (for P2P last-write-wins)
+        let pPlusFlagTs = {};
 
         // agentBlock: { value → deletedAt (timestamp) }
         // Tombstone map — an agent in here was explicitly deleted and must never be re-added
@@ -876,6 +883,28 @@
         function saveAssetRef()         { storageSet(ASSET_REF_KEY,         JSON.stringify(assetRef)); }
         function saveAssetRefTs()       { storageSet(ASSET_REF_TS_KEY,      JSON.stringify(assetRefTs)); }
         function saveAssetRefBlock()    { storageSet(ASSET_REF_BLOCK_KEY,   JSON.stringify(assetRefBlock)); }
+
+        function savePPlusFlags() {
+            storageSet(P_PLUS_KEY,    JSON.stringify(pPlusFlags));
+            storageSet(P_PLUS_TS_KEY, JSON.stringify(pPlusFlagTs));
+        }
+
+        // Toggle P+ flag for a FIN; triggers re-suggestion, priority re-render, and P2P broadcast
+        function togglePPlus(fin, checked) {
+            const ts = Date.now();
+            if (checked) pPlusFlags[fin] = true;
+            else delete pPlusFlags[fin];
+            pPlusFlagTs[fin] = ts; // always stamp — even a removal needs a ts to win over a stale set
+            savePPlusFlags();
+            // Broadcast immediately to all connected peers
+            const msg = { type: 'PPLUS_SYNC', pPlusFlags, pPlusFlagTs };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+            // Re-run suggestion so the main form immediately reflects the new priority
+            if (!document.getElementById('field-fin')?.value) updateFinPlaceholder();
+            renderPriorityList();
+            // Re-render schedule table if it's open so checkbox state is consistent
+            if (activeRefTab === 'schedule') renderRefList();
+        }
 
         // Derive each FIN's asset list on-the-fly from assetIndex.
         // Returns { fin: [assetId, ...] } — each asset appears on exactly one FIN.
@@ -1936,6 +1965,7 @@
         // Returns { fin, priority } for the best available aircraft at the agent's station.
         // Tries P1 first; falls back to P2, then P3 if no higher-priority candidates exist.
         // Within each priority bucket: most overdue → airline rank (AC > RV > QK) → earliest ODT.
+        // P+ flagged FINs are always checked first, ahead of the normal priority tiers.
         function getNextSuggestedFin() {
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
             if (!agentStation) return null;
@@ -1962,29 +1992,56 @@
                 return Math.round((today - d) / 86400000);
             };
 
+            const minService = new Date(now.getTime() + 20 * 60000); // must have 20min remaining
+
+            // Helper: check if a FIN is currently serviceable at this station
+            const getServiceable = (fin) => {
+                const rotations = scheduleData[fin];
+                if (!rotations || rotations.length === 0) return null;
+                const upcoming = rotations
+                    .filter(r => { const d = parseT(r.odt); return d && d >= minService && (r.stn || '').toUpperCase() === agentStation; })
+                    .sort((a, b) => parseT(a.odt) - parseT(b.odt));
+                if (upcoming.length === 0) return null;
+                if (isFinClaimed(fin)) return null;
+                return upcoming[0];
+            };
+
             const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
+
+            // ── P+ override: suggest any P+ flagged FIN first ─────────────────
+            // Sort P+ candidates by most overdue → airline rank → earliest ODT
+            const pPlusCandidates = [];
+            Object.keys(pPlusFlags).forEach(fin => {
+                if (!pPlusFlags[fin]) return;
+                const rot = getServiceable(fin);
+                if (!rot) return;
+                const airline = fin.substring(0, 2).toUpperCase();
+                pPlusCandidates.push({
+                    fin,
+                    days:        daysOverdue(fin),
+                    airlineRank: AIRLINE_RANK[airline] !== undefined ? AIRLINE_RANK[airline] : 99,
+                    odt:         parseT(rot.odt).getTime()
+                });
+            });
+            if (pPlusCandidates.length > 0) {
+                pPlusCandidates.sort((a, b) => b.days - a.days || a.airlineRank - b.airlineRank || a.odt - b.odt);
+                const best = pPlusCandidates[0];
+                return { fin: best.fin, priority: computeFinPriority(best.fin), pPlus: true };
+            }
+
             const byPriority = { 1: [], 2: [], 3: [] };
 
             allFins.forEach(fin => {
                 const priority = computeFinPriority(fin);
-                const rotations = scheduleData[fin];
-                if (!rotations || rotations.length === 0) return;
-
-                const minService = new Date(now.getTime() + 20 * 60000); // must have 20min remaining
-                const upcoming = rotations
-                    .filter(r => { const d = parseT(r.odt); return d && d >= minService && (r.stn || '').toUpperCase() === agentStation; })
-                    .sort((a, b) => parseT(a.odt) - parseT(b.odt));
-                if (upcoming.length === 0) return;
-
-                // Skip FINs claimed by another active agent
-                if (isFinClaimed(fin)) return;
+                const rot = getServiceable(fin);
+                if (!rot) return;
 
                 const airline = fin.substring(0, 2).toUpperCase();
                 byPriority[priority].push({
                     fin,
                     days:        daysOverdue(fin),
                     airlineRank: AIRLINE_RANK[airline] !== undefined ? AIRLINE_RANK[airline] : 99,
-                    odt:         parseT(upcoming[0].odt).getTime()
+                    odt:         parseT(rot.odt).getTime()
                 });
             });
 
@@ -2172,6 +2229,14 @@
                 const savedSchedule = storageGet(SCHEDULE_KEY);
                 if (savedSchedule) scheduleData = JSON.parse(savedSchedule);
             } catch(e) { console.warn("Could not load schedule:", e); }
+            try {
+                const savedPPlus = storageGet(P_PLUS_KEY);
+                if (savedPPlus) pPlusFlags = JSON.parse(savedPPlus);
+            } catch(e) { console.warn("Could not load P+ flags:", e); }
+            try {
+                const savedPPlusTs = storageGet(P_PLUS_TS_KEY);
+                if (savedPPlusTs) pPlusFlagTs = JSON.parse(savedPPlusTs);
+            } catch(e) { console.warn("Could not load P+ timestamps:", e); }
             try {
                 const savedAgentRef = storageGet(AGENT_REF_KEY);
                 if (savedAgentRef) agentRef = JSON.parse(savedAgentRef);
@@ -2654,13 +2719,14 @@
             // padding: 1px 1ch gives exactly one character-width of space on each side.
             // white-space: nowrap prevents any wrapping inside cells.
             const tbl = document.createElement('table');
-            tbl.style.cssText = 'border-collapse:collapse; font-size:8px; white-space:nowrap; width:100%;';
+            tbl.style.cssText = 'border-collapse:collapse; font-size:11px; white-space:nowrap; width:100%;';
 
-            const CELL_STYLE  = 'padding:1px 1ch; vertical-align:middle;';
+            const CELL_STYLE  = 'padding:2px 1ch; vertical-align:middle;';
             const HEAD_STYLE  = CELL_STYLE + 'font-weight:900; text-transform:uppercase; letter-spacing:0.1em; color:#94a3b8; border-bottom:2px solid #e2e8f0; position:sticky; top:0; background:#fff; z-index:2;';
             const thead = document.createElement('thead');
             thead.innerHTML = `<tr>
                 <th style="${HEAD_STYLE}">FIN</th>
+                <th style="${HEAD_STYLE} color:#7c3aed; font-size:10px;">P+</th>
                 <th style="${HEAD_STYLE}">IDT</th>
                 <th style="${HEAD_STYLE}">ODT</th>
                 <th style="${HEAD_STYLE}">IFLT</th>
@@ -2682,11 +2748,22 @@
                     tr.style.cssText = rowBorder;
                     tr.onmouseenter = () => tr.style.background = '#f8fafc';
                     tr.onmouseleave = () => tr.style.background = '';
+                    const isPPlus = !!pPlusFlags[fin];
                     const finCell = idx === 0
-                        ? `<td style="${CELL_STYLE} font-family:monospace; font-weight:900; color:#2563eb;">${fin}</td>`
+                        ? `<td style="${CELL_STYLE} font-family:monospace; font-weight:900; color:${isPPlus ? '#7c3aed' : '#2563eb'};">${fin}</td>`
                         : `<td style="${CELL_STYLE} color:#e2e8f0;"></td>`;
+                    // P+ checkbox — only shown on the first rotation row for each FIN
+                    const pPlusCell = idx === 0
+                        ? `<td style="${CELL_STYLE} text-align:center;">
+                            <input type="checkbox" title="Escalate ${fin} to top priority"
+                                style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed;"
+                                ${isPPlus ? 'checked' : ''}
+                                onchange="togglePPlus('${fin}', this.checked)">
+                           </td>`
+                        : `<td style="${CELL_STYLE}"></td>`;
                     tr.innerHTML = `
                         ${finCell}
+                        ${pPlusCell}
                         <td style="${CELL_STYLE} font-family:monospace; color:#94a3b8;" title="${fmtSchedTime(rot.idt)}">${fmtSchedDate(rot.idt)}</td>
                         <td style="${CELL_STYLE} font-family:monospace; font-weight:700; color:#7c3aed;" title="${fmtSchedTime(rot.odt)}">${fmtSchedDate(rot.odt)}</td>
                         <td style="${CELL_STYLE} font-family:monospace; color:#94a3b8;">${rot.iflt  || '—'}</td>
@@ -2817,6 +2894,9 @@
                 else if (daysAgo <= 2)   priority = 2;
                 else                     priority = 1;
 
+                // P+ override — escalate to P1 regardless of computed priority
+                if (pPlusFlags[fin]) priority = 1;
+
                 const lastTime    = (entry && entry.lastTime)    || '';
                 const lastStation = (entry && entry.lastStation) || '';
 
@@ -2854,12 +2934,15 @@
                 return;
             }
 
-            // Sort: priority asc (1 first), then airline alpha, then FIN numeric
-            filtered.sort((a, b) =>
-                a.priority - b.priority ||
-                a.airline.localeCompare(b.airline) ||
-                parseInt(a.fin.replace(/\D/g,'')) - parseInt(b.fin.replace(/\D/g,''))
-            );
+            // Sort: P+ first, then priority asc (1 first), then airline alpha, then FIN numeric
+            filtered.sort((a, b) => {
+                const aPP = pPlusFlags[a.fin] ? 0 : 1;
+                const bPP = pPlusFlags[b.fin] ? 0 : 1;
+                return aPP - bPP ||
+                    a.priority - b.priority ||
+                    a.airline.localeCompare(b.airline) ||
+                    parseInt(a.fin.replace(/\D/g,'')) - parseInt(b.fin.replace(/\D/g,''));
+            });
 
             // Group by priority
             const groups = { 1: [], 2: [], 3: [] };
@@ -2897,6 +2980,9 @@
                     const dateStr    = r.lastSeen || '—';
                     const pColor     = p === 1 ? 'text-red-500' : p === 2 ? 'text-amber-500' : 'text-emerald-500';
                     const timeStnStr = [r.lastTime, r.lastStation].filter(Boolean).join(' · ');
+                    const pPlusBadge = pPlusFlags[r.fin]
+                        ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-300">P+</span>`
+                        : '';
 
                     const turnInfo = getTurnInfoCompact(r.fin);
                     let turnHtml = '';
@@ -2916,7 +3002,7 @@
                     wrapper.className = "border-b border-slate-50 hover:bg-slate-50 last:border-0";
                     wrapper.innerHTML = `
                         <div class="grid gap-2 px-4 pt-2.5 ${turnInfo ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
-                            <span class="font-mono font-black text-blue-600">${r.fin}</span>
+                            <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : 'text-blue-600'}">${r.fin}${pPlusBadge}</span>
                             <span class="font-bold text-slate-700">${r.type}</span>
                             <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
                             <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
@@ -3504,7 +3590,8 @@
                 finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched,
                 agentRef: agents, agentBlock, sharedDb: sharedEntries, sharedDbClearTs,
                 aircraftRef: acRef, aircraftRefBlock,
-                assetRef: asRef, assetRefTs: asRefTs, assetRefBlock
+                assetRef: asRef, assetRefTs: asRefTs, assetRefBlock,
+                pPlusFlags, pPlusFlagTs
             };
         }
 
@@ -3862,6 +3949,27 @@
                 }
             }
 
+            // Merge P+ flags — per-FIN last-write-wins using pPlusFlagTs
+            if (msg.pPlusFlags && typeof msg.pPlusFlags === 'object' && msg.pPlusFlagTs && typeof msg.pPlusFlagTs === 'object') {
+                let ppChanged = false;
+                Object.entries(msg.pPlusFlagTs).forEach(([fin, incomingTs]) => {
+                    const localTs = pPlusFlagTs[fin] || 0;
+                    if (incomingTs > localTs) {
+                        pPlusFlagTs[fin] = incomingTs;
+                        if (msg.pPlusFlags[fin]) pPlusFlags[fin] = true;
+                        else delete pPlusFlags[fin];
+                        ppChanged = true;
+                    }
+                });
+                if (ppChanged) {
+                    savePPlusFlags();
+                    anyChanged = true;
+                    if (!document.getElementById('field-fin')?.value) updateFinPlaceholder();
+                    renderPriorityList();
+                    if (activeRefTab === 'schedule') renderRefList();
+                }
+            }
+
             // Apply incoming clear tombstone BEFORE merging shared entries — ensures
             // that records pre-dating the clear are never re-added via sync.
             if (typeof msg.sharedDbClearTs === 'number' && msg.sharedDbClearTs > sharedDbClearTs) {
@@ -4078,6 +4186,32 @@
                     // Re-run suggestion in case this FIN was blocking ours
                     if (!document.getElementById('field-fin')?.value) {
                         updateFinPlaceholder();
+                    }
+                }
+            }
+
+            if (msg.type === 'PPLUS_SYNC') {
+                if (msg.pPlusFlags && typeof msg.pPlusFlags === 'object' && msg.pPlusFlagTs && typeof msg.pPlusFlagTs === 'object') {
+                    let ppChanged = false;
+                    Object.entries(msg.pPlusFlagTs).forEach(([fin, incomingTs]) => {
+                        const localTs = pPlusFlagTs[fin] || 0;
+                        if (incomingTs > localTs) {
+                            pPlusFlagTs[fin] = incomingTs;
+                            if (msg.pPlusFlags[fin]) pPlusFlags[fin] = true;
+                            else delete pPlusFlags[fin];
+                            ppChanged = true;
+                        }
+                    });
+                    if (ppChanged) {
+                        savePPlusFlags();
+                        if (!document.getElementById('field-fin')?.value) updateFinPlaceholder();
+                        renderPriorityList();
+                        if (activeRefTab === 'schedule') renderRefList();
+                        // Relay to any other connected peers so all agents get it
+                        Object.keys(p2pConnections).forEach(pid => {
+                            if (pid === fromPeer) return;
+                            conn_p2p_send(pid, msg);
+                        });
                     }
                 }
             }
