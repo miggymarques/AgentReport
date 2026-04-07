@@ -83,6 +83,37 @@
         .sync-dot-online { background-color: #10b981 !important; box-shadow: 0 0 6px #10b981; }
         .sync-dot-syncing { background-color: #3b82f6 !important; animation: pulse-sync 0.8s ease-in-out infinite; }
         .sync-dot-offline { background-color: #475569 !important; }
+
+        /* P+ checkbox — solid purple when checked, purple outline only when unchecked */
+        .pplus-checkbox {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #7c3aed;
+            border-radius: 3px;
+            cursor: pointer;
+            background: transparent;
+            position: relative;
+            transition: background 0.15s, border-color 0.15s;
+            flex-shrink: 0;
+        }
+        .pplus-checkbox:checked {
+            background: #7c3aed;
+            border-color: #7c3aed;
+        }
+        .pplus-checkbox:checked::after {
+            content: '';
+            position: absolute;
+            left: 2px;
+            top: -1px;
+            width: 5px;
+            height: 9px;
+            border: 2px solid white;
+            border-top: none;
+            border-left: none;
+            transform: rotate(45deg);
+        }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen font-sans text-slate-900">
@@ -2025,11 +2056,16 @@
 
             // ── P+ override: suggest any P+ flagged FIN first ─────────────────
             // Sort P+ candidates by most overdue → airline rank → earliest ODT
+            // P+ is only surfaced when the aircraft is already on the ground at the
+            // agent's station (IDT in the past), not merely scheduled to arrive later.
             const pPlusCandidates = [];
             Object.keys(pPlusFlags).forEach(fin => {
                 if (!pPlusFlags[fin]) return;
                 const rot = getServiceable(fin);
                 if (!rot) return;
+                // Guard: aircraft must have already arrived (IDT ≤ now)
+                const idt = parseT(rot.idt);
+                if (!idt || idt > now) return;
                 const airline = fin.substring(0, 2).toUpperCase();
                 pPlusCandidates.push({
                     fin,
@@ -2771,10 +2807,9 @@
                     // P+ checkbox — only shown on the first rotation row for each FIN
                     const pPlusCell = idx === 0
                         ? `<td style="${CELL_STYLE} text-align:center;">
-                            <input type="checkbox" title="Escalate ${fin} to top priority"
-                                style="width:14px;height:14px;cursor:pointer;accent-color:${isPPlus ? '#ef4444' : '#7c3aed'};"
+                            <input type="checkbox" class="pplus-checkbox" title="Escalate ${fin} to top priority"
                                 ${isPPlus ? 'checked' : ''}
-                                onchange="togglePPlus('${fin}', this.checked); this.style.accentColor=this.checked?'#ef4444':'#7c3aed';">
+                                onchange="togglePPlus('${fin}', this.checked);">
                            </td>`
                         : `<td style="${CELL_STYLE}"></td>`;
                     tr.innerHTML = `
