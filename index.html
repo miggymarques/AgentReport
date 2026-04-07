@@ -4132,7 +4132,15 @@
                 const nowTs = Date.now();
                 lastSyncTs[fromPeer] = nowTs;
 
-                if (changed) setSyncStatus('synced', Object.keys(p2pConnections).length);
+                if (changed) {
+                    setSyncStatus('synced', Object.keys(p2pConnections).length);
+                    // Re-render whichever ref tab is currently open so incoming peer data
+                    // (assetRef, aircraftRef, finTable/assetIndex via synctable) appears
+                    // immediately — mirrors what REF_SYNC already does for those tabs.
+                    if (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'synctable') {
+                        renderRefList();
+                    }
+                }
 
                 // Reply with our own delta of anything newer than what they told us they had
                 const replyConn = p2pConnections[fromPeer];
