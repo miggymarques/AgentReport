@@ -906,6 +906,21 @@
             if (activeRefTab === 'schedule') renderRefList();
         }
 
+        // Auto-reset P+ when a FIN gets serviced — called after any service record lands
+        // (local save, P2P incoming entry, or sync-table import).
+        // Stamps a fresh timestamp so the removal beats any stale P+ on other peers.
+        function clearPPlusForFin(fin) {
+            if (!fin || fin === 'INV' || !pPlusFlags[fin]) return;
+            delete pPlusFlags[fin];
+            pPlusFlagTs[fin] = Date.now();
+            savePPlusFlags();
+            const msg = { type: 'PPLUS_SYNC', pPlusFlags, pPlusFlagTs };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+            if (!document.getElementById('field-fin')?.value) updateFinPlaceholder();
+            renderPriorityList();
+            if (activeRefTab === 'schedule') renderRefList();
+        }
+
         // Derive each FIN's asset list on-the-fly from assetIndex.
         // Returns { fin: [assetId, ...] } — each asset appears on exactly one FIN.
         function buildFinAssets() {
@@ -2631,6 +2646,7 @@
 
             entries.forEach(entry => {
                 updateFinTable(entry);
+                clearPPlusForFin(entry.FIN); // auto-reset P+ for any FIN now confirmed serviced
                 processed++;
             });
 
@@ -2756,9 +2772,9 @@
                     const pPlusCell = idx === 0
                         ? `<td style="${CELL_STYLE} text-align:center;">
                             <input type="checkbox" title="Escalate ${fin} to top priority"
-                                style="width:14px;height:14px;cursor:pointer;accent-color:#7c3aed;"
+                                style="width:14px;height:14px;cursor:pointer;accent-color:${isPPlus ? '#ef4444' : '#7c3aed'};"
                                 ${isPPlus ? 'checked' : ''}
-                                onchange="togglePPlus('${fin}', this.checked)">
+                                onchange="togglePPlus('${fin}', this.checked); this.style.accentColor=this.checked?'#ef4444':'#7c3aed';">
                            </td>`
                         : `<td style="${CELL_STYLE}"></td>`;
                     tr.innerHTML = `
@@ -3119,6 +3135,7 @@
             addToSharedDb(entry);
             broadcastNewEntry(entry);
             updateFinTable(entry);
+            clearPPlusForFin(entry.FIN); // auto-reset P+ now that this FIN has been serviced
 
             if (!isInvMode) {
                 const removals = [{f: 'HD1Rmvd', p: 'HHD1'}, {f: 'HD2Rmvd', p: 'HHD2'}, {f: 'HD3Rmvd', p: 'HHD3'}, {f: 'HD4Rmvd', p: 'HHD4'}];
@@ -4108,6 +4125,7 @@
                 const inEntry = msg.entry;
                 // Only update backend tables — do NOT add to db or history tab
                 updateFinTable(inEntry);
+                clearPPlusForFin(inEntry.FIN); // auto-reset P+ now that peer confirmed service
                 addToSharedDb(inEntry);
                 // Bug fix: do NOT advance lastSyncTs by entry.id — entry IDs are not reliable
                 // sync cursors and clobber the finTable/assetIndex delta window. Leave lastSyncTs
