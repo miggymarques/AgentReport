@@ -3192,16 +3192,22 @@
 
                             const inGtVal = mtcRot.inGt || '—';
                             const oGtVal  = mtcRot.oGt  || '—';
+                            const blankNa = (v) => (v === 'N/A' || v === 'n/a') ? '' : v;
+                            const dIStn = blankNa(mtcIStn);
+                            const dStn  = blankNa(mtcStn);
+                            const dOStn = blankNa(mtcOStn);
+                            const routeParts = [dIStn, dStn, dOStn].filter(Boolean);
+                            const routeStr = routeParts.length > 0 ? routeParts.join(' → ') : '—';
 
                             turnHtml = `
                                 <div class="px-4 pb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono border-b border-amber-100 bg-amber-50/40">
-                                    <span class="text-amber-500 text-[8px] font-black uppercase tracking-widest mr-1">🔧 MTC</span>
+                                    <span class="text-amber-500 text-[8px] font-black uppercase tracking-widest mr-1">🔧</span>
                                     <span class="text-amber-700 font-black">${inGtVal}</span>
                                     <span class="text-amber-400">·</span>
                                     <span class="text-amber-600">${oGtVal}</span>
                                     <span class="text-amber-400">·</span>
                                     <span class="text-amber-700 font-black">✈in ${idtStr}</span>
-                                    <span class="text-amber-600 font-black">${mtcIStn || '—'} → ${mtcStn || '—'} → ${mtcOStn || '—'}</span>
+                                    <span class="text-amber-600 font-black">${routeStr}</span>
                                     <span class="text-amber-700 font-black">✈out ${odtStr}</span>
                                 </div>`;
                         }
