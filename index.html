@@ -2017,9 +2017,11 @@
         }
 
         function releaseFin(fin) {
-            if (!fin || !finClaims[fin]) return;
+            if (!fin) return;
             delete finClaims[fin];
-            const msg = { type: 'RELEASE_FIN', fin };
+            const releaseTs = Date.now();
+            finClaimReleases[fin] = releaseTs;
+            const msg = { type: 'RELEASE_FIN', fin, releaseTs };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
         }
 
@@ -3773,7 +3775,8 @@
         let p2pReady = false;
         let p2pSyncInterval = null;
         let lastSyncTs = {};          // peerId → timestamp of last successful sync with that peer
-        let finClaims  = {};          // fin → { agent, ts } — in-memory only, not persisted
+        let finClaims        = {};    // fin → { agent, ts } — in-memory only, not persisted
+        let finClaimReleases = {};    // fin → releaseTs tombstones — broadcast so peers clear stale claims
 
         const P2P_QUEUE_KEY = 'p2p_offline_queue_v1';
 
@@ -3983,7 +3986,7 @@
                 Object.entries(finClaims).forEach(([fin, c]) => {
                     if (now - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
                 });
-                conn.send({ type: msgType, sinceTs, ...delta, finClaims: activeClaims });
+                conn.send({ type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
                 flushP2PQueue();
             };
 
@@ -4164,12 +4167,27 @@
             }
 
             // Merge incoming finClaims (piggybacked on FULL_SYNC / DELTA_SYNC)
+            // Apply tombstones first so a release always beats an older claim
+            if (msg.finClaimReleases && typeof msg.finClaimReleases === 'object') {
+                Object.entries(msg.finClaimReleases).forEach(([fin, releaseTs]) => {
+                    if (!finClaimReleases[fin] || releaseTs > finClaimReleases[fin]) {
+                        finClaimReleases[fin] = releaseTs;
+                    }
+                    // Evict any local claim whose ts predates (or equals) the release
+                    const claim = finClaims[fin];
+                    if (claim && claim.ts <= finClaimReleases[fin]) {
+                        delete finClaims[fin];
+                    }
+                });
+            }
             if (msg.finClaims && typeof msg.finClaims === 'object') {
                 let claimChanged = false;
                 const now = Date.now();
                 Object.entries(msg.finClaims).forEach(([fin, c]) => {
                     if (!c || !c.agent || !c.ts) return;
                     if (now - c.ts > CLAIM_TTL_MS) return; // already expired
+                    // Reject if a newer release tombstone exists for this fin
+                    if (finClaimReleases[fin] && c.ts <= finClaimReleases[fin]) return;
                     const existing = finClaims[fin];
                     if (!existing || c.ts > existing.ts) {
                         finClaims[fin] = { agent: c.agent, ts: c.ts };
@@ -4341,7 +4359,7 @@
                         Object.entries(finClaims).forEach(([fin, c]) => {
                             if (replyNow - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
                         });
-                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, ...replyDelta, finClaims: activeClaims });
+                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, ...replyDelta, finClaims: activeClaims, finClaimReleases });
                     }
                 }
                 return;
@@ -4411,6 +4429,8 @@
 
             if (msg.type === 'CLAIM_FIN') {
                 if (msg.fin && msg.agent && msg.ts) {
+                    // Reject if a release tombstone is newer than this claim
+                    if (finClaimReleases[msg.fin] && msg.ts <= finClaimReleases[msg.fin]) return;
                     // Only store if newer than existing claim
                     const existing = finClaims[msg.fin];
                     if (!existing || msg.ts > existing.ts) {
@@ -4420,17 +4440,23 @@
                             updateFinPlaceholder._lastSuggested = null;
                             updateFinPlaceholder();
                         }
+                        renderPriorityList();
                     }
                 }
             }
 
             if (msg.type === 'RELEASE_FIN') {
-                if (msg.fin && finClaims[msg.fin]) {
-                    delete finClaims[msg.fin];
-                    // Re-run suggestion in case this FIN was blocking ours
-                    if (!document.getElementById('field-fin')?.value) {
-                        updateFinPlaceholder();
+                if (msg.fin) {
+                    const releaseTs = msg.releaseTs || Date.now();
+                    if (!finClaimReleases[msg.fin] || releaseTs > finClaimReleases[msg.fin]) {
+                        finClaimReleases[msg.fin] = releaseTs;
                     }
+                    const claim = finClaims[msg.fin];
+                    if (claim && claim.ts <= finClaimReleases[msg.fin]) {
+                        delete finClaims[msg.fin];
+                    }
+                    if (!document.getElementById('field-fin')?.value) updateFinPlaceholder();
+                    renderPriorityList();
                 }
             }
 
@@ -4537,7 +4563,7 @@
                         const sinceTs = lastSyncTs[pid] || 0;
                         const delta = buildDelta(sinceTs);
                         const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
-                        conn_p2p_send(pid, { type: msgType, sinceTs, ...delta, finClaims: activeClaims });
+                        conn_p2p_send(pid, { type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
                     });
                 }
             }, P2P_SYNC_INTERVAL_MS);
