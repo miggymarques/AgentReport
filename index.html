@@ -2559,8 +2559,17 @@
                         const fin = String(row['FIN'] || '').trim().toUpperCase();
                         if (!fin) return;
 
+                        // For IDT/ODT use the raw cell value: with cellDates:true the raw
+                        // value is a proper JS Date object which serialises to a clean ISO
+                        // string. raw:false formats dates as locale strings that don't
+                        // always round-trip correctly through new Date().
+                        const rawRow = rawRows[i] || {};
+                        const parseRawDt = (raw, fallback) => {
+                            if (raw instanceof Date && !isNaN(raw)) return raw.toISOString();
+                            return fallback || '';
+                        };
                         const rotation = {
-                            idt:     row['IDT']   || '',
+                            idt:     parseRawDt(rawRow['IDT'],  row['IDT']),
                             iflt:    String(row['IFLT']  || '').trim(),
                             inGt:    String(row['InGt']  || '').trim(),
                             iStn:    String(row['ISTN']  || '').trim(),
@@ -2568,7 +2577,7 @@
                             oStn:    String(row['OSTN']  || '').trim(),
                             oGt:     String(row['OGT']   || '').trim(),
                             oflt:    String(row['OFLT']  || '').trim(),
-                            odt:     row['ODT']   || '',
+                            odt:     parseRawDt(rawRow['ODT'],  row['ODT']),
                             routeDt: row['RouteDt'] || '',
                             _ts: ts
                         };
