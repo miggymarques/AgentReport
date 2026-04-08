@@ -539,7 +539,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.11.2";
+        const CURRENT_VERSION = "v2.11.1";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1980,6 +1980,12 @@
         // ─── FIN Claim System ────────────────────────────────────────────────
         const CLAIM_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+        // ─── Priority Card Quick-Select State ────────────────────────────────
+        // Tracks which FIN was selected via a priority card tap, and the revert timer.
+        let priorityCardFin   = null;  // FIN currently loaded via card tap
+        let priorityCardTimer = null;  // setTimeout handle for 15-min revert
+        const PRIORITY_CARD_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
         function claimFin(fin) {
             if (!fin) return;
             const agentVal = document.getElementById('agent-field')?.value || '';
@@ -2006,6 +2012,85 @@
             const agentVal = document.getElementById('agent-field')?.value || '';
             const myName = agentVal.split(',')[0].trim();
             return claim.agent !== myName;
+        }
+
+        // ─── Priority Card Quick-Select ──────────────────────────────────────
+        // Called when an agent taps a FIN card in the Priority tab.
+        // Populates New Entry tab with FIN, flight#, priority and rotation info,
+        // broadcasts a claim to peers, and starts a 15-min revert timer.
+
+        function clearPriorityCardTimer() {
+            if (priorityCardTimer) { clearTimeout(priorityCardTimer); priorityCardTimer = null; }
+        }
+
+        function selectPriorityCard(fin, priority, rot) {
+            // If a different card was already loaded, release its claim first
+            if (priorityCardFin && priorityCardFin !== fin) {
+                releaseFin(priorityCardFin);
+            }
+            clearPriorityCardTimer();
+            priorityCardFin = fin;
+
+            // ── Switch to New Entry tab ───────────────────────────────────────
+            switchTab('form');
+
+            // ── Populate form fields ──────────────────────────────────────────
+            const finField      = document.getElementById('field-fin');
+            const flightField   = document.getElementById('field-flight');
+            const priorityField = document.getElementById('priority-field');
+
+            if (finField) {
+                finField.value = fin;
+                // Run the existing FIN-input handler so aircraft type/body/rotation render
+                handleFinInput(finField);
+            }
+
+            // Set flight# value from the card's rotation (inbound preferred, fallback outbound)
+            if (flightField && rot) {
+                const ifltNum = (rot.iflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                const ofltNum = (rot.oflt || '').replace(/\D/g, '').replace(/^0+/, '');
+                const useNum  = (!ifltNum || ifltNum === '0' || ifltNum === '0000') ? ofltNum : ifltNum;
+                if (useNum) flightField.value = useNum.padStart(4, '0');
+            }
+
+            // Override priority to match what the card showed
+            if (priorityField) priorityField.value = String(priority);
+
+            // ── Claim this FIN and broadcast to peers ─────────────────────────
+            claimFin(fin);
+            updateFinPlaceholder._lastSuggested = fin;
+
+            // Re-render priority list so this card shows the "In Progress" badge
+            renderPriorityList();
+
+            // Toast with timer info
+            showToast('\u2708 ' + fin + ' loaded \u2014 15 min to complete');
+
+            // ── Start 15-minute revert timer ──────────────────────────────────
+            priorityCardTimer = setTimeout(() => {
+                const currentFin = document.getElementById('field-fin')?.value;
+                if (currentFin === fin) {
+                    // Time expired without a save — revert form to suggested-service state
+                    releaseFin(fin);
+                    priorityCardFin  = null;
+                    priorityCardTimer = null;
+                    updateFinPlaceholder._lastSuggested = null;
+
+                    const ff = document.getElementById('field-fin');
+                    if (ff) { ff.value = ''; handleFinInput(ff); }
+
+                    const flt = document.getElementById('field-flight');
+                    if (flt) flt.value = '';
+
+                    updateFinPlaceholder();
+                    renderPriorityList();
+                    showToast('\u23f0 ' + fin + ' timed out \u2014 reverted to suggestion');
+                } else {
+                    // FIN field was already cleared/changed — just clean up state
+                    priorityCardFin  = null;
+                    priorityCardTimer = null;
+                }
+            }, PRIORITY_CARD_TTL_MS);
         }
 
         // Returns { fin, priority } for the best available aircraft at the agent's station.
@@ -3035,6 +3120,15 @@
                         ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-300">P+</span>`
                         : '';
 
+                    // ── Claimed / In-Progress badges ──────────────────────────
+                    const isMyCard   = priorityCardFin === r.fin;
+                    const isPeerCard = !isMyCard && isFinClaimed(r.fin);
+                    const inProgressBadge = isMyCard
+                        ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-300 animate-pulse">⏱ IN PROGRESS</span>`
+                        : isPeerCard
+                            ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-300">🔒 CLAIMED</span>`
+                            : '';
+
                     const turnInfo = getTurnInfoCompact(r.fin);
                     let turnHtml = '';
                     if (turnInfo) {
@@ -3049,11 +3143,25 @@
                             </div>`;
                     }
 
+                    // Get rotation object for this FIN so the card tap can pass it along
+                    const nextRot = getNextRotation(r.fin);
+
                     const wrapper = document.createElement('div');
-                    wrapper.className = "border-b border-slate-50 hover:bg-slate-50 last:border-0";
+                    // Visual treatment: my card = blue tint, peer card = greyed, default = normal
+                    const wrapperBg = isMyCard
+                        ? 'bg-blue-50/60 border-b border-blue-100'
+                        : isPeerCard
+                            ? 'bg-slate-50/80 border-b border-slate-100 opacity-60'
+                            : 'border-b border-slate-50 hover:bg-slate-50 last:border-0';
+                    wrapper.className = `${wrapperBg} cursor-pointer active:scale-[0.99] transition-transform select-none`;
+                    wrapper.title = isMyCard ? 'Your active service — tap to re-select' : isPeerCard ? 'Being serviced by another agent' : 'Tap to load this aircraft into New Entry';
+                    // Only make non-peer cards tappable (or own card to re-select / reset timer)
+                    if (!isPeerCard) {
+                        wrapper.onclick = () => selectPriorityCard(r.fin, p, nextRot);
+                    }
                     wrapper.innerHTML = `
                         <div class="grid gap-2 px-4 pt-2.5 ${turnInfo ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
-                            <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : 'text-blue-600'}">${r.fin}${pPlusBadge}</span>
+                            <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : isMyCard ? 'text-blue-700' : 'text-blue-600'}">${r.fin}${pPlusBadge}${inProgressBadge}</span>
                             <span class="font-bold text-slate-700">${r.type}</span>
                             <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
                             <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
@@ -3219,6 +3327,9 @@
             if (savedFin && savedFin.value) releaseFin(savedFin.value);
             else if (updateFinPlaceholder._lastSuggested) releaseFin(updateFinPlaceholder._lastSuggested);
             updateFinPlaceholder._lastSuggested = null;
+            // Clear any active priority-card timer so it doesn't revert an already-saved record
+            clearPriorityCardTimer();
+            priorityCardFin = null;
             updateFinPlaceholder();
             hideTypoHint(); // clears all hint boxes
             // Reset placeholders that may have been set by handleFinInput
