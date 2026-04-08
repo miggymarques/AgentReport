@@ -1674,6 +1674,25 @@
         };
 
         // Returns the best upcoming rotation object for a FIN, or null
+        // Returns true when a rotation represents a maintenance event.
+        // MTC in the InGt column is the agreed signal.
+        function isMtcRotation(rot) {
+            return (rot.inGt || '').trim().toUpperCase() === 'MTC';
+        }
+
+        // Returns the first upcoming MTC rotation for a FIN (for display only — not for
+        // service suggestions).  Uses the same 30-min grace window as getNextRotation.
+        function getMtcRotation(fin) {
+            const rotations = scheduleData[fin];
+            if (!rotations || rotations.length === 0) return null;
+            const grace = new Date(new Date().getTime() - 30 * 60000);
+            const parseOdt = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+            const mtc = rotations
+                .filter(r => isMtcRotation(r) && parseOdt(r.odt) >= grace)
+                .sort((a, b) => parseOdt(a.odt) - parseOdt(b.odt));
+            return mtc.length > 0 ? mtc[0] : null;
+        }
+
         function getNextRotation(fin) {
             const rotations = scheduleData[fin];
             if (!rotations || rotations.length === 0) return null;
@@ -1681,7 +1700,8 @@
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
             const grace = new Date(now.getTime() - 30 * 60000);
             const parseOdt = (odt) => { if (!odt) return null; const d = new Date(odt); return isNaN(d) ? null : d; };
-            const upcoming = rotations.filter(r => { const d = parseOdt(r.odt); return d && d >= grace; })
+            // Exclude MTC maintenance rotations — they are never valid service opportunities
+            const upcoming = rotations.filter(r => { const d = parseOdt(r.odt); return d && d >= grace && !isMtcRotation(r); })
                 .sort((a, b) => parseOdt(a.odt) - parseOdt(b.odt));
             if (upcoming.length === 0) return null;
             return agentStation
@@ -2130,7 +2150,7 @@
                 const rotations = scheduleData[fin];
                 if (!rotations || rotations.length === 0) return null;
                 const upcoming = rotations
-                    .filter(r => { const d = parseT(r.odt); return d && d >= minService && (r.stn || '').toUpperCase() === agentStation; })
+                    .filter(r => { const d = parseT(r.odt); return d && d >= minService && (r.stn || '').toUpperCase() === agentStation && !isMtcRotation(r); })
                     .sort((a, b) => parseT(a.odt) - parseT(b.odt));
                 if (upcoming.length === 0) return null;
                 if (isFinClaimed(fin)) return null;
@@ -3141,6 +3161,50 @@
                                 <span class="text-slate-500 font-black">${iStn || '—'} → ${stn || '—'} → ${oStn || '—'}</span>
                                 <span class="text-slate-500">✈out <span class="font-black text-blue-600">${otm}</span></span>
                             </div>`;
+                    } else {
+                        // No serviceable rotation — check for a maintenance rotation
+                        const mtcRot = getMtcRotation(r.fin);
+                        if (mtcRot) {
+                            const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+                            const agentKnownTz = STATION_TZ[agentStation];
+                            const fallbackTz   = agentKnownTz || Intl.DateTimeFormat().resolvedOptions().timeZone;
+                            const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
+                            const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
+
+                            const mtcStn   = (mtcRot.stn  || '').toUpperCase();
+                            const mtcIStn  = (mtcRot.iStn || '').toUpperCase();
+                            const mtcOStn  = (mtcRot.oStn || '').toUpperCase();
+                            const mtcStnTz = STATION_TZ[mtcStn]  || fallbackTz;
+                            const mtcITz   = STATION_TZ[mtcIStn] || fallbackTz;
+
+                            const idtDate = parseT(mtcRot.idt);
+                            const odtDate = parseT(mtcRot.odt);
+
+                            let idtStr = '—';
+                            if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
+                                idtStr = fmtInTz(idtDate, mtcITz);
+                                if (agentKnownTz && mtcITz !== agentKnownTz)
+                                    idtStr += '(' + fmtInTz(idtDate, agentKnownTz) + ')';
+                            }
+                            let odtStr = odtDate ? fmtInTz(odtDate, mtcStnTz) : '—';
+                            if (odtDate && agentKnownTz && mtcStnTz !== agentKnownTz)
+                                odtStr += '(' + fmtInTz(odtDate, agentKnownTz) + ')';
+
+                            const inGtVal = mtcRot.inGt || '—';
+                            const oGtVal  = mtcRot.oGt  || '—';
+
+                            turnHtml = `
+                                <div class="px-4 pb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono border-b border-amber-100 bg-amber-50/40">
+                                    <span class="text-amber-500 text-[8px] font-black uppercase tracking-widest mr-1">🔧 MTC</span>
+                                    <span class="text-amber-700 font-black">${inGtVal}</span>
+                                    <span class="text-amber-400">·</span>
+                                    <span class="text-amber-600">${oGtVal}</span>
+                                    <span class="text-amber-400">·</span>
+                                    <span class="text-amber-700 font-black">✈in ${idtStr}</span>
+                                    <span class="text-amber-600 font-black">${mtcIStn || '—'} → ${mtcStn || '—'} → ${mtcOStn || '—'}</span>
+                                    <span class="text-amber-700 font-black">✈out ${odtStr}</span>
+                                </div>`;
+                        }
                     }
 
                     // Get rotation object for this FIN so the card tap can pass it along
@@ -3160,7 +3224,7 @@
                         wrapper.onclick = () => selectPriorityCard(r.fin, p, nextRot);
                     }
                     wrapper.innerHTML = `
-                        <div class="grid gap-2 px-4 pt-2.5 ${turnInfo ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
+                        <div class="grid gap-2 px-4 pt-2.5 ${turnHtml ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
                             <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : isMyCard ? 'text-blue-700' : 'text-blue-600'}">${r.fin}${pPlusBadge}${inProgressBadge}</span>
                             <span class="font-bold text-slate-700">${r.type}</span>
                             <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
