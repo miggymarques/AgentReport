@@ -3169,7 +3169,6 @@
                             const agentKnownTz = STATION_TZ[agentStation];
                             const fallbackTz   = agentKnownTz || Intl.DateTimeFormat().resolvedOptions().timeZone;
                             const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
-                            const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
 
                             const mtcStn   = (mtcRot.stn  || '').toUpperCase();
                             const mtcIStn  = (mtcRot.iStn || '').toUpperCase();
@@ -3180,15 +3179,9 @@
                             const idtDate = parseT(mtcRot.idt);
                             const odtDate = parseT(mtcRot.odt);
 
-                            let idtStr = '—';
-                            if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
-                                idtStr = fmtInTz(idtDate, mtcITz);
-                                if (agentKnownTz && mtcITz !== agentKnownTz)
-                                    idtStr += '(' + fmtInTz(idtDate, agentKnownTz) + ')';
-                            }
-                            let odtStr = odtDate ? fmtInTz(odtDate, mtcStnTz) : '—';
-                            if (odtDate && agentKnownTz && mtcStnTz !== agentKnownTz)
-                                odtStr += '(' + fmtInTz(odtDate, agentKnownTz) + ')';
+                            const fmtDate = (d, tz) => d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', timeZone: tz });
+                            const idtStr = idtDate ? fmtDate(idtDate, mtcITz)   : '—';
+                            const odtStr = odtDate ? fmtDate(odtDate, mtcStnTz) : '—';
 
                             const inGtVal = mtcRot.inGt || '—';
                             const oGtVal  = mtcRot.oGt  || '—';
