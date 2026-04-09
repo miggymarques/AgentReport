@@ -3881,29 +3881,9 @@
             return `ggcsync-${name}`;
         }
 
-        function initP2P(agentValue) {
-            if (!agentValue) return;
-            const peerId = agentToPeerId(agentValue);
-
-            // Already running with this ID — no need to reinit
-            if (p2pPeer && p2pMyId === peerId && !p2pPeer.destroyed) return;
-
-            // Destroy any existing peer before reinitialising
-            if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
-            if (p2pSyncInterval) { clearInterval(p2pSyncInterval); p2pSyncInterval = null; }
-            p2pPeer = null;
-            p2pConnections = {};
-            p2pReady = false;
-            p2pMyId = peerId;
-
-            setSyncStatus('connecting');
-
-            try {
-                const savedQueue = storageGet(P2P_QUEUE_KEY);
-                if (savedQueue) p2pOfflineQueue = JSON.parse(savedQueue);
-            } catch(e) {}
-
-            p2pPeer = new Peer(peerId, {
+        // ─── P2P: Shared config builder ───────────────────────────────────────
+        function _buildPeerConfig() {
+            return {
                 debug: 0,
                 host: '0.peerjs.com',
                 port: 443,
@@ -3926,57 +3906,186 @@
                         }
                     ]
                 }
-            });
+            };
+        }
 
-            p2pPeer.on('open', (id) => {
-                p2pReady = true;
+        // ─── P2P: Per-peer outbound send buffer ───────────────────────────────
+        // Messages queued here while a peer is temporarily disconnected are
+        // flushed automatically when the connection re-opens.
+        const p2pSendBuffer = {}; // peerId → [{msg, ts}]
+        const P2P_BUFFER_MAX     = 50;   // cap per peer
+        const P2P_BUFFER_TTL_MS  = 5 * 60 * 1000; // 5 min — older msgs are dropped
+
+        function _peerBufferEnqueue(peerId, msg) {
+            if (!p2pSendBuffer[peerId]) p2pSendBuffer[peerId] = [];
+            const now = Date.now();
+            p2pSendBuffer[peerId].push({ msg, ts: now });
+            // Trim expired and overflow entries
+            p2pSendBuffer[peerId] = p2pSendBuffer[peerId]
+                .filter(e => now - e.ts < P2P_BUFFER_TTL_MS)
+                .slice(-P2P_BUFFER_MAX);
+        }
+
+        function _peerBufferFlush(peerId, conn) {
+            const queue = p2pSendBuffer[peerId];
+            if (!queue || queue.length === 0) return;
+            const now = Date.now();
+            const fresh = queue.filter(e => now - e.ts < P2P_BUFFER_TTL_MS);
+            fresh.forEach(e => {
+                try { conn.send(e.msg); } catch(_) {}
+            });
+            p2pSendBuffer[peerId] = [];
+        }
+
+        // ─── P2P: Reconnect backoff state ─────────────────────────────────────
+        const p2pRetryDelay  = {}; // peerId → current delay ms
+        const p2pRetryTimer  = {}; // peerId → setTimeout handle
+        const P2P_RETRY_MIN  = 5000;
+        const P2P_RETRY_MAX  = 120000;
+
+        function _scheduleReconnect(peerId) {
+            if (p2pRetryTimer[peerId]) return; // already scheduled
+            const delay = p2pRetryDelay[peerId] || P2P_RETRY_MIN;
+            // Next delay: double up to max, with ±20 % jitter to avoid thundering herd
+            p2pRetryDelay[peerId] = Math.min(delay * 2, P2P_RETRY_MAX) * (0.8 + Math.random() * 0.4);
+            p2pRetryTimer[peerId] = setTimeout(() => {
+                delete p2pRetryTimer[peerId];
+                attemptConnect(peerId);
+            }, delay);
+        }
+
+        function _resetRetryDelay(peerId) {
+            p2pRetryDelay[peerId] = P2P_RETRY_MIN;
+            if (p2pRetryTimer[peerId]) { clearTimeout(p2pRetryTimer[peerId]); delete p2pRetryTimer[peerId]; }
+        }
+
+        // ─── P2P: Zombie-connection heartbeat ─────────────────────────────────
+        // Application-level PING/PONG — catches connections that PeerJS reports as
+        // open but whose underlying data channel has silently died.
+        const HEARTBEAT_INTERVAL_MS = 20000; // send ping every 20 s
+        const HEARTBEAT_TIMEOUT_MS  = 15000; // close conn if no pong within 15 s
+        const p2pLastPong  = {}; // peerId → timestamp of last pong received
+        let   p2pHeartbeatTimer = null;
+
+        function _startHeartbeat() {
+            if (p2pHeartbeatTimer) return;
+            p2pHeartbeatTimer = setInterval(() => {
+                const now = Date.now();
+                Object.keys(p2pConnections).forEach(pid => {
+                    const conn = p2pConnections[pid];
+                    if (!conn || !conn.open) return;
+                    // If we've sent a ping and haven't heard back in time — close it
+                    const lastPong = p2pLastPong[pid] || now; // grace on first check
+                    if (now - lastPong > HEARTBEAT_INTERVAL_MS + HEARTBEAT_TIMEOUT_MS) {
+                        console.warn('[P2P] Zombie connection detected for', pid, '— closing');
+                        try { conn.close(); } catch(_) {}
+                        delete p2pConnections[pid];
+                        updateSyncCount();
+                        _scheduleReconnect(pid);
+                        return;
+                    }
+                    try { conn.send({ type: 'PING', ts: now }); } catch(_) {}
+                });
+            }, HEARTBEAT_INTERVAL_MS);
+        }
+
+        // ─── P2P: Seen-message dedup guard ────────────────────────────────────
+        // Prevents relay-loop double-processing for broadcast message types.
+        const p2pSeenMsgIds = new Set();
+        const P2P_SEEN_MAX  = 500;
+
+        function _seenMsgId(id) {
+            if (p2pSeenMsgIds.has(id)) return true;
+            p2pSeenMsgIds.add(id);
+            if (p2pSeenMsgIds.size > P2P_SEEN_MAX) {
+                // Evict oldest entry (Sets preserve insertion order)
+                p2pSeenMsgIds.delete(p2pSeenMsgIds.values().next().value);
+            }
+            return false;
+        }
+
+        function initP2P(agentValue) {
+            if (!agentValue) return;
+            const peerId = agentToPeerId(agentValue);
+
+            // Already running with this ID — no need to reinit
+            if (p2pPeer && p2pMyId === peerId && !p2pPeer.destroyed) return;
+
+            // Destroy any existing peer before reinitialising
+            if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
+            if (p2pSyncInterval) { clearInterval(p2pSyncInterval); p2pSyncInterval = null; }
+            p2pPeer = null;
+            p2pConnections = {};
+            p2pReady = false;
+            p2pMyId = peerId;
+
+            setSyncStatus('connecting');
+
+            try {
+                const savedQueue = storageGet(P2P_QUEUE_KEY);
+                if (savedQueue) p2pOfflineQueue = JSON.parse(savedQueue);
+            } catch(e) {}
+
+            // ── Reconnect on tab becoming visible (e.g. screen wake / tab switch) ──
+            if (!initP2P._visibilityBound) {
+                initP2P._visibilityBound = true;
+                document.addEventListener('visibilitychange', () => {
+                    if (document.visibilityState !== 'visible') return;
+                    if (p2pPeer && !p2pPeer.destroyed && !p2pReady) {
+                        try { p2pPeer.reconnect(); } catch(_) {}
+                    }
+                    if (p2pReady && p2pMyId) connectToAllPeers(agentValue);
+                });
+            }
+
+            _attachPeerHandlers(new Peer(peerId, _buildPeerConfig()), agentValue, peerId);
+        }
+
+        function _attachPeerHandlers(peer, agentValue, canonicalId) {
+            p2pPeer   = peer;
+            p2pMyId   = peer.id || canonicalId; // may be overwritten on 'open'
+
+            peer.on('open', (id) => {
+                p2pMyId   = id;
+                p2pReady  = true;
+                _resetRetryDelay(id);
                 setSyncStatus('online', 0);
-                // Attempt connections to all other known agents
+                _startHeartbeat();
                 connectToAllPeers(agentValue);
-                // Start 5-minute background sync pulse
                 startPeriodicSync(agentValue);
             });
 
-            // Accept incoming connections from other agents
-            p2pPeer.on('connection', (conn) => {
+            peer.on('connection', (conn) => {
                 setupP2PConnection(conn);
             });
 
-            p2pPeer.on('disconnected', () => {
+            peer.on('disconnected', () => {
                 p2pReady = false;
                 setSyncStatus('offline');
-                // Auto-reconnect to signaling server
+                // Attempt signaling-server reconnect with backoff
+                const delay = 4000 * (0.8 + Math.random() * 0.4);
                 setTimeout(() => {
-                    if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect();
-                }, 4000);
+                    if (p2pPeer === peer && !peer.destroyed) peer.reconnect();
+                }, delay);
             });
 
-            p2pPeer.on('error', (err) => {
-                console.warn('P2P error:', err.type, err.message);
+            peer.on('error', (err) => {
+                console.warn('[P2P] peer error:', err.type, err.message);
                 if (err.type === 'unavailable-id') {
-                    // ID taken (e.g. same agent on another device) — register with a suffix and still connect outward
+                    // ID already taken (same agent on another tab/device) — use a random suffix
                     setSyncStatus('connecting');
-                    const fallbackId = peerId + '-' + Math.random().toString(36).slice(2, 6);
-                    if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
-                    p2pPeer = new Peer(fallbackId, { debug: 0, host: '0.peerjs.com', port: 443, path: '/', secure: true, pingInterval: 5000, config: { iceServers: [ { urls: 'stun:stun.l.google.com:19302' }, { urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478', username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'), credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==') }, { urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478?transport=tcp', username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'), credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==') } ] } });
-                    p2pMyId = fallbackId;
-                    p2pPeer.on('open', () => {
-                        p2pReady = true;
-                        setSyncStatus('online', 0);
-                        connectToAllPeers(agentValue);
-                        startPeriodicSync(agentValue);
-                    });
-                    p2pPeer.on('connection', (conn) => { setupP2PConnection(conn); });
-                    p2pPeer.on('disconnected', () => {
-                        p2pReady = false;
-                        setSyncStatus('offline');
-                        setTimeout(() => { if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect(); }, 4000);
-                    });
-                } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+                    if (!peer.destroyed) peer.destroy();
+                    const fallbackId = canonicalId + '-' + Math.random().toString(36).slice(2, 6);
+                    _attachPeerHandlers(new Peer(fallbackId, _buildPeerConfig()), agentValue, canonicalId);
+                } else if (err.type === 'peer-unavailable') {
+                    // Remote peer not registered yet — normal, will retry via periodic sync
+                } else if (err.type === 'network' || err.type === 'server-error' ||
+                           err.type === 'socket-error' || err.type === 'socket-closed') {
                     setSyncStatus('offline');
+                    const delay = 5000 * (0.8 + Math.random() * 0.4);
                     setTimeout(() => {
-                        if (p2pPeer && !p2pPeer.destroyed) p2pPeer.reconnect();
-                    }, 5000);
+                        if (p2pPeer === peer && !peer.destroyed) peer.reconnect();
+                    }, delay);
                 }
             });
         }
@@ -3985,53 +4094,95 @@
             const myPeerId = agentToPeerId(myAgentValue);
             ALL_AGENTS.forEach(name => {
                 const theirId = `ggcsync-${name.toLowerCase().replace(/\s+/g, '-')}`;
-                if (theirId === myPeerId) return;              // skip self
-                // Skip if already connected to this canonical ID or any suffix variant of it
-                const alreadyConnected = Object.keys(p2pConnections).some(pid => pid === theirId || pid.startsWith(theirId + '-'));
-                if (alreadyConnected) return;
+                if (theirId === myPeerId) return; // skip self
+                if (theirId === p2pMyId)  return; // skip self (fallback ID)
+                // Skip if already open to canonical ID or any suffix variant
+                const alreadyOpen = Object.keys(p2pConnections).some(pid =>
+                    (pid === theirId || pid.startsWith(theirId + '-')) && p2pConnections[pid]?.open
+                );
+                if (alreadyOpen) return;
                 attemptConnect(theirId);
             });
         }
 
-        function attemptConnect(theirId, retries = 0) {
-            if (!p2pPeer || !p2pReady || p2pConnections[theirId]) return;
+        function attemptConnect(theirId) {
+            if (!p2pPeer || !p2pReady) return;
+            // Don't open a duplicate outgoing connection to an already-open peer
+            if (p2pConnections[theirId]?.open) return;
             const conn = p2pPeer.connect(theirId, { reliable: true });
             setupP2PConnection(conn);
         }
 
         function setupP2PConnection(conn) {
-            // Register data/close/error handlers immediately regardless of open state
-            conn.on('data', (msg) => handleP2PMessage(msg, conn.peer));
+            const peerId = conn.peer;
 
-            conn.on('close', () => {
-                delete p2pConnections[conn.peer];
-                updateSyncCount();
-                setTimeout(() => attemptConnect(conn.peer), 20000);
+            // De-duplicate: if we already have an open connection to this peer, drop the new one
+            if (p2pConnections[peerId] && p2pConnections[peerId].open && p2pConnections[peerId] !== conn) {
+                // Keep the existing open connection — close the redundant one gracefully
+                try { conn.close(); } catch(_) {}
+                return;
+            }
+
+            conn.on('data', (msg) => {
+                // Application-level PONG reply
+                if (msg.type === 'PING') {
+                    try { conn.send({ type: 'PONG', ts: msg.ts }); } catch(_) {}
+                    return;
+                }
+                if (msg.type === 'PONG') {
+                    p2pLastPong[peerId] = Date.now();
+                    return;
+                }
+                // Dedup guard for broadcast relay messages to prevent loop double-processing
+                if (msg._id && _seenMsgId(msg._id)) return;
+                handleP2PMessage(msg, peerId);
             });
 
-            conn.on('error', () => {
-                delete p2pConnections[conn.peer];
-                updateSyncCount();
+            conn.on('close', () => {
+                if (p2pConnections[peerId] === conn) {
+                    delete p2pConnections[peerId];
+                    // Reset sync cursor so next reconnect triggers a full sync
+                    delete lastSyncTs[peerId];
+                    updateSyncCount();
+                }
+                _scheduleReconnect(peerId);
+            });
+
+            conn.on('error', (err) => {
+                console.warn('[P2P] conn error for', peerId, err);
+                if (p2pConnections[peerId] === conn) {
+                    delete p2pConnections[peerId];
+                    delete lastSyncTs[peerId];
+                    updateSyncCount();
+                }
+                _scheduleReconnect(peerId);
             });
 
             const doSync = () => {
-                p2pConnections[conn.peer] = conn;
+                p2pConnections[peerId] = conn;
+                p2pLastPong[peerId]    = Date.now(); // treat open as an implicit pong
+                _resetRetryDelay(peerId);
                 updateSyncCount();
-                const sinceTs = lastSyncTs[conn.peer] || 0;
-                const delta = buildDelta(sinceTs);
+
+                // Always do a FULL_SYNC on fresh open (lastSyncTs was cleared on close)
+                const sinceTs = lastSyncTs[peerId] || 0;
+                const delta   = buildDelta(sinceTs);
                 const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
-                // Include active (non-expired) claims so the peer knows which FINs are taken
                 const activeClaims = {};
                 const now = Date.now();
                 Object.entries(finClaims).forEach(([fin, c]) => {
                     if (now - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
                 });
-                conn.send({ type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
+                try {
+                    conn.send({ type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
+                } catch(e) {
+                    console.warn('[P2P] send failed on open for', peerId, e);
+                }
+                // Flush per-peer buffer (messages sent while the conn was re-opening)
+                _peerBufferFlush(peerId, conn);
                 flushP2PQueue();
             };
 
-            // If already open (incoming connection), sync immediately
-            // Otherwise wait for the open event (outgoing connection)
             if (conn.open) {
                 doSync();
             } else {
@@ -4612,7 +4763,16 @@
         function conn_p2p_send(peerId, msg) {
             const conn = p2pConnections[peerId];
             if (conn && conn.open) {
-                conn.send(msg);
+                try {
+                    conn.send(msg);
+                } catch(e) {
+                    // Send failed despite conn.open — buffer for next reconnect
+                    console.warn('[P2P] send threw for', peerId, e);
+                    _peerBufferEnqueue(peerId, msg);
+                }
+            } else {
+                // Connection not currently open — buffer so it's sent on reconnect
+                _peerBufferEnqueue(peerId, msg);
             }
         }
 
