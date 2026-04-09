@@ -378,6 +378,7 @@
                     <button onclick="setPriorityFilter('priority','1')"   id="pf-priority-1"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-red-400 border-red-200 hover:bg-red-50">P1</button>
                     <button onclick="setPriorityFilter('priority','2')"   id="pf-priority-2"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-amber-500 border-amber-200 hover:bg-amber-50">P2</button>
                     <button onclick="setPriorityFilter('priority','3')"   id="pf-priority-3"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-emerald-500 border-emerald-200 hover:bg-emerald-50">P3</button>
+                    <button onclick="setPriorityFilter('mtc','MTC')"      id="pf-priority-MTC" class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-purple-500 border-purple-200 hover:bg-purple-50">MTC</button>
                 </div>
                 <div class="w-px h-5 bg-slate-200 mx-1"></div>
                 <div class="relative flex items-center">
@@ -490,6 +491,7 @@
                     <input id="sf-istn"   type="text" placeholder="ISTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
                     <input id="sf-stn"    type="text" placeholder="STN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
                     <input id="sf-ostn"   type="text" placeholder="OSTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
+                    <input id="sf-ingt"   type="text" placeholder="MTC"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono" title="Filter by IGT or OGT">
                     <button onclick="clearScheduleFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1">✕ Clear</button>
                 </div>
                 <!-- Drop zone -->
@@ -1525,7 +1527,7 @@
                     </span>
                     <span class="font-mono text-[9px] leading-relaxed">${onboardHtml}${removedHtml}</span>
                     <span class="text-[9px] leading-relaxed">${agentDisplay}</span>
-                    <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}${entry.lastTime ? `<span class="block text-slate-300">${entry.lastTime}</span>` : ''}</span>
+                    <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}${entry.lastTime ? `<span class="block text-slate-500">${entry.lastTime}</span>` : ''}</span>
                     <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
                 container.appendChild(div);
             });
@@ -2620,7 +2622,7 @@
         }
 
         function clearScheduleFilters() {
-            ['sf-fin','sf-airline','sf-stn','sf-istn','sf-ostn'].forEach(id => {
+            ['sf-fin','sf-airline','sf-stn','sf-istn','sf-ostn','sf-ingt'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.value = '';
             });
@@ -2831,6 +2833,7 @@
             const fStn    = (document.getElementById('sf-stn')?.value     || '').trim().toUpperCase();
             const fIStn   = (document.getElementById('sf-istn')?.value    || '').trim().toUpperCase();
             const fOStn   = (document.getElementById('sf-ostn')?.value    || '').trim().toUpperCase();
+            const fInGt   = (document.getElementById('sf-ingt')?.value    || '').trim().toUpperCase();
 
             // Build filtered list: { fin, rotations[] }
             const filtered = [];
@@ -2841,6 +2844,7 @@
                     if (fStn  && (rot.stn  || '').toUpperCase()  !== fStn)  return false;
                     if (fIStn && (rot.iStn || '').toUpperCase()  !== fIStn) return false;
                     if (fOStn && (rot.oStn || '').toUpperCase()  !== fOStn) return false;
+                    if (fInGt && (rot.inGt || '').toUpperCase() !== fInGt && (rot.oGt || '').toUpperCase() !== fInGt) return false;
                     return true;
                 });
                 if (rots.length > 0) filtered.push({ fin, rots });
@@ -2851,7 +2855,7 @@
             // Summary bar
             const summary = document.createElement('div');
             summary.className = "text-center py-2 border-b border-slate-100 mb-1";
-            const isFiltered = fFin || fAirline || fStn || fIStn || fOStn;
+            const isFiltered = fFin || fAirline || fStn || fIStn || fOStn || fInGt;
             summary.innerHTML = isFiltered
                 ? `<span class="text-[10px] font-black text-violet-600">${filtered.length} aircraft · ${shownRots} rotations</span> <span class="text-[9px] text-slate-300">(filtered from ${finCount} / ${rotCount})</span>`
                 : `<span class="text-[10px] font-black text-slate-500">${finCount} aircraft · ${rotCount} rotations</span>${ts ? `<span class="text-[9px] text-slate-300 ml-2">· ${new Date(ts).toLocaleString()}</span>` : ''}`;
@@ -2952,17 +2956,19 @@
         let priorityFilterPriority = 'ALL';
         let priorityFilterFin      = '';
         let priorityFilterTurn     = ''; // 6-char string e.g. "YYZYUL" → stn pair YYZ+YUL
+        let priorityFilterMTC      = false; // true = show only FINs whose next rotation has INGT=MTC
 
         function setPriorityFilter(type, val) {
             if (type === 'airline')  priorityFilterAirline  = val;
             if (type === 'priority') priorityFilterPriority = val;
             if (type === 'fin')      priorityFilterFin      = val.trim();
             if (type === 'turn')     priorityFilterTurn     = val.trim().toUpperCase();
+            if (type === 'mtc')      priorityFilterMTC      = !priorityFilterMTC; // toggle
 
             // Show/hide the clear X button
             const clearBtn = document.getElementById('pf-clear');
             if (clearBtn) {
-                const active = priorityFilterAirline !== 'ALL' || priorityFilterPriority !== 'ALL' || priorityFilterFin !== '' || priorityFilterTurn !== '';
+                const active = priorityFilterAirline !== 'ALL' || priorityFilterPriority !== 'ALL' || priorityFilterFin !== '' || priorityFilterTurn !== '' || priorityFilterMTC;
                 clearBtn.classList.toggle('hidden', !active);
             }
 
@@ -2973,6 +2979,11 @@
             });
             document.querySelectorAll('.pf-priority').forEach(btn => {
                 const key = btn.id.replace('pf-priority-','');
+                // MTC button has its own toggle logic
+                if (key === 'MTC') {
+                    btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${priorityFilterMTC ? 'bg-purple-600 text-white border-purple-700' : 'bg-white text-purple-500 border-purple-200 hover:bg-purple-50'}`;
+                    return;
+                }
                 const active = btn.id === `pf-priority-${priorityFilterPriority}`;
                 const colors = { '1':'text-red-400 border-red-200 hover:bg-red-50', '2':'text-amber-500 border-amber-200 hover:bg-amber-50', '3':'text-emerald-500 border-emerald-200 hover:bg-emerald-50', 'ALL':'text-slate-500 border-slate-200 hover:bg-slate-50' };
                 btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white ' + (colors[key] || colors['ALL'])}`;
@@ -2986,6 +2997,7 @@
             priorityFilterPriority = 'ALL';
             priorityFilterFin      = '';
             priorityFilterTurn     = '';
+            priorityFilterMTC      = false;
             const finInput  = document.getElementById('pf-fin-input');
             const turnInput = document.getElementById('pf-turn-input');
             if (finInput)  finInput.value  = '';
@@ -2997,6 +3009,10 @@
             });
             document.querySelectorAll('.pf-priority').forEach(btn => {
                 const key = btn.id.replace('pf-priority-','');
+                if (key === 'MTC') {
+                    btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-purple-500 border-purple-200 hover:bg-purple-50`;
+                    return;
+                }
                 const active = btn.id === 'pf-priority-ALL';
                 const colors = { '1':'text-red-400 border-red-200 hover:bg-red-50', '2':'text-amber-500 border-amber-200 hover:bg-amber-50', '3':'text-emerald-500 border-emerald-200 hover:bg-emerald-50', 'ALL':'text-slate-500 border-slate-200 hover:bg-slate-50' };
                 btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${active ? 'bg-slate-800 text-white border-slate-700' : 'bg-white ' + (colors[key] || colors['ALL'])}`;
@@ -3092,6 +3108,11 @@
                     const pair1 = iStn + stn;   // ISTN+STN  e.g. "YULYYZ"
                     const pair2 = stn  + oStn;  // STN+OSTN  e.g. "YULYYZ"
                     if (!pair1.startsWith(q) && !pair2.startsWith(q)) return false;
+                }
+                if (priorityFilterMTC) {
+                    // Show only FINs whose next rotation has INGT = 'MTC'
+                    const rot = getNextRotation(r.fin);
+                    if (!rot || (rot.inGt || '').trim().toUpperCase() !== 'MTC') return false;
                 }
                 return true;
             });
@@ -3234,13 +3255,14 @@
                         wrapper.onclick = () => selectPriorityCard(r.fin, p, nextRot);
                     }
                     wrapper.innerHTML = `
-                        <div class="grid gap-2 px-4 pt-2.5 ${turnHtml ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
-                            <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : isMyCard ? 'text-blue-700' : 'text-blue-600'}">${r.fin}${pPlusBadge}${inProgressBadge}</span>
+                        <div class="grid gap-2 px-4 pt-2.5 ${(turnHtml || inProgressBadge) ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
+                            <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : isMyCard ? 'text-blue-700' : 'text-blue-600'}">${r.fin}${pPlusBadge}</span>
                             <span class="font-bold text-slate-700">${r.type}</span>
                             <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
-                            <span class="text-slate-500">${dateStr} <span class="text-slate-300 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
+                            <span class="text-slate-500">${dateStr} <span class="text-slate-500 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
                             <span class="text-center font-black text-[13px] ${pColor}">${p}</span>
                         </div>
+                        ${inProgressBadge ? `<div class="px-4 pb-1.5">${inProgressBadge}</div>` : ''}
                         ${turnHtml}`;
                     section.appendChild(wrapper);
                 });
