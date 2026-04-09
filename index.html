@@ -2049,6 +2049,31 @@
         }
 
         function selectPriorityCard(fin, priority, rot) {
+            // ── Toggle off: if THIS user already owns this card's claim, release it ──
+            const existingClaim = finClaims[fin];
+            const isMyClaim = existingClaim && (
+                existingClaim.sessionId
+                    ? existingClaim.sessionId === MY_SESSION_ID
+                    : (() => {
+                        const agentVal = document.getElementById('agent-field')?.value || '';
+                        return existingClaim.agent === agentVal.split(',')[0].trim();
+                    })()
+            );
+            if (isMyClaim && priorityCardFin === fin) {
+                releaseFin(fin);
+                priorityCardFin = null;
+                clearPriorityCardTimer();
+                // Clear the form fields that were populated from this card
+                const finField = document.getElementById('field-fin');
+                if (finField && finField.value === fin) {
+                    finField.value = '';
+                    handleFinInput(finField);
+                }
+                renderPriorityList();
+                showToast('🔓 ' + fin + ' unclaimed — available again');
+                return;
+            }
+
             // Hard gate: reject if a peer already holds this FIN — covers race conditions
             // where two agents tap at the same time before either receives the other's claim.
             if (isFinClaimed(fin)) {
