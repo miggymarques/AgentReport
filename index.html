@@ -3110,9 +3110,8 @@
                     if (!pair1.startsWith(q) && !pair2.startsWith(q)) return false;
                 }
                 if (priorityFilterMTC) {
-                    // Show only FINs whose next rotation has INGT = 'MTC'
-                    const rot = getNextRotation(r.fin);
-                    if (!rot || (rot.inGt || '').trim().toUpperCase() !== 'MTC') return false;
+                    // Show only FINs that have an upcoming MTC rotation (inGt = 'MTC')
+                    if (!getMtcRotation(r.fin)) return false;
                 }
                 return true;
             });
