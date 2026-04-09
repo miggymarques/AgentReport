@@ -2012,9 +2012,9 @@
             if (!fin) return;
             const agentVal = document.getElementById('agent-field')?.value || '';
             const agentName = agentVal.split(',')[0].trim();
-            finClaims[fin] = { agent: agentName, ts: Date.now() };
+            finClaims[fin] = { agent: agentName, ts: Date.now(), sessionId: MY_SESSION_ID };
             // Broadcast to peers
-            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts };
+            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts, sessionId: MY_SESSION_ID };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
         }
 
@@ -2032,7 +2032,8 @@
             if (!claim) return false;
             // Expire stale claims
             if (Date.now() - claim.ts > CLAIM_TTL_MS) { delete finClaims[fin]; return false; }
-            // Don't block our own claim
+            // Don't block our own claim — compare by sessionId (reliable) with name as fallback
+            if (claim.sessionId) return claim.sessionId !== MY_SESSION_ID;
             const agentVal = document.getElementById('agent-field')?.value || '';
             const myName = agentVal.split(',')[0].trim();
             return claim.agent !== myName;
@@ -2048,6 +2049,15 @@
         }
 
         function selectPriorityCard(fin, priority, rot) {
+            // Hard gate: reject if a peer already holds this FIN — covers race conditions
+            // where two agents tap at the same time before either receives the other's claim.
+            if (isFinClaimed(fin)) {
+                const claimer = finClaims[fin]?.agent || 'another agent';
+                showToast('🔒 ' + fin + ' is already claimed by ' + claimer);
+                renderPriorityList();
+                return;
+            }
+
             // If a different card was already loaded, release its claim first
             if (priorityCardFin && priorityCardFin !== fin) {
                 releaseFin(priorityCardFin);
@@ -3796,8 +3806,17 @@
         let p2pReady = false;
         let p2pSyncInterval = null;
         let lastSyncTs = {};          // peerId → timestamp of last successful sync with that peer
-        let finClaims        = {};    // fin → { agent, ts } — in-memory only, not persisted
+        let finClaims        = {};    // fin → { agent, ts, sessionId } — in-memory only, not persisted
         let finClaimReleases = {};    // fin → releaseTs tombstones — broadcast so peers clear stale claims
+
+        // Stable per-device session ID — used to identify our own claims reliably,
+        // regardless of agent name (avoids false-positives when two agents share a name).
+        const MY_SESSION_ID = (() => {
+            const KEY = 'claim_session_id_v1';
+            let id = localStorage.getItem(KEY);
+            if (!id) { id = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)); localStorage.setItem(KEY, id); }
+            return id;
+        })();
 
         const P2P_QUEUE_KEY = 'p2p_offline_queue_v1';
 
@@ -4211,7 +4230,7 @@
                     if (finClaimReleases[fin] && c.ts <= finClaimReleases[fin]) return;
                     const existing = finClaims[fin];
                     if (!existing || c.ts > existing.ts) {
-                        finClaims[fin] = { agent: c.agent, ts: c.ts };
+                        finClaims[fin] = { agent: c.agent, ts: c.ts, sessionId: c.sessionId || null };
                         claimChanged = true;
                     }
                 });
@@ -4455,7 +4474,7 @@
                     // Only store if newer than existing claim
                     const existing = finClaims[msg.fin];
                     if (!existing || msg.ts > existing.ts) {
-                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts };
+                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts, sessionId: msg.sessionId || null };
                         // If this FIN is our current suggestion, re-suggest
                         if (updateFinPlaceholder._lastSuggested === msg.fin) {
                             updateFinPlaceholder._lastSuggested = null;
