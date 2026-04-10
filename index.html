@@ -374,6 +374,7 @@
                 </div>
                 <div class="w-px h-5 bg-slate-200 mx-1"></div>
                 <div class="flex gap-1">
+                    <button onclick="setPriorityFilter('imp','')"       id="pf-priority-IMP" class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-indigo-500 border-indigo-200 hover:bg-indigo-50">IMP.</button>
                     <button onclick="setPriorityFilter('priority','ALL')" id="pf-priority-ALL" class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-slate-800 text-white border-slate-700">ALL</button>
                     <button onclick="setPriorityFilter('priority','1')"   id="pf-priority-1"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-red-400 border-red-200 hover:bg-red-50">P1</button>
                     <button onclick="setPriorityFilter('priority','2')"   id="pf-priority-2"   class="pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-amber-500 border-amber-200 hover:bg-amber-50">P2</button>
@@ -2172,8 +2173,6 @@
             const today  = new Date(now); today.setHours(0,0,0,0);
             const parseT = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
 
-            const AIRLINE_RANK = { 'AC': 0, 'RV': 1, 'QK': 2 };
-
             // Days since last serviced — higher = more overdue; never serviced = 9999
             const daysOverdue = (fin) => {
                 const entry = finTable[fin];
@@ -2995,12 +2994,17 @@
             container.appendChild(tbl);
         }
 
+        // Airline importance rank — lower = higher importance.
+        // Single source of truth shared by rotation suggestions AND the IMP sort.
+        const AIRLINE_RANK = { 'AC': 0, 'RV': 1, 'QK': 2 };
+
         // Filter state for priority tab
         let priorityFilterAirline  = 'ALL';
         let priorityFilterPriority = 'ALL';
         let priorityFilterFin      = '';
         let priorityFilterTurn     = ''; // 6-char string e.g. "YYZYUL" → stn pair YYZ+YUL
         let priorityFilterMTC      = false; // true = show only FINs whose next rotation has INGT=MTC
+        let prioritySortImp        = false; // true = sort by rotation-suggestion importance order
 
         function setPriorityFilter(type, val) {
             if (type === 'airline')  priorityFilterAirline  = val;
@@ -3008,11 +3012,12 @@
             if (type === 'fin')      priorityFilterFin      = val.trim();
             if (type === 'turn')     priorityFilterTurn     = val.trim().toUpperCase();
             if (type === 'mtc')      priorityFilterMTC      = !priorityFilterMTC; // toggle
+            if (type === 'imp')      prioritySortImp        = !prioritySortImp;   // toggle
 
             // Show/hide the clear X button
             const clearBtn = document.getElementById('pf-clear');
             if (clearBtn) {
-                const active = priorityFilterAirline !== 'ALL' || priorityFilterPriority !== 'ALL' || priorityFilterFin !== '' || priorityFilterTurn !== '' || priorityFilterMTC;
+                const active = priorityFilterAirline !== 'ALL' || priorityFilterPriority !== 'ALL' || priorityFilterFin !== '' || priorityFilterTurn !== '' || priorityFilterMTC || prioritySortImp;
                 clearBtn.classList.toggle('hidden', !active);
             }
 
@@ -3026,6 +3031,11 @@
                 // MTC button has its own toggle logic
                 if (key === 'MTC') {
                     btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${priorityFilterMTC ? 'bg-purple-600 text-white border-purple-700' : 'bg-white text-purple-500 border-purple-200 hover:bg-purple-50'}`;
+                    return;
+                }
+                // IMP button has its own toggle logic
+                if (key === 'IMP') {
+                    btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border ${prioritySortImp ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-indigo-500 border-indigo-200 hover:bg-indigo-50'}`;
                     return;
                 }
                 const active = btn.id === `pf-priority-${priorityFilterPriority}`;
@@ -3042,6 +3052,7 @@
             priorityFilterFin      = '';
             priorityFilterTurn     = '';
             priorityFilterMTC      = false;
+            prioritySortImp        = false;
             const finInput  = document.getElementById('pf-fin-input');
             const turnInput = document.getElementById('pf-turn-input');
             if (finInput)  finInput.value  = '';
@@ -3055,6 +3066,10 @@
                 const key = btn.id.replace('pf-priority-','');
                 if (key === 'MTC') {
                     btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-purple-500 border-purple-200 hover:bg-purple-50`;
+                    return;
+                }
+                if (key === 'IMP') {
+                    btn.className = `pf-priority px-2.5 py-1 rounded-lg text-[10px] font-black border bg-white text-indigo-500 border-indigo-200 hover:bg-indigo-50`;
                     return;
                 }
                 const active = btn.id === 'pf-priority-ALL';
@@ -3165,15 +3180,38 @@
                 return;
             }
 
-            // Sort: P+ first, then priority asc (1 first), then airline alpha, then FIN numeric
-            filtered.sort((a, b) => {
-                const aPP = pPlusFlags[a.fin] ? 0 : 1;
-                const bPP = pPlusFlags[b.fin] ? 0 : 1;
-                return aPP - bPP ||
-                    a.priority - b.priority ||
-                    a.airline.localeCompare(b.airline) ||
-                    parseInt(a.fin.replace(/\D/g,'')) - parseInt(b.fin.replace(/\D/g,''));
-            });
+            // Sort: importance order (IMP.) or default (P+ first, then priority asc, then airline alpha, then FIN numeric)
+            if (prioritySortImp) {
+                // Mirror rotation-suggestion importance: P+ first, then priority bucket,
+                // then most overdue, then airline rank (AC < RV < QK), then earliest ODT.
+                filtered.sort((a, b) => {
+                    const aPP = pPlusFlags[a.fin] ? 0 : 1;
+                    const bPP = pPlusFlags[b.fin] ? 0 : 1;
+                    if (aPP !== bPP) return aPP - bPP;
+                    if (a.priority !== b.priority) return a.priority - b.priority;
+                    const aDays = a.daysAgo !== null ? a.daysAgo : 9999;
+                    const bDays = b.daysAgo !== null ? b.daysAgo : 9999;
+                    if (bDays !== aDays) return bDays - aDays; // more overdue first
+                    const aRank = AIRLINE_RANK[a.airline] !== undefined ? AIRLINE_RANK[a.airline] : 99;
+                    const bRank = AIRLINE_RANK[b.airline] !== undefined ? AIRLINE_RANK[b.airline] : 99;
+                    if (aRank !== bRank) return aRank - bRank;
+                    // Earliest ODT as tiebreaker
+                    const aRot = getNextRotation(a.fin);
+                    const bRot = getNextRotation(b.fin);
+                    const aOdt = aRot ? new Date(aRot.odt).getTime() : Infinity;
+                    const bOdt = bRot ? new Date(bRot.odt).getTime() : Infinity;
+                    return aOdt - bOdt;
+                });
+            } else {
+                filtered.sort((a, b) => {
+                    const aPP = pPlusFlags[a.fin] ? 0 : 1;
+                    const bPP = pPlusFlags[b.fin] ? 0 : 1;
+                    return aPP - bPP ||
+                        a.priority - b.priority ||
+                        a.airline.localeCompare(b.airline) ||
+                        parseInt(a.fin.replace(/\D/g,'')) - parseInt(b.fin.replace(/\D/g,''));
+                });
+            }
 
             // Group by priority
             const groups = { 1: [], 2: [], 3: [] };
