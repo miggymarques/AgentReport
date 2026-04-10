@@ -2809,23 +2809,38 @@
                 const fin = (row['FIN'] || '').trim().toUpperCase();
                 if (!fin || fin === 'INV' || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
 
-                // Build a timestamp from "Service Date" — normalise to 4-digit year first
+                // Bug fix: timestamp must reflect the actual service datetime (date + time), not
+                // just the date. Previously, time was stripped by normaliseDateStr so every
+                // record on the same calendar day got ts = midnight. The row's file-position
+                // (idx) was then added to ts as a tiebreaker, meaning a record serviced at
+                // 14:30 in row 2 of File B could lose to one at 10:00 in row 5 of File A
+                // purely because 5 > 2. Now ts is a true datetime epoch; idx is never mixed in.
                 let ts = 0;
                 const rawDateStr = row['Service Date'] || row['displayDate'] || '';
+                const rawTimeStr = (row['Arrival Time'] || row['Last Time'] || row['displayTime'] || '').trim();
                 const dateStr = normaliseDateStr(rawDateStr);
                 if (dateStr) {
-                    const d = new Date(dateStr);
-                    ts = isNaN(d) ? 0 : d.getTime();
+                    // Combine normalised date + time for sub-day precision
+                    const combined = rawTimeStr ? `${dateStr} ${rawTimeStr}` : dateStr;
+                    const d = new Date(combined);
+                    if (!isNaN(d)) {
+                        ts = d.getTime();
+                    } else {
+                        // Time string didn't parse — fall back to date-only midnight
+                        const dDate = new Date(dateStr);
+                        ts = isNaN(dDate) ? 0 : dDate.getTime();
+                    }
                 }
-                // Use index as tie-breaker so row order is respected within same date
+                // Last resort: row index keeps unrecognised-date records in file sequence
                 if (!ts) ts = idx + 1;
 
                 entries.push({
-                    id:             ts + idx,   // unique enough per row
+                    id:             ts,         // true service datetime epoch — NOT mixed with idx
+                    _rowIdx:        idx,         // kept separate; stable tiebreaker for same ts
                     FIN:            fin,
                     'Flight#':      row['Flight#']          || '',
                     displayDate:    dateStr || rawDateStr,
-                    displayTime:    row['Last Time'] || row['Arrival Time'] || row['displayTime'] || '',
+                    displayTime:    rawTimeStr || '',
                     'Service Station': row['Service Station'] || '',
                     Agent:          row['Agent']            || '',
                     Priority:       row['Priority']         || '1',
@@ -2849,9 +2864,9 @@
                 });
             });
 
-            // Sort oldest → newest so each call to updateFinTable can correctly
-            // evict stale asset placements using the timestamp guard.
-            entries.sort((a, b) => (a.id || 0) - (b.id || 0));
+            // Sort oldest → newest. Same datetime (HH:MM granularity) falls back to
+            // original file-row order via _rowIdx so within-file sequence is preserved.
+            entries.sort((a, b) => (a.id || 0) - (b.id || 0) || (a._rowIdx || 0) - (b._rowIdx || 0));
 
             entries.forEach(entry => {
                 updateFinTable(entry);
