@@ -824,6 +824,10 @@
             rebuildAgentDropdown();
             syncAllAgentsFromRef();
 
+            // Mark local state as changed so the 1-min delta-sync timer picks this up
+            // for any peer that connects after this immediate broadcast.
+            _lastLocalChangeTs = Date.now();
+
             // Broadcast immediately to peers
             const _syncTs = Date.now();
             Object.keys(p2pConnections).forEach(pid =>
@@ -845,6 +849,8 @@
             saveAgentRef();
             rebuildAgentDropdown();
             syncAllAgentsFromRef();
+
+            _lastLocalChangeTs = Date.now(); // peers joining later get this tombstone in the next delta
 
             const _rmSyncTs = Date.now();
             Object.keys(p2pConnections).forEach(pid =>
@@ -929,6 +935,7 @@
             else delete pPlusFlags[fin];
             pPlusFlagTs[fin] = ts; // always stamp — even a removal needs a ts to win over a stale set
             savePPlusFlags();
+            _lastLocalChangeTs = Date.now(); // ensure 1-min delta picks this up for late-joining peers
             // Broadcast immediately to all connected peers
             const msg = { type: 'PPLUS_SYNC', pPlusFlags, pPlusFlagTs };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
@@ -947,6 +954,7 @@
             delete pPlusFlags[fin];
             pPlusFlagTs[fin] = Date.now();
             savePPlusFlags();
+            _lastLocalChangeTs = Date.now(); // ensure 1-min delta picks this up for late-joining peers
             const msg = { type: 'PPLUS_SYNC', pPlusFlags, pPlusFlagTs };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
             if (!document.getElementById('field-fin')?.value) updateFinPlaceholder();
@@ -2637,6 +2645,7 @@
 
                     scheduleData = newSchedule;
                     saveScheduleData();
+                    _lastLocalChangeTs = Date.now(); // peers joining after this broadcast catch it on next delta
 
                     // Broadcast to all peers
                     const peers = Object.keys(p2pConnections);
@@ -3814,6 +3823,19 @@
             setTimeout(() => { window.location.href = `mailto:hhdhq@gategourmet.com?subject=${subject}&body=${body}`; }, 500);
         }
         // ─── P2P SYNC ENGINE ─────────────────────────────────────────────────
+        // Design principles:
+        //  • Signaling server (0.peerjs.com) is ONLY contacted for:
+        //      – initial Peer registration (once per session)
+        //      – peer.connect(id) calls when opening a new data channel
+        //      – peer.reconnect() when the signaling socket drops
+        //  • Data syncs (FULL_SYNC / DELTA_SYNC) travel over WebRTC data channels
+        //    and do NOT hit the signaling server at all.
+        //  • Reconnection sweeps are separated from data-sync sweeps:
+        //      – DATA_SYNC_INTERVAL  (1 min) : sends deltas to already-connected peers only
+        //      – PEER_SWEEP_INTERVAL (5 min) : tries to open connections to offline peers,
+        //        but only if their per-peer backoff timer has already expired.
+        //  • Per-peer backoff (_scheduleReconnect) is the primary reconnection driver;
+        //    the sweep is just a safety net.
 
         // All known agents — IDs are derived deterministically from their name
         const ALL_AGENTS = [
@@ -3830,7 +3852,9 @@
         let p2pOfflineQueue = [];     // { entry } objects to broadcast when reconnected
         let p2pReady = false;
         let p2pSyncInterval = null;
+        let p2pSweepInterval = null;  // separate slower interval for reconnection sweeps
         let lastSyncTs = {};          // peerId → timestamp of last successful sync with that peer
+        let _lastLocalChangeTs = 0;   // timestamp of the last local data mutation — used to skip empty delta syncs
         let finClaims        = {};    // fin → { agent, ts, sessionId } — in-memory only, not persisted
         let finClaimReleases = {};    // fin → releaseTs tombstones — broadcast so peers clear stale claims
 
@@ -3956,10 +3980,17 @@
             if (!queue || queue.length === 0) return;
             const now = Date.now();
             const fresh = queue.filter(e => now - e.ts < P2P_BUFFER_TTL_MS);
+            const requeue = [];
             fresh.forEach(e => {
-                try { conn.send(e.msg); } catch(_) {}
+                try {
+                    conn.send(e.msg);
+                } catch(_) {
+                    // Send failed — preserve in buffer for the next open event
+                    requeue.push(e);
+                }
             });
-            p2pSendBuffer[peerId] = [];
+            // Only clear entries that were actually sent successfully
+            p2pSendBuffer[peerId] = requeue;
         }
 
         // ─── P2P: Reconnect backoff state ─────────────────────────────────────
@@ -4038,7 +4069,8 @@
 
             // Destroy any existing peer before reinitialising
             if (p2pPeer && !p2pPeer.destroyed) p2pPeer.destroy();
-            if (p2pSyncInterval) { clearInterval(p2pSyncInterval); p2pSyncInterval = null; }
+            if (p2pSyncInterval)  { clearInterval(p2pSyncInterval);  p2pSyncInterval  = null; }
+            if (p2pSweepInterval) { clearInterval(p2pSweepInterval); p2pSweepInterval = null; }
             p2pPeer = null;
             p2pConnections = {};
             p2pReady = false;
@@ -4054,19 +4086,28 @@
             // ── Reconnect on tab becoming visible (e.g. screen wake / tab switch) ──
             if (!initP2P._visibilityBound) {
                 initP2P._visibilityBound = true;
+                let _visibilityDebounceTimer = null;
                 document.addEventListener('visibilitychange', () => {
                     if (document.visibilityState !== 'visible') return;
-                    if (p2pPeer && !p2pPeer.destroyed && !p2pReady) {
-                        try { p2pPeer.reconnect(); } catch(_) {}
-                    }
-                    if (p2pReady && p2pMyId) connectToAllPeers(agentValue);
+                    // Debounce: rapid tab switches shouldn't fire multiple sweeps
+                    clearTimeout(_visibilityDebounceTimer);
+                    _visibilityDebounceTimer = setTimeout(() => {
+                        if (p2pPeer && !p2pPeer.destroyed && !p2pReady) {
+                            try { p2pPeer.reconnect(); } catch(_) {}
+                        }
+                        // On visibility restore, bypass backoff for peers whose timer has long expired
+                        // but still use respectBackoff=true so we don't blast the signaling server
+                        // if we just had a short tab switch.
+                        if (p2pReady && p2pMyId) connectToAllPeers(agentValue, { respectBackoff: true });
+                    }, 2000);
                 });
             }
 
-            _attachPeerHandlers(new Peer(peerId, _buildPeerConfig()), agentValue, peerId);
+            // On initial open, bypass backoff to immediately try all peers
+            _attachPeerHandlers(new Peer(peerId, _buildPeerConfig()), agentValue, peerId, { initialConnect: true });
         }
 
-        function _attachPeerHandlers(peer, agentValue, canonicalId) {
+        function _attachPeerHandlers(peer, agentValue, canonicalId, { initialConnect = false } = {}) {
             p2pPeer   = peer;
             p2pMyId   = peer.id || canonicalId; // may be overwritten on 'open'
 
@@ -4076,7 +4117,9 @@
                 _resetRetryDelay(id);
                 setSyncStatus('online', 0);
                 _startHeartbeat();
-                connectToAllPeers(agentValue);
+                // On the very first open, bypass backoff so we reach all peers immediately.
+                // On subsequent re-opens (signaling server reconnect), respect backoff.
+                connectToAllPeers(agentValue, { respectBackoff: !initialConnect });
                 startPeriodicSync(agentValue);
             });
 
@@ -4101,7 +4144,7 @@
                     setSyncStatus('connecting');
                     if (!peer.destroyed) peer.destroy();
                     const fallbackId = canonicalId + '-' + Math.random().toString(36).slice(2, 6);
-                    _attachPeerHandlers(new Peer(fallbackId, _buildPeerConfig()), agentValue, canonicalId);
+                    _attachPeerHandlers(new Peer(fallbackId, _buildPeerConfig()), agentValue, canonicalId, { initialConnect: true });
                 } else if (err.type === 'peer-unavailable') {
                     // Remote peer not registered yet — normal, will retry via periodic sync
                 } else if (err.type === 'network' || err.type === 'server-error' ||
@@ -4115,7 +4158,7 @@
             });
         }
 
-        function connectToAllPeers(myAgentValue) {
+        function connectToAllPeers(myAgentValue, { respectBackoff = true } = {}) {
             const myPeerId = agentToPeerId(myAgentValue);
             ALL_AGENTS.forEach(name => {
                 const theirId = `ggcsync-${name.toLowerCase().replace(/\s+/g, '-')}`;
@@ -4126,6 +4169,11 @@
                     (pid === theirId || pid.startsWith(theirId + '-')) && p2pConnections[pid]?.open
                 );
                 if (alreadyOpen) return;
+                // Respect the per-peer exponential-backoff timer — _scheduleReconnect is the
+                // primary driver for reconnection. Only bypass it when explicitly asked (e.g.
+                // on initial startup or when the user brings the tab back to foreground after
+                // a long absence). This is the main mechanism that reduces signaling-server calls.
+                if (respectBackoff && p2pRetryTimer[theirId]) return;
                 attemptConnect(theirId);
             });
         }
@@ -4548,6 +4596,7 @@
                 // so a future delta won't skip records if apply threw or was partial
                 const nowTs = Date.now();
                 lastSyncTs[fromPeer] = nowTs;
+                if (changed) _lastLocalChangeTs = nowTs; // our local state is now newer — relay to others
 
                 if (changed) {
                     setSyncStatus('synced', Object.keys(p2pConnections).length);
@@ -4723,11 +4772,13 @@
 
         // Called from handleSave — broadcast newly saved entry to all peers
         function broadcastRefSync() {
+            _lastLocalChangeTs = Date.now();
             const msg = { type: 'REF_SYNC', aircraftRef, aircraftRefBlock, assetRef, assetRefTs, assetRefBlock };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
         }
 
         function broadcastNewEntry(entry) {
+            _lastLocalChangeTs = Date.now(); // mark that local state has changed
             const msg = { type: 'NEW_ENTRY', entry };
             const peers = Object.keys(p2pConnections);
             if (peers.length > 0) {
@@ -4762,27 +4813,55 @@
         }
 
         function startPeriodicSync(agentValue) {
-            const P2P_SYNC_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
-            if (p2pSyncInterval) clearInterval(p2pSyncInterval);
+            const DATA_SYNC_INTERVAL_MS = 1 * 60 * 1000;  // 1 min — send deltas to connected peers
+            const PEER_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 min — try to reach offline peers
+
+            if (p2pSyncInterval)  clearInterval(p2pSyncInterval);
+            if (p2pSweepInterval) clearInterval(p2pSweepInterval);
+
+            // ── Data-sync timer (1 min) ──────────────────────────────────────────
+            // Sends DELTA_SYNC (or FULL_SYNC) to already-connected peers ONLY.
+            // Does NOT touch the signaling server.
             p2pSyncInterval = setInterval(() => {
-                // Re-attempt any peers not currently connected
-                connectToAllPeers(agentValue);
-                // Send a full sync to all currently connected peers
                 const peers = Object.keys(p2pConnections);
-                if (peers.length > 0) {
-                    const activeClaims = {};
-                    const nowClaims = Date.now();
-                    Object.entries(finClaims).forEach(([fin, c]) => {
-                        if (nowClaims - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
-                    });
-                    peers.forEach(pid => {
-                        const sinceTs = lastSyncTs[pid] || 0;
-                        const delta = buildDelta(sinceTs);
-                        const msgType = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
+                if (peers.length === 0) return;
+
+                const activeClaims = {};
+                const nowClaims = Date.now();
+                Object.entries(finClaims).forEach(([fin, c]) => {
+                    if (nowClaims - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
+                });
+
+                peers.forEach(pid => {
+                    const sinceTs  = lastSyncTs[pid] || 0;
+
+                    // Skip if this peer is fully up-to-date (nothing changed locally since
+                    // the last successful sync with them). This avoids sending empty messages.
+                    if (sinceTs > 0 && sinceTs >= _lastLocalChangeTs) return;
+
+                    const delta    = buildDelta(sinceTs);
+                    const msgType  = sinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC';
+                    const hasData  = sinceTs === 0 ||
+                        Object.keys(delta.finTable).length   > 0 ||
+                        Object.keys(delta.assetIndex).length > 0 ||
+                        Object.keys(delta.nroIndex).length   > 0 ||
+                        (delta.agentRef || []).length         > 0 ||
+                        Object.keys(delta.scheduleData || {}).length > 0;
+
+                    if (hasData) {
                         conn_p2p_send(pid, { type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
-                    });
-                }
-            }, P2P_SYNC_INTERVAL_MS);
+                    }
+                });
+            }, DATA_SYNC_INTERVAL_MS);
+
+            // ── Peer-sweep timer (5 min) ─────────────────────────────────────────
+            // Attempts to open connections to offline peers, but ONLY when their
+            // per-peer backoff timer has already expired (respectBackoff: true).
+            // This keeps signaling-server traffic low while still catching peers
+            // that came online after the last backoff window closed.
+            p2pSweepInterval = setInterval(() => {
+                if (p2pReady) connectToAllPeers(agentValue, { respectBackoff: true });
+            }, PEER_SWEEP_INTERVAL_MS);
         }
 
         function conn_p2p_send(peerId, msg) {
