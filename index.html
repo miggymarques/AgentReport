@@ -413,6 +413,7 @@
                 <span class="text-indigo-200">›</span>
                 <span class="bg-indigo-100 text-indigo-600 border border-indigo-200 px-1.5 py-0.5 rounded">Earliest Dept</span>
             </div>
+            <div id="new-aircraft-notice" class="hidden mx-0 mt-0"></div>
             <div id="priority-list"></div>
         </section>
     </main>
@@ -3131,6 +3132,45 @@
         function renderPriorityList() {
             const container = document.getElementById('priority-list');
             container.innerHTML = '';
+
+            // ── New-Aircraft Notice ─────────────────────────────────────────────
+            // Detect FINs present in the imported schedule (rotations) that are
+            // not registered in the backend aircraft table (aircraftRef).
+            (function updateNewAircraftNotice() {
+                const noticeEl = document.getElementById('new-aircraft-notice');
+                if (!noticeEl) return;
+
+                const schedFins = Object.keys(scheduleData);
+                const newFins = schedFins
+                    .filter(fin => /^(AC|RV|QK)\d{3,4}$/.test(fin) && !aircraftRef[fin])
+                    .sort();
+
+                if (newFins.length === 0) {
+                    noticeEl.innerHTML = '';
+                    noticeEl.classList.add('hidden');
+                    return;
+                }
+
+                noticeEl.classList.remove('hidden');
+                noticeEl.innerHTML = `
+                    <div class="mx-0 mb-2 px-4 py-2.5 bg-orange-50 border border-orange-200 rounded-xl flex flex-wrap items-start gap-2">
+                        <div class="flex items-center gap-1.5 shrink-0 mt-0.5">
+                            <svg class="w-3.5 h-3.5 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                            </svg>
+                            <span class="text-[9px] font-black uppercase tracking-widest text-orange-600 whitespace-nowrap">New Aircraft in Schedule</span>
+                        </div>
+                        <div class="flex flex-wrap gap-1">
+                            ${newFins.map(fin =>
+                                `<span class="font-mono font-black text-[10px] px-1.5 py-0.5 bg-orange-100 text-orange-700 border border-orange-300 rounded">${fin}</span>`
+                            ).join('')}
+                        </div>
+                        <span class="w-full text-[9px] text-orange-400 font-semibold -mt-1">
+                            ${newFins.length} FIN${newFins.length > 1 ? 's' : ''} found in rotations but not in the aircraft table — consider adding ${newFins.length > 1 ? 'them' : 'it'} via System Ref Editor.
+                        </span>
+                    </div>`;
+            })();
+            // ───────────────────────────────────────────────────────────────────
 
             const today = new Date();
             today.setHours(0, 0, 0, 0);
