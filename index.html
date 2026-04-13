@@ -1448,6 +1448,47 @@
             }
         }
 
+        // ─── Auto-write OB entries into Asset History (one record per asset, latest wins) ─
+        // entry      : service record with .HHD1–.HHD4 and .FIN
+        // saveMoment : Date object for the record-save timestamp
+        // batchMode  : if true, skips save+broadcast — caller flushes after a loop
+        // Returns    : array of entries actually written (for batch flush)
+        function writeOBHistoryForHHDs(entry, saveMoment, batchMode = false) {
+            const loc = (entry.FIN || '').trim().toUpperCase();
+            if (!loc || loc === 'INV') return [];   // skip inventory-only records
+
+            const dt  = (saveMoment instanceof Date ? saveMoment : new Date(saveMoment)).toISOString();
+            const written = [];
+
+            ['HHD1', 'HHD2', 'HHD3', 'HHD4'].forEach(field => {
+                const raw = (entry[field] || '').trim().toUpperCase();
+                if (!raw || !isValidAssetId(raw)) return;  // skip sentinels (Msng, NtRqrd, N/A) and empty
+
+                const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId: raw, dt, tr: 'OB', loc };
+
+                // Upsert: one record per assetId, latest wins
+                const existingIdx = assetHistory.findIndex(h => h.assetId === raw);
+                if (existingIdx !== -1) {
+                    if (dt <= assetHistory[existingIdx].dt) return; // existing is same age or newer — keep it
+                    assetHistory.splice(existingIdx, 1);            // remove stale record
+                }
+                assetHistory.push(histEntry);
+                written.push(histEntry);
+            });
+
+            if (!batchMode && written.length) {
+                saveAssetHistory();
+                broadcastAssetHistorySync(written);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                    renderRefList();
+                }
+            }
+
+            return written;
+        }
+
         // ─── Asset History ────────────────────────────────────────────────────
         function renderAssetHistory(container) {
             if (!assetHistory.length) {
@@ -3020,11 +3061,26 @@
             // original file-row order via _rowIdx so within-file sequence is preserved.
             entries.sort((a, b) => (a.id || 0) - (b.id || 0) || (a._rowIdx || 0) - (b._rowIdx || 0));
 
+            const batchedHistoryEntries = [];
+
             entries.forEach(entry => {
                 updateFinTable(entry);
                 clearPPlusForFin(entry.FIN); // auto-reset P+ for any FIN now confirmed serviced
+                // Collect OB history entries in batch — dt from parsed Service Date + Arrival Time
+                const created = writeOBHistoryForHHDs(entry, new Date(entry.id), /*batchMode=*/true);
+                batchedHistoryEntries.push(...created);
                 processed++;
             });
+
+            // Flush the batch after all rows are processed
+            if (batchedHistoryEntries.length) {
+                saveAssetHistory();
+                broadcastAssetHistorySync(batchedHistoryEntries);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                }
+            }
 
             // Final reconcile pass after all rows processed — catches any cross-FIN
             // conflicts that only become apparent once all entries are in
@@ -3679,6 +3735,11 @@
             broadcastNewEntry(entry);
             updateFinTable(entry);
             clearPPlusForFin(entry.FIN); // auto-reset P+ now that this FIN has been serviced
+
+            // Write OB history for each real HHD on this record
+            if (!isInvMode) {
+                writeOBHistoryForHHDs(entry, now);
+            }
 
             if (!isInvMode) {
                 const removals = [{f: 'HD1Rmvd', p: 'HHD1'}, {f: 'HD2Rmvd', p: 'HHD2'}, {f: 'HD3Rmvd', p: 'HHD3'}, {f: 'HD4Rmvd', p: 'HHD4'}];
@@ -4851,20 +4912,19 @@
 
             // ── Merge assetHistory ────────────────────────────────────────────
             if (msg.assetHistory && Array.isArray(msg.assetHistory) && msg.assetHistory.length) {
-                const existingIds = new Set(assetHistory.map(e => e.id));
                 let ahChanged = false;
-                // Insert only entries we haven't seen yet, keyed on id
+                // Upsert: one record per assetId, latest dt wins
                 msg.assetHistory.forEach(incoming => {
-                    if (!incoming.id) return;
-                    if (!existingIds.has(incoming.id)) {
-                        assetHistory.push(incoming);
-                        existingIds.add(incoming.id);
-                        ahChanged = true;
+                    if (!incoming.id || !incoming.assetId) return;
+                    const existingIdx = assetHistory.findIndex(h => h.assetId === incoming.assetId);
+                    if (existingIdx !== -1) {
+                        if ((incoming.dt || '') <= (assetHistory[existingIdx].dt || '')) return; // existing is newer — skip
+                        assetHistory.splice(existingIdx, 1);  // evict stale record
                     }
+                    assetHistory.push(incoming);
+                    ahChanged = true;
                 });
                 if (ahChanged) {
-                    // Keep the log in chronological order (ascending id = ascending time)
-                    assetHistory.sort((a, b) => a.id - b.id);
                     saveAssetHistory();
                     anyChanged = true;
                     if (activeRefTab === 'assethistory') {
@@ -4929,6 +4989,8 @@
                 updateFinTable(inEntry);
                 clearPPlusForFin(inEntry.FIN); // auto-reset P+ now that peer confirmed service
                 addToSharedDb(inEntry);
+                // Write OB history — use the original save timestamp from the source device
+                writeOBHistoryForHHDs(inEntry, new Date(inEntry.id));
                 // Bug fix: do NOT advance lastSyncTs by entry.id — entry IDs are not reliable
                 // sync cursors and clobber the finTable/assetIndex delta window. Leave lastSyncTs
                 // as-is so the next delta correctly covers any table records updated right now.
