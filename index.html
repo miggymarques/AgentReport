@@ -3209,27 +3209,9 @@
                     const aRank = AIRLINE_RANK[a.airline] !== undefined ? AIRLINE_RANK[a.airline] : 99;
                     const bRank = AIRLINE_RANK[b.airline] !== undefined ? AIRLINE_RANK[b.airline] : 99;
                     if (aRank !== bRank) return aRank - bRank;
-                    // Earliest ODT as tiebreaker — only count rotations at the agent's station,
-                    // matching getNextSuggestedFin's getServiceable() logic so the IMP sort
-                    // order is consistent with the suggestion engine and cards always show the
-                    // correct station rotation (never the fallback any-station rotation).
-                    const _impStation = (document.getElementById('station-field')?.value || '').toUpperCase();
-                    const _getStationRot = (fin) => {
-                        const rots = scheduleData[fin];
-                        if (!rots || rots.length === 0) return null;
-                        const _now = new Date();
-                        const _grace = new Date(_now.getTime() - 30 * 60000);
-                        const _upcoming = rots
-                            .filter(r => {
-                                const d = new Date(r.odt); 
-                                return !isNaN(d) && d >= _grace && !isMtcRotation(r) &&
-                                    (_impStation ? (r.stn || '').toUpperCase() === _impStation : true);
-                            })
-                            .sort((x, y) => new Date(x.odt) - new Date(y.odt));
-                        return _upcoming.length > 0 ? _upcoming[0] : null;
-                    };
-                    const aRot = _getStationRot(a.fin);
-                    const bRot = _getStationRot(b.fin);
+                    // Earliest ODT as tiebreaker
+                    const aRot = getNextRotation(a.fin);
+                    const bRot = getNextRotation(b.fin);
                     const aOdt = aRot ? new Date(aRot.odt).getTime() : Infinity;
                     const bOdt = bRot ? new Date(bRot.odt).getTime() : Infinity;
                     return aOdt - bOdt;
@@ -3294,19 +3276,10 @@
                             ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-300">🔒 CLAIMED</span>`
                             : '';
 
-                    // Use station-exclusive rotation for the Turn row so cards only show the
-                    // agent's station rotation — never the fallback any-station rotation that
-                    // getNextRotation() can return when no station-specific rotation exists.
-                    const _cardStation = (document.getElementById('station-field')?.value || '').toUpperCase();
                     const turnInfo = getTurnInfoCompact(r.fin);
                     let turnHtml = '';
-                    // Guard: only render Turn row when the rotation's service station (index 2)
-                    // matches the agent's station — or when no station is selected.
-                    const _turnParts = turnInfo ? turnInfo.split('|') : null;
-                    const _turnStn   = _turnParts ? _turnParts[2] : '';
-                    const _turnValid = turnInfo && (!_cardStation || _turnStn === _cardStation || _turnStn === '—');
-                    if (_turnValid) {
-                        const [itm, iStn, stn, oStn, otm] = _turnParts;
+                    if (turnInfo) {
+                        const [itm, iStn, stn, oStn, otm] = turnInfo.split('|');
                         const hasTimes = itm && itm !== '—';
                         turnHtml = `
                             <div class="px-4 pb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono border-b border-slate-50">
@@ -3360,10 +3333,8 @@
                         }
                     }
 
-                    // Get rotation object for this FIN so the card tap can pass it along.
-                    // Use the station-exclusive rotation (same guard as the Turn row above)
-                    // so the flight# pre-fill in selectPriorityCard is always for this station.
-                    const nextRot = _turnValid ? getNextRotation(r.fin) : null;
+                    // Get rotation object for this FIN so the card tap can pass it along
+                    const nextRot = getNextRotation(r.fin);
 
                     const wrapper = document.createElement('div');
                     // Visual treatment: my card = blue tint, peer card = greyed, default = normal
