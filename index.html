@@ -430,6 +430,7 @@
             <div class="flex border-b text-[10px] font-black uppercase tracking-widest bg-slate-50">
                 <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">Aircraft</button>
                 <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
+                <button onclick="switchRefTab('assethistory')" id="ref-tab-assethistory" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset History</button>
                 <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Sync Table</button>
                 <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Schedule</button>
                 <button onclick="switchRefTab('agents')" id="ref-tab-agents" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Agents</button>
@@ -479,12 +480,34 @@
                 <div class="flex gap-2 mb-2">
                     <input type="text" id="new-asset-id" placeholder="Asset#" class="w-24 uppercase font-mono !text-xs">
                     <input type="text" id="new-asset-name" placeholder="Asset Type" class="flex-1 !text-xs">
+                    <input type="datetime-local" id="new-asset-dt" class="flex-1 !text-xs">
                 </div>
                 <div class="flex gap-2">
                     <input type="text" id="new-asset-tr" placeholder="TR (Transaction Type)" class="flex-1 !text-xs">
                     <input type="text" id="new-asset-loc" placeholder="LOC (Location)" class="flex-1 !text-xs">
                     <input type="text" id="new-asset-nt" placeholder="NT (Notes)" class="flex-1 !text-xs">
                     <button onclick="addNewAsset()" class="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap">+</button>
+                </div>
+            </div>
+
+            <div class="p-3 bg-slate-50 border-t hidden" id="add-assethistory-ui">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Asset Transaction Log · <span id="assethistory-count-label">0 records</span></span>
+                    <div class="flex gap-2">
+                        <button onclick="exportAssetHistoryCSV()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+                </div>
+                <!-- Manual add row -->
+                <div class="flex gap-2 flex-wrap">
+                    <input type="text"           id="ah-asset-id"  placeholder="Asst#"   class="w-20 uppercase font-mono !text-xs">
+                    <input type="datetime-local" id="ah-dt"                               class="flex-1 !text-xs">
+                    <input type="text"           id="ah-tr"        placeholder="TR"       class="w-14 uppercase font-mono !text-xs">
+                    <input type="text"           id="ah-loc"       placeholder="LOC"      class="w-20 uppercase font-mono !text-xs">
+                    <input type="text"           id="ah-nt"        placeholder="NT (Notes)" class="flex-1 !text-xs">
+                    <button onclick="addAssetHistoryEntry()" class="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap">+ Add</button>
                 </div>
             </div>
 
@@ -696,6 +719,7 @@
         const ASSET_REF_KEY          = 'yul_asset_ref_v2';
         const ASSET_REF_TS_KEY       = 'yul_asset_ref_ts_v1';
         const ASSET_REF_BLOCK_KEY    = 'yul_asset_ref_block_v1';
+        const ASSET_HISTORY_KEY      = 'yul_asset_history_v1';
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
         const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
         const NRO_INDEX_KEY    = 'yul_nro_index_v1';
@@ -705,6 +729,10 @@
 
         // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
         let scheduleData = {};
+
+        // assetHistory: append-only transaction log [ { id, assetId, dt, tr, loc, nt }, ... ]
+        // id = Date.now() at creation — used as unique key and P2P delta cursor (same pattern as sharedDb)
+        let assetHistory = [];
 
         // pPlusFlags: { "AC101": true, ... } — FINs manually escalated to top priority
         let pPlusFlags = {};
@@ -943,6 +971,7 @@
         function saveAssetRef()         { storageSet(ASSET_REF_KEY,         JSON.stringify(assetRef)); }
         function saveAssetRefTs()       { storageSet(ASSET_REF_TS_KEY,      JSON.stringify(assetRefTs)); }
         function saveAssetRefBlock()    { storageSet(ASSET_REF_BLOCK_KEY,   JSON.stringify(assetRefBlock)); }
+        function saveAssetHistory()     { storageSet(ASSET_HISTORY_KEY,     JSON.stringify(assetHistory)); }
 
         function savePPlusFlags() {
             storageSet(P_PLUS_KEY,    JSON.stringify(pPlusFlags));
@@ -1324,14 +1353,16 @@
 
         function switchRefTab(tab) {
             activeRefTab = tab;
-            document.getElementById('ref-tab-aircraft').className  = `flex-1 py-3 border-b-2 ${tab === 'aircraft'  ? 'border-blue-600 text-blue-600'      : 'border-transparent text-slate-400'}`;
-            document.getElementById('ref-tab-assets').className    = `flex-1 py-3 border-b-2 ${tab === 'assets'    ? 'border-blue-600 text-blue-600'      : 'border-transparent text-slate-400'}`;
-            document.getElementById('ref-tab-synctable').className = `flex-1 py-3 border-b-2 ${tab === 'synctable' ? 'border-emerald-500 text-emerald-600' : 'border-transparent text-slate-400'}`;
-            document.getElementById('ref-tab-schedule').className  = `flex-1 py-3 border-b-2 ${tab === 'schedule'  ? 'border-violet-500 text-violet-600'  : 'border-transparent text-slate-400'}`;
-            document.getElementById('ref-tab-agents').className    = `flex-1 py-3 border-b-2 ${tab === 'agents'    ? 'border-rose-500 text-rose-600'      : 'border-transparent text-slate-400'}`;
-            document.getElementById('ref-tab-alldata').className   = `flex-1 py-3 border-b-2 ${tab === 'alldata'   ? 'border-teal-500 text-teal-600'      : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-aircraft').className    = `flex-1 py-3 border-b-2 ${tab === 'aircraft'     ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-assets').className       = `flex-1 py-3 border-b-2 ${tab === 'assets'       ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-assethistory').className = `flex-1 py-3 border-b-2 ${tab === 'assethistory' ? 'border-indigo-500 text-indigo-600'    : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-synctable').className    = `flex-1 py-3 border-b-2 ${tab === 'synctable'    ? 'border-emerald-500 text-emerald-600'  : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-schedule').className     = `flex-1 py-3 border-b-2 ${tab === 'schedule'     ? 'border-violet-500 text-violet-600'   : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-agents').className       = `flex-1 py-3 border-b-2 ${tab === 'agents'       ? 'border-rose-500 text-rose-600'       : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-alldata').className      = `flex-1 py-3 border-b-2 ${tab === 'alldata'      ? 'border-teal-500 text-teal-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
             document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
+            document.getElementById('add-assethistory-ui').classList.toggle('hidden', tab !== 'assethistory');
             document.getElementById('add-schedule-ui').classList.toggle('hidden', tab !== 'schedule');
             document.getElementById('add-agent-ui').classList.toggle('hidden', tab !== 'agents');
             document.getElementById('add-alldata-ui').classList.toggle('hidden', tab !== 'alldata');
@@ -1339,6 +1370,10 @@
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
             const _colHdr = document.getElementById('synctable-col-header'); if (tab !== 'synctable') { _colHdr.classList.add('hidden'); _colHdr.innerHTML = ''; }
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; }
+            if (tab === 'assethistory') {
+                const el = document.getElementById('assethistory-count-label');
+                if (el) el.textContent = assetHistory.length + ' records';
+            }
             // Schedule tab: let ref-editor-list own the horizontal scroll so the
             // scrollbar is always visible at the bottom of the modal, not buried
             // at the bottom of the content. Remove padding so table bleeds edge-to-edge.
@@ -1377,6 +1412,7 @@
                 Object.keys(assetRef).sort((a,b) => parseInt(a) - parseInt(b)).forEach(assetId => {
                     const entry = assetRef[assetId];
                     const typeName = typeof entry === 'object' ? (entry.type || '') : (entry || '');
+                    const dtVal    = typeof entry === 'object' ? (entry.DT   || '') : '';
                     const trVal    = typeof entry === 'object' ? (entry.TR  || '') : '';
                     const locVal   = typeof entry === 'object' ? (entry.LOC || '') : '';
                     const ntVal    = typeof entry === 'object' ? (entry.NT  || '') : '';
@@ -1388,6 +1424,7 @@
                                 <span class="font-mono font-black text-emerald-600">${assetId}</span>
                                 <span class="text-slate-300">|</span>
                                 <span class="font-bold text-slate-700 uppercase">${typeName}</span>
+                                ${dtVal  ? `<span class="text-[9px] px-1 bg-slate-100 text-slate-600 rounded font-bold font-mono">DT: ${dtVal}</span>` : ''}
                                 ${trVal  ? `<span class="text-[9px] px-1 bg-blue-100 text-blue-700 rounded font-bold uppercase">TR: ${trVal}</span>`  : ''}
                                 ${locVal ? `<span class="text-[9px] px-1 bg-violet-100 text-violet-700 rounded font-bold uppercase">LOC: ${locVal}</span>` : ''}
                                 ${ntVal  ? `<span class="text-[9px] px-1 bg-amber-100 text-amber-700 rounded font-bold">NT: ${ntVal}</span>`  : ''}
@@ -1398,6 +1435,8 @@
                         </div>`;
                     container.appendChild(div);
                 });
+            } else if (activeRefTab === 'assethistory') {
+                renderAssetHistory(container);
             } else if (activeRefTab === 'synctable') {
                 renderSyncTable(container);
             } else if (activeRefTab === 'schedule') {
@@ -1407,6 +1446,90 @@
             } else if (activeRefTab === 'alldata') {
                 renderSharedTable(container);
             }
+        }
+
+        // ─── Asset History ────────────────────────────────────────────────────
+        function renderAssetHistory(container) {
+            if (!assetHistory.length) {
+                container.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">No asset history entries yet.</p>';
+                return;
+            }
+            // newest first
+            const sorted = assetHistory.slice().sort((a, b) => b.id - a.id);
+
+            // sticky column header
+            const hdr = document.createElement('div');
+            hdr.className = 'grid text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 pb-1 mb-1 sticky top-0 bg-white z-10';
+            hdr.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr';
+            hdr.innerHTML = `<span>Asst#</span><span>TR Date</span><span>TR</span><span>LOC</span><span>NT</span>`;
+            container.appendChild(hdr);
+
+            sorted.forEach(row => {
+                // Format datetime for display: "Apr 13 2026 14:35"
+                let dtDisplay = row.dt || '';
+                if (dtDisplay) {
+                    try {
+                        const d = new Date(dtDisplay);
+                        dtDisplay = d.toLocaleString('en-CA', {
+                            month: 'short', day: 'numeric', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit', hour12: false
+                        });
+                    } catch(e) {}
+                }
+                const div = document.createElement('div');
+                div.className = 'grid items-center gap-x-2 py-1.5 border-b border-slate-100 text-xs hover:bg-slate-50 transition-colors';
+                div.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr';
+                div.innerHTML = `
+                    <span class="font-mono font-black text-indigo-600 truncate">${row.assetId || '—'}</span>
+                    <span class="font-mono text-slate-600 text-[10px] truncate">${dtDisplay || '—'}</span>
+                    <span class="font-bold text-blue-700 uppercase truncate">${row.tr || '—'}</span>
+                    <span class="font-bold text-violet-700 uppercase truncate">${row.loc || '—'}</span>
+                    <span class="text-slate-500 truncate">${row.nt || ''}</span>`;
+                container.appendChild(div);
+            });
+        }
+
+        function addAssetHistoryEntry() {
+            const assetId = (document.getElementById('ah-asset-id')?.value || '').trim().toUpperCase();
+            const dt      = (document.getElementById('ah-dt')?.value      || '').trim();
+            const tr      = (document.getElementById('ah-tr')?.value      || '').trim().toUpperCase();
+            const loc     = (document.getElementById('ah-loc')?.value     || '').trim().toUpperCase();
+            const nt      = (document.getElementById('ah-nt')?.value      || '').trim();
+            if (!assetId) return showToast('Enter Asst#');
+            const entry = { id: Date.now(), assetId, dt, tr, loc, nt };
+            assetHistory.push(entry);
+            saveAssetHistory();
+            // broadcast to all peers immediately
+            broadcastAssetHistorySync([entry]);
+            // refresh UI
+            if (activeRefTab === 'assethistory') {
+                const el = document.getElementById('assethistory-count-label');
+                if (el) el.textContent = assetHistory.length + ' records';
+                renderRefList();
+            }
+            // clear fields
+            ['ah-asset-id','ah-dt','ah-tr','ah-loc','ah-nt'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+            showToast('History entry added');
+        }
+
+        function exportAssetHistoryCSV() {
+            if (!assetHistory.length) return showToast('No history to export');
+            const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const headers = ['Asst#', 'TR Date', 'TR', 'LOC', 'NT'];
+            const rows = [headers.map(esc).join(',')];
+            assetHistory.slice().sort((a, b) => b.id - a.id).forEach(r => {
+                rows.push([r.assetId, r.dt, r.tr, r.loc, r.nt].map(esc).join(','));
+            });
+            const csv  = rows.join('\r\n');
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            const date = new Date().toISOString().slice(0, 10);
+            a.href = url; a.download = `AssetHistory_${date}.csv`;
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
         }
 
         // ─── Sync Table filter state ─────────────────────────────────────────
@@ -1673,11 +1796,12 @@
             const id  = document.getElementById('new-asset-id').value.trim();
             const name = document.getElementById('new-asset-name').value.trim();
             if (!id || !name) return showToast("Enter ID & Asset Type");
+            const dt  = document.getElementById('new-asset-dt').value.trim();
             const tr  = document.getElementById('new-asset-tr').value.trim();
             const loc = document.getElementById('new-asset-loc').value.trim();
             const nt  = document.getElementById('new-asset-nt').value.trim();
             const _ts = Date.now();
-            assetRef[id] = { type: name, TR: tr, LOC: loc, NT: nt };
+            assetRef[id] = { type: name, DT: dt, TR: tr, LOC: loc, NT: nt };
             assetRefTs[id] = _ts;
             delete assetRefBlock[id]; // re-add clears tombstone
             saveAssetRef();
@@ -1687,6 +1811,7 @@
             renderRefList();
             document.getElementById('new-asset-id').value   = '';
             document.getElementById('new-asset-name').value = '';
+            document.getElementById('new-asset-dt').value   = '';
             document.getElementById('new-asset-tr').value   = '';
             document.getElementById('new-asset-loc').value  = '';
             document.getElementById('new-asset-nt').value   = '';
@@ -2450,6 +2575,10 @@
                 const savedAssetRefBlock = storageGet(ASSET_REF_BLOCK_KEY);
                 if (savedAssetRefBlock) assetRefBlock = JSON.parse(savedAssetRefBlock);
             } catch(e) { console.warn("Could not load asset ref block:", e); }
+            try {
+                const savedAssetHistory = storageGet(ASSET_HISTORY_KEY);
+                if (savedAssetHistory) assetHistory = JSON.parse(savedAssetHistory);
+            } catch(e) { console.warn("Could not load asset history:", e); }
             try {
                 const savedFinTable = storageGet(SYNC_TABLE_KEY);
                 if (savedFinTable) finTable = JSON.parse(savedFinTable);
@@ -4045,11 +4174,17 @@
                 }
             });
 
+            // Asset history: entries whose id (creation timestamp) is newer than sinceTs
+            const ahEntries = sinceTs === 0
+                ? assetHistory
+                : assetHistory.filter(e => (e.id || 0) > sinceTs);
+
             return {
                 finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched,
                 agentRef: agents, agentBlock, sharedDb: sharedEntries, sharedDbClearTs,
                 aircraftRef: acRef, aircraftRefBlock,
                 assetRef: asRef, assetRefTs: asRefTs, assetRefBlock,
+                assetHistory: ahEntries,
                 pPlusFlags, pPlusFlagTs
             };
         }
@@ -4714,6 +4849,32 @@
                 if (asChanged) { saveAssetRef(); saveAssetRefTs(); saveAssetRefBlock(); anyChanged = true; }
             }
 
+            // ── Merge assetHistory ────────────────────────────────────────────
+            if (msg.assetHistory && Array.isArray(msg.assetHistory) && msg.assetHistory.length) {
+                const existingIds = new Set(assetHistory.map(e => e.id));
+                let ahChanged = false;
+                // Insert only entries we haven't seen yet, keyed on id
+                msg.assetHistory.forEach(incoming => {
+                    if (!incoming.id) return;
+                    if (!existingIds.has(incoming.id)) {
+                        assetHistory.push(incoming);
+                        existingIds.add(incoming.id);
+                        ahChanged = true;
+                    }
+                });
+                if (ahChanged) {
+                    // Keep the log in chronological order (ascending id = ascending time)
+                    assetHistory.sort((a, b) => a.id - b.id);
+                    saveAssetHistory();
+                    anyChanged = true;
+                    if (activeRefTab === 'assethistory') {
+                        const el = document.getElementById('assethistory-count-label');
+                        if (el) el.textContent = assetHistory.length + ' records';
+                        renderRefList();
+                    }
+                }
+            }
+
             // After all merges, reconcile snapshots to enforce single-location rule
             if (anyChanged) reconcileFinTableSnapshots();
 
@@ -4735,7 +4896,7 @@
                     // Re-render whichever ref tab is currently open so incoming peer data
                     // (assetRef, aircraftRef, finTable/assetIndex via synctable) appears
                     // immediately — mirrors what REF_SYNC already does for those tabs.
-                    if (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'synctable') {
+                    if (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'assethistory' || activeRefTab === 'synctable') {
                         renderRefList();
                     }
                 }
@@ -4820,7 +4981,7 @@
 
             if (msg.type === 'REF_SYNC') {
                 const changed = applyIncomingSyncMsg(msg, fromPeer);
-                if (changed && (activeRefTab === 'aircraft' || activeRefTab === 'assets')) renderRefList();
+                if (changed && (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'assethistory')) renderRefList();
                 return;
             }
 
@@ -4905,8 +5066,22 @@
         // Called from handleSave — broadcast newly saved entry to all peers
         function broadcastRefSync() {
             _lastLocalChangeTs = Date.now();
-            const msg = { type: 'REF_SYNC', aircraftRef, aircraftRefBlock, assetRef, assetRefTs, assetRefBlock };
+            const msg = { type: 'REF_SYNC', aircraftRef, aircraftRefBlock, assetRef, assetRefTs, assetRefBlock, assetHistory };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+        }
+
+        // Broadcast only newly added assetHistory entries — avoids resending the full log
+        function broadcastAssetHistorySync(newEntries) {
+            _lastLocalChangeTs = Date.now();
+            const msg = { type: 'REF_SYNC', assetHistory: newEntries };
+            const peers = Object.keys(p2pConnections);
+            if (peers.length > 0) {
+                peers.forEach(pid => conn_p2p_send(pid, msg));
+            } else {
+                // Queue for when a peer connects — same offline-queue pattern as NEW_ENTRY
+                p2pOfflineQueue.push(msg);
+                try { storageSet(P2P_QUEUE_KEY, JSON.stringify(p2pOfflineQueue)); } catch(e) {}
+            }
         }
 
         function broadcastNewEntry(entry) {
