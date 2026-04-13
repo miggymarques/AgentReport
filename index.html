@@ -479,6 +479,7 @@
                 <div class="flex gap-2 mb-2">
                     <input type="text" id="new-asset-id" placeholder="Asset#" class="w-24 uppercase font-mono !text-xs">
                     <input type="text" id="new-asset-name" placeholder="Asset Type" class="flex-1 !text-xs">
+                    <input type="datetime-local" id="new-asset-dt" class="flex-1 !text-xs">
                 </div>
                 <div class="flex gap-2">
                     <input type="text" id="new-asset-tr" placeholder="TR (Transaction Type)" class="flex-1 !text-xs">
@@ -1377,6 +1378,7 @@
                 Object.keys(assetRef).sort((a,b) => parseInt(a) - parseInt(b)).forEach(assetId => {
                     const entry = assetRef[assetId];
                     const typeName = typeof entry === 'object' ? (entry.type || '') : (entry || '');
+                    const dtVal    = typeof entry === 'object' ? (entry.DT   || '') : '';
                     const trVal    = typeof entry === 'object' ? (entry.TR  || '') : '';
                     const locVal   = typeof entry === 'object' ? (entry.LOC || '') : '';
                     const ntVal    = typeof entry === 'object' ? (entry.NT  || '') : '';
@@ -1388,6 +1390,7 @@
                                 <span class="font-mono font-black text-emerald-600">${assetId}</span>
                                 <span class="text-slate-300">|</span>
                                 <span class="font-bold text-slate-700 uppercase">${typeName}</span>
+                                ${dtVal  ? `<span class="text-[9px] px-1 bg-slate-100 text-slate-600 rounded font-bold font-mono">DT: ${dtVal}</span>` : ''}
                                 ${trVal  ? `<span class="text-[9px] px-1 bg-blue-100 text-blue-700 rounded font-bold uppercase">TR: ${trVal}</span>`  : ''}
                                 ${locVal ? `<span class="text-[9px] px-1 bg-violet-100 text-violet-700 rounded font-bold uppercase">LOC: ${locVal}</span>` : ''}
                                 ${ntVal  ? `<span class="text-[9px] px-1 bg-amber-100 text-amber-700 rounded font-bold">NT: ${ntVal}</span>`  : ''}
@@ -1673,11 +1676,12 @@
             const id  = document.getElementById('new-asset-id').value.trim();
             const name = document.getElementById('new-asset-name').value.trim();
             if (!id || !name) return showToast("Enter ID & Asset Type");
+            const dt  = document.getElementById('new-asset-dt').value.trim();
             const tr  = document.getElementById('new-asset-tr').value.trim();
             const loc = document.getElementById('new-asset-loc').value.trim();
             const nt  = document.getElementById('new-asset-nt').value.trim();
             const _ts = Date.now();
-            assetRef[id] = { type: name, TR: tr, LOC: loc, NT: nt };
+            assetRef[id] = { type: name, DT: dt, TR: tr, LOC: loc, NT: nt };
             assetRefTs[id] = _ts;
             delete assetRefBlock[id]; // re-add clears tombstone
             saveAssetRef();
@@ -1687,6 +1691,7 @@
             renderRefList();
             document.getElementById('new-asset-id').value   = '';
             document.getElementById('new-asset-name').value = '';
+            document.getElementById('new-asset-dt').value   = '';
             document.getElementById('new-asset-tr').value   = '';
             document.getElementById('new-asset-loc').value  = '';
             document.getElementById('new-asset-nt').value   = '';
