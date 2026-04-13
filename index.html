@@ -475,10 +475,17 @@
                 <button onclick="addNewRef()" class="bg-blue-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
             </div>
 
-            <div class="p-4 bg-slate-50 border-t flex gap-2 hidden" id="add-asset-ui">
-                <input type="text" id="new-asset-id" placeholder="Asset#" class="w-24 uppercase font-mono !text-xs">
-                <input type="text" id="new-asset-name" placeholder="Item Name" class="flex-1 !text-xs">
-                <button onclick="addNewAsset()" class="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold">+</button>
+            <div class="p-4 bg-slate-50 border-t hidden" id="add-asset-ui">
+                <div class="flex gap-2 mb-2">
+                    <input type="text" id="new-asset-id" placeholder="Asset#" class="w-24 uppercase font-mono !text-xs">
+                    <input type="text" id="new-asset-name" placeholder="Asset Type" class="flex-1 !text-xs">
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" id="new-asset-tr" placeholder="TR (Transaction Type)" class="flex-1 !text-xs">
+                    <input type="text" id="new-asset-loc" placeholder="LOC (Location)" class="flex-1 !text-xs">
+                    <input type="text" id="new-asset-nt" placeholder="NT (Notes)" class="flex-1 !text-xs">
+                    <button onclick="addNewAsset()" class="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap">+</button>
+                </div>
             </div>
 
             <div class="p-4 bg-slate-50 border-t hidden" id="add-agent-ui">
@@ -555,7 +562,7 @@
 
     <script>
         // Updated Version Number
-        const CURRENT_VERSION = "v2.11.2";
+        const CURRENT_VERSION = "v2.11.3";
 
         const DEFAULT_AIRCRAFT_REF = {
             "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
@@ -1368,18 +1375,27 @@
                 });
             } else if (activeRefTab === 'assets') {
                 Object.keys(assetRef).sort((a,b) => parseInt(a) - parseInt(b)).forEach(assetId => {
-                    const name = assetRef[assetId];
+                    const entry = assetRef[assetId];
+                    const typeName = typeof entry === 'object' ? (entry.type || '') : (entry || '');
+                    const trVal    = typeof entry === 'object' ? (entry.TR  || '') : '';
+                    const locVal   = typeof entry === 'object' ? (entry.LOC || '') : '';
+                    const ntVal    = typeof entry === 'object' ? (entry.NT  || '') : '';
                     const div = document.createElement('div');
-                    div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs";
+                    div.className = "p-2 bg-slate-50 rounded border border-slate-200 text-xs";
                     div.innerHTML = `
-                        <div class="flex-1">
-                            <span class="font-mono font-black text-emerald-600">${assetId}</span>
-                            <span class="mx-2 text-slate-300">|</span>
-                            <span class="font-bold text-slate-700 uppercase">${name}</span>
-                        </div>
-                        <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>`;
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span class="font-mono font-black text-emerald-600">${assetId}</span>
+                                <span class="text-slate-300">|</span>
+                                <span class="font-bold text-slate-700 uppercase">${typeName}</span>
+                                ${trVal  ? `<span class="text-[9px] px-1 bg-blue-100 text-blue-700 rounded font-bold uppercase">TR: ${trVal}</span>`  : ''}
+                                ${locVal ? `<span class="text-[9px] px-1 bg-violet-100 text-violet-700 rounded font-bold uppercase">LOC: ${locVal}</span>` : ''}
+                                ${ntVal  ? `<span class="text-[9px] px-1 bg-amber-100 text-amber-700 rounded font-bold">NT: ${ntVal}</span>`  : ''}
+                            </div>
+                            <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2 shrink-0">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                        </div>`;
                     container.appendChild(div);
                 });
             } else if (activeRefTab === 'synctable') {
@@ -1654,11 +1670,14 @@
         }
 
         function addNewAsset() {
-            const id = document.getElementById('new-asset-id').value.trim();
+            const id  = document.getElementById('new-asset-id').value.trim();
             const name = document.getElementById('new-asset-name').value.trim();
-            if (!id || !name) return showToast("Enter ID & Name");
+            if (!id || !name) return showToast("Enter ID & Asset Type");
+            const tr  = document.getElementById('new-asset-tr').value.trim();
+            const loc = document.getElementById('new-asset-loc').value.trim();
+            const nt  = document.getElementById('new-asset-nt').value.trim();
             const _ts = Date.now();
-            assetRef[id] = name;
+            assetRef[id] = { type: name, TR: tr, LOC: loc, NT: nt };
             assetRefTs[id] = _ts;
             delete assetRefBlock[id]; // re-add clears tombstone
             saveAssetRef();
@@ -1666,8 +1685,11 @@
             saveAssetRefBlock();
             broadcastRefSync();
             renderRefList();
-            document.getElementById('new-asset-id').value = '';
+            document.getElementById('new-asset-id').value   = '';
             document.getElementById('new-asset-name').value = '';
+            document.getElementById('new-asset-tr').value   = '';
+            document.getElementById('new-asset-loc').value  = '';
+            document.getElementById('new-asset-nt').value   = '';
             showToast("Added Asset");
         }
 
@@ -3504,8 +3526,11 @@
                 if (form.elements['ServiceCall']?.checked) parts.push("Service Call");
                 if (rec.ASST) {
                     const rawId = rec.ASST.replace(/\D/g, '');
-                    const assetType = assetRef[rawId] || assetRef[rawId.padStart(4, '0')];
-                    if (assetType) parts.push(`Type: ${assetType}`);
+                    const assetEntry = assetRef[rawId] || assetRef[rawId.padStart(4, '0')];
+                    if (assetEntry) {
+                        const assetType = typeof assetEntry === 'object' ? assetEntry.type : assetEntry;
+                        if (assetType) parts.push(`Type: ${assetType}`);
+                    }
                 }
                 if (rec.SrvcIssCAT !== "---") parts.push(`${rec.SrvcIssCAT}: ${rec.SrvcIss}`);
                 if (rec.IssueDetails) parts.push(`Iss: ${rec.IssueDetails}`);
