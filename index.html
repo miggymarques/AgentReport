@@ -1489,6 +1489,44 @@
             return written;
         }
 
+        // ─── Write a single RM entry into Asset History (date-based upsert) ────
+        // One record per assetId — latest dt always wins, regardless of prior TR type.
+        // assetId  : normalised "GGC####" string
+        // dt       : Date object or ISO string for the removal event
+        // loc      : location code (station code or FIN depending on trigger)
+        // nt       : free-text note
+        // batchMode: if true, skip save+broadcast — caller must flush after the loop
+        // Returns the written entry object, or null if the existing record is newer.
+        function writeRMHistoryEntry(assetId, dt, loc, nt, batchMode = false) {
+            if (!assetId || !isValidAssetId(assetId)) return null;
+            const dtStr = (dt instanceof Date ? dt : new Date(dt)).toISOString();
+            const histEntry = {
+                id:      Date.now() + Math.floor(Math.random() * 1000),
+                assetId,
+                dt:      dtStr,
+                tr:      'RM',
+                loc:     (loc || '').trim().toUpperCase(),
+                nt:      (nt  || '').trim()
+            };
+            // Upsert: one record per assetId, latest dt wins (regardless of TR type)
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (dtStr <= assetHistory[existingIdx].dt) return null; // existing is same age or newer
+                assetHistory.splice(existingIdx, 1);                    // evict stale record
+            }
+            assetHistory.push(histEntry);
+            if (!batchMode) {
+                saveAssetHistory();
+                broadcastAssetHistorySync([histEntry]);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                    renderRefList();
+                }
+            }
+            return histEntry;
+        }
+
         // ─── Asset History ────────────────────────────────────────────────────
         function renderAssetHistory(container) {
             if (!assetHistory.length) {
@@ -3066,9 +3104,26 @@
             entries.forEach(entry => {
                 updateFinTable(entry);
                 clearPPlusForFin(entry.FIN); // auto-reset P+ for any FIN now confirmed serviced
-                // Collect OB history entries in batch — dt from parsed Service Date + Arrival Time
+
+                // ── OB history: one record per HHD currently onboard ─────────
                 const created = writeOBHistoryForHHDs(entry, new Date(entry.id), /*batchMode=*/true);
                 batchedHistoryEntries.push(...created);
+
+                // ── RM history: assets marked removed in this sync row ────────
+                // Trigger: HD1Rmvd–HD4Rmvd fields
+                // TR: "RM" | LOC: Service Station (user station code) | NT: FIN
+                const stationCode = (entry['Service Station'] || '').trim().toUpperCase();
+                const rmDt        = new Date(entry.id);
+                let   rmAlerts    = [];
+                ['HD1Rmvd', 'HD2Rmvd', 'HD3Rmvd', 'HD4Rmvd'].forEach(field => {
+                    const raw = (entry[field] || '').trim().toUpperCase();
+                    if (!raw) return;
+                    if (!isValidAssetId(raw)) { rmAlerts.push(`${field}: "${raw}" — not a valid asset ID`); return; }
+                    const written = writeRMHistoryEntry(raw, rmDt, stationCode, entry.FIN, /*batchMode=*/true);
+                    if (written) batchedHistoryEntries.push(written);
+                });
+                if (rmAlerts.length) console.warn('[Sync Import] RM mapping failed —', rmAlerts.join(' | '));
+
                 processed++;
             });
 
@@ -3736,27 +3791,87 @@
             updateFinTable(entry);
             clearPPlusForFin(entry.FIN); // auto-reset P+ now that this FIN has been serviced
 
-            // Write OB history for each real HHD on this record
+            // ── OB history: each real HHD currently onboard ─────────────────
             if (!isInvMode) {
                 writeOBHistoryForHHDs(entry, now);
             }
 
+            // ── RM history: HD1(Rmvd)–HD4(Rmvd) removed assets (File Save) ──
+            // Trigger: non-empty HDxRmvd fields.
+            // Validation: must exist in Asset Database (assetRef) — skips unmatched.
+            // TR: "RM" | LOC: FIN (the aircraft this asset was pulled from) | alert on mismatch.
             if (!isInvMode) {
-                const removals = [{f: 'HD1Rmvd', p: 'HHD1'}, {f: 'HD2Rmvd', p: 'HHD2'}, {f: 'HD3Rmvd', p: 'HHD3'}, {f: 'HD4Rmvd', p: 'HHD4'}];
+                const removals = [
+                    {f: 'HD1Rmvd', p: 'HHD1'},
+                    {f: 'HD2Rmvd', p: 'HHD2'},
+                    {f: 'HD3Rmvd', p: 'HHD3'},
+                    {f: 'HD4Rmvd', p: 'HHD4'}
+                ];
+                const rmAlerts = [];
                 removals.forEach((r, idx) => {
                     const removedId = entry[r.f];
                     const boardedId = entry[r.p];
-                    if (removedId && removedId.trim() !== "" && !removedId.toLowerCase().includes("ntrqrd") && !removedId.toLowerCase().includes("n/a")) {
-                        db.unshift({
-                            id: Date.now() + Math.floor(Math.random() * 1000) + (idx + 1), FIN: "INV", 'Flight#': entry['Flight#'] || "", displayDate: entry.displayDate, displayTime: timeStr,
-                            Priority: "1", Serviced: "Yes", Case1: "N/A", Case2: "N/A", Case3: "N/A", HHD1: "N/A", HHD2: "N/A",
-                            HHD3: "N/A", HHD4: "N/A", HHD5: "N/A", HHD6: "N/A", Battery: "", Rolls: "", ASST: removedId,
-                            SrvcIssCAT: "RM ( INV REM Base )", SrvcIss: "For Use In Service",
-                            'Service Station': entry['Service Station'], Agent: entry.Agent, Rv: CURRENT_VERSION,
-                            Comments: `${removedId} Swp Wth ${boardedId} On Fin ${entry.FIN}${!isValidAssetId(removedId) ? ' | ' + removedId + ' Doesn\'t Exist' : ''}`
-                        });
+                    if (!removedId || removedId.trim() === ''
+                        || removedId.toLowerCase().includes('ntrqrd')
+                        || removedId.toLowerCase().includes('n/a')) return;
+
+                    // Always create the INV swap record (existing behaviour)
+                    db.unshift({
+                        id: Date.now() + Math.floor(Math.random() * 1000) + (idx + 1),
+                        FIN: 'INV', 'Flight#': entry['Flight#'] || '',
+                        displayDate: entry.displayDate, displayTime: timeStr,
+                        Priority: '1', Serviced: 'Yes',
+                        Case1: 'N/A', Case2: 'N/A', Case3: 'N/A',
+                        HHD1: 'N/A', HHD2: 'N/A', HHD3: 'N/A',
+                        HHD4: 'N/A', HHD5: 'N/A', HHD6: 'N/A',
+                        Battery: '', Rolls: '', ASST: removedId,
+                        SrvcIssCAT: 'RM ( INV REM Base )', SrvcIss: 'For Use In Service',
+                        'Service Station': entry['Service Station'], Agent: entry.Agent, Rv: CURRENT_VERSION,
+                        Comments: `${removedId} Swp Wth ${boardedId} On Fin ${entry.FIN}${!isValidAssetId(removedId) ? ' | ' + removedId + ' Doesn\'t Exist' : ''}`
+                    });
+
+                    // RM Asset History — validate against Asset Database first
+                    if (!isValidAssetId(removedId)) {
+                        rmAlerts.push(`${r.f} "${removedId}" is not a valid asset ID — skipped`);
+                        return;
                     }
+                    const rawNum   = removedId.replace(/\D/g, '');
+                    const inAssetDb = assetRef[rawNum] !== undefined || assetRef[rawNum.padStart(4, '0')] !== undefined;
+                    if (!inAssetDb) {
+                        rmAlerts.push(`${r.f} "${removedId}" not found in Asset Database — skipped`);
+                        return;
+                    }
+                    // LOC = FIN (the aircraft the asset was removed from)
+                    writeRMHistoryEntry(removedId, now, entry.FIN, `Swp Wth ${boardedId}`);
                 });
+                if (rmAlerts.length) {
+                    // Surface mismatches to the user immediately
+                    showToast(`⚠️ RM History: ${rmAlerts.length} mapping issue${rmAlerts.length > 1 ? 's' : ''} — check console`);
+                    console.warn('[File Save] RM Asset History mapping failures:\n' + rmAlerts.join('\n'));
+                }
+            }
+
+            // ── RM history: Inventory RTN Base entries (File Save + INV Only) ─
+            // Criteria: FIN="INV" AND SrvcIssCAT contains "RT"+"INV RTN"
+            //           AND SrvcIss = "Not Required"
+            // Treat Inventory Only transactions the same as All Data Sync.
+            // TR: "RM" | LOC: Service Station (user station code) | NT: note/comment
+            if (isInvMode) {
+                const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+                const issNorm = (entry.SrvcIss    || '').toLowerCase();
+                const isInvRtn   = catNorm.includes('rt') && catNorm.includes('inv rtn');
+                const isNotReqd  = issNorm.includes('not required');
+                if (isInvRtn && isNotReqd) {
+                    const assetId    = (entry.ASST || '').trim().toUpperCase();
+                    const stationCode = (entry['Service Station'] || document.getElementById('station-field')?.value || '').trim().toUpperCase();
+                    const noteText   = (entry.IssueDetails || entry.GeneralComments || '').trim();
+                    if (assetId && isValidAssetId(assetId)) {
+                        writeRMHistoryEntry(assetId, now, stationCode, noteText);
+                    } else if (assetId) {
+                        showToast(`⚠️ RM History: ASST "${assetId}" not a valid asset ID — skipped`);
+                        console.warn('[File Save INV] RM Asset History: invalid ASST field —', assetId);
+                    }
+                }
             }
 
             try {
@@ -4991,6 +5106,34 @@
                 addToSharedDb(inEntry);
                 // Write OB history — use the original save timestamp from the source device
                 writeOBHistoryForHHDs(inEntry, new Date(inEntry.id));
+
+                // ── All Data Sync: RM history for INV RTN Base entries ────────
+                // Criteria: FIN="INV" AND SrvcIssCAT contains "RT"+"INV RTN"
+                //           AND SrvcIss = "Not Required"
+                // TR: "RM" | LOC: Service Station | NT: note/comment field
+                if ((inEntry.FIN || '').toUpperCase() === 'INV') {
+                    const catNorm = (inEntry.SrvcIssCAT || '').toLowerCase();
+                    const issNorm = (inEntry.SrvcIss    || '').toLowerCase();
+                    if (catNorm.includes('rt') && catNorm.includes('inv rtn') && issNorm.includes('not required')) {
+                        const assetId     = (inEntry.ASST || '').trim().toUpperCase();
+                        const stationCode = (inEntry['Service Station'] || '').trim().toUpperCase();
+                        const noteText    = (inEntry.IssueDetails || inEntry.GeneralComments || '').trim();
+                        if (assetId && isValidAssetId(assetId)) {
+                            writeRMHistoryEntry(assetId, new Date(inEntry.id), stationCode, noteText);
+                        } else if (assetId) {
+                            console.warn('[All Data Sync] RM Asset History: invalid ASST —', assetId, 'from peer', fromPeer);
+                        }
+                    }
+                    // ── RM history for removed assets in INV-mode entries ─────
+                    // (mirrors File Save inventory path: HD1Rmvd–HD4Rmvd on INV records)
+                    const stationCode = (inEntry['Service Station'] || '').trim().toUpperCase();
+                    ['HD1Rmvd','HD2Rmvd','HD3Rmvd','HD4Rmvd'].forEach(field => {
+                        const raw = (inEntry[field] || '').trim().toUpperCase();
+                        if (!raw || !isValidAssetId(raw)) return;
+                        const noteText = (inEntry.IssueDetails || inEntry.GeneralComments || '').trim();
+                        writeRMHistoryEntry(raw, new Date(inEntry.id), stationCode, noteText);
+                    });
+                }
                 // Bug fix: do NOT advance lastSyncTs by entry.id — entry IDs are not reliable
                 // sync cursors and clobber the finTable/assetIndex delta window. Leave lastSyncTs
                 // as-is so the next delta correctly covers any table records updated right now.
