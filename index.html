@@ -1461,13 +1461,24 @@
             const written = [];
 
             ['HHD1', 'HHD2', 'HHD3', 'HHD4'].forEach(field => {
-                const raw = (entry[field] || '').trim().toUpperCase();
-                if (!raw || !isValidAssetId(raw)) return;  // skip sentinels (Msng, NtRqrd, N/A) and empty
+                const rawInput = (entry[field] || '').trim().toUpperCase();
+                if (!rawInput) return;
 
-                const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId: raw, dt, tr: 'OB', loc };
+                // Normalize to canonical GGC#### format regardless of how the value arrived
+                // (CSV import may have "2140", "GGC2140", or already-formatted "GGC2140").
+                // Sentinels (Msng, NtRqrd, N/A, Rmvd) contain no digits → digits = "" → skipped.
+                const digits = rawInput.replace(/\D/g, '');
+                if (!digits) return;
+                const paddedDigits = digits.padStart(4, '0');
+                const assetId = 'GGC' + paddedDigits;
 
-                // Upsert: one record per assetId, latest wins
-                const existingIdx = assetHistory.findIndex(h => h.assetId === raw);
+                // Validate against asset database — assetRef is keyed by numeric string (no GGC prefix)
+                if (!assetRef[digits] && !assetRef[paddedDigits]) return;
+
+                const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc };
+
+                // Upsert: one record per assetId (canonical GGC#### key), latest wins
+                const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
                 if (existingIdx !== -1) {
                     if (dt <= assetHistory[existingIdx].dt) return; // existing is same age or newer — keep it
                     assetHistory.splice(existingIdx, 1);            // remove stale record
@@ -1533,14 +1544,21 @@
                 container.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">No asset history entries yet.</p>';
                 return;
             }
-            // newest first
-            const sorted = assetHistory.slice().sort((a, b) => b.id - a.id);
 
-            // sticky column header
+            // Sort numerically by the digit portion of assetId (GGC0001 → GGC9999),
+            // then by date descending as a stable tiebreaker for duplicate asset IDs.
+            const sorted = assetHistory.slice().sort((a, b) => {
+                const numA = parseInt((a.assetId || '').replace(/\D/g, '') || '0', 10);
+                const numB = parseInt((b.assetId || '').replace(/\D/g, '') || '0', 10);
+                if (numA !== numB) return numA - numB;
+                return (b.dt || '') < (a.dt || '') ? -1 : 1; // newer date first within same asset
+            });
+
+            // sticky column header  — extra 1.75rem column for the delete button
             const hdr = document.createElement('div');
             hdr.className = 'grid text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 pb-1 mb-1 sticky top-0 bg-white z-10';
-            hdr.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr';
-            hdr.innerHTML = `<span>Asst#</span><span>TR Date</span><span>TR</span><span>LOC</span><span>NT</span>`;
+            hdr.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr 1.75rem';
+            hdr.innerHTML = `<span>Asst#</span><span>TR Date</span><span>TR</span><span>LOC</span><span>NT</span><span></span>`;
             container.appendChild(hdr);
 
             sorted.forEach(row => {
@@ -1557,15 +1575,29 @@
                 }
                 const div = document.createElement('div');
                 div.className = 'grid items-center gap-x-2 py-1.5 border-b border-slate-100 text-xs hover:bg-slate-50 transition-colors';
-                div.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr';
+                div.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr 1.75rem';
                 div.innerHTML = `
                     <span class="font-mono font-black text-indigo-600 truncate">${row.assetId || '—'}</span>
                     <span class="font-mono text-slate-600 text-[10px] truncate">${dtDisplay || '—'}</span>
                     <span class="font-bold text-blue-700 uppercase truncate">${row.tr || '—'}</span>
                     <span class="font-bold text-violet-700 uppercase truncate">${row.loc || '—'}</span>
-                    <span class="text-slate-500 truncate">${row.nt || ''}</span>`;
+                    <span class="text-slate-500 truncate">${row.nt || ''}</span>
+                    <button class="text-slate-300 hover:text-red-500 transition-colors text-base leading-none font-black flex-shrink-0" title="Delete record" onclick="deleteAssetHistoryEntry(${row.id})">×</button>`;
                 container.appendChild(div);
             });
+        }
+
+        // ─── Delete a single Asset History record by its id ───────────────────
+        function deleteAssetHistoryEntry(entryId) {
+            const idx = assetHistory.findIndex(h => h.id === entryId);
+            if (idx === -1) return;
+            assetHistory.splice(idx, 1);
+            saveAssetHistory();
+            if (activeRefTab === 'assethistory') {
+                const el = document.getElementById('assethistory-count-label');
+                if (el) el.textContent = assetHistory.length + ' records';
+                renderRefList();
+            }
         }
 
         function addAssetHistoryEntry() {
@@ -3116,9 +3148,14 @@
                 const rmDt        = new Date(entry.id);
                 let   rmAlerts    = [];
                 ['HD1Rmvd', 'HD2Rmvd', 'HD3Rmvd', 'HD4Rmvd'].forEach(field => {
-                    const raw = (entry[field] || '').trim().toUpperCase();
-                    if (!raw) return;
-                    if (!isValidAssetId(raw)) { rmAlerts.push(`${field}: "${raw}" — not a valid asset ID`); return; }
+                    const rawInput = (entry[field] || '').trim().toUpperCase();
+                    if (!rawInput) return;
+                    // Normalize to canonical GGC#### — sentinels have no digits and are skipped
+                    const digits = rawInput.replace(/\D/g, '');
+                    if (!digits) return;
+                    const paddedDigits = digits.padStart(4, '0');
+                    const raw = 'GGC' + paddedDigits;
+                    if (!isValidAssetId(raw)) { rmAlerts.push(`${field}: "${rawInput}" (${raw}) — not a valid asset ID`); return; }
                     const written = writeRMHistoryEntry(raw, rmDt, stationCode, entry.FIN, /*batchMode=*/true);
                     if (written) batchedHistoryEntries.push(written);
                 });
