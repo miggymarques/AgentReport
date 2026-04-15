@@ -720,6 +720,7 @@
         const ASSET_REF_TS_KEY       = 'yul_asset_ref_ts_v1';
         const ASSET_REF_BLOCK_KEY    = 'yul_asset_ref_block_v1';
         const ASSET_HISTORY_KEY      = 'yul_asset_history_v1';
+        const ASSET_HISTORY_BLOCK_KEY = 'yul_asset_history_block_v1'; // tombstone map: { entryId → deletedAt ts }
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
         const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
         const NRO_INDEX_KEY    = 'yul_nro_index_v1';
@@ -733,6 +734,9 @@
         // assetHistory: append-only transaction log [ { id, assetId, dt, tr, loc, nt }, ... ]
         // id = Date.now() at creation — used as unique key and P2P delta cursor (same pattern as sharedDb)
         let assetHistory = [];
+        // assetHistoryBlock: tombstone map { entryId → deletedAt timestamp }
+        // An entry id in here was explicitly deleted; peers must never re-insert it.
+        let assetHistoryBlock = {};
 
         // pPlusFlags: { "AC101": true, ... } — FINs manually escalated to top priority
         let pPlusFlags = {};
@@ -971,7 +975,8 @@
         function saveAssetRef()         { storageSet(ASSET_REF_KEY,         JSON.stringify(assetRef)); }
         function saveAssetRefTs()       { storageSet(ASSET_REF_TS_KEY,      JSON.stringify(assetRefTs)); }
         function saveAssetRefBlock()    { storageSet(ASSET_REF_BLOCK_KEY,   JSON.stringify(assetRefBlock)); }
-        function saveAssetHistory()     { storageSet(ASSET_HISTORY_KEY,     JSON.stringify(assetHistory)); }
+        function saveAssetHistory()      { storageSet(ASSET_HISTORY_KEY,       JSON.stringify(assetHistory)); }
+        function saveAssetHistoryBlock() { storageSet(ASSET_HISTORY_BLOCK_KEY, JSON.stringify(assetHistoryBlock)); }
 
         function savePPlusFlags() {
             storageSet(P_PLUS_KEY,    JSON.stringify(pPlusFlags));
@@ -1478,8 +1483,10 @@
                 const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc };
 
                 // Upsert: one record per assetId (canonical GGC#### key), latest wins
+                // Skip if an existing record for this assetId was tombstoned — respect the deletion.
                 const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
                 if (existingIdx !== -1) {
+                    if (assetHistoryBlock[assetHistory[existingIdx].id]) return; // existing was deleted — don't resurrect
                     if (dt <= assetHistory[existingIdx].dt) return; // existing is same age or newer — keep it
                     assetHistory.splice(existingIdx, 1);            // remove stale record
                 }
@@ -1522,6 +1529,7 @@
             // Upsert: one record per assetId, latest dt wins (regardless of TR type)
             const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
             if (existingIdx !== -1) {
+                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // existing was deleted — don't resurrect
                 if (dtStr <= assetHistory[existingIdx].dt) return null; // existing is same age or newer
                 assetHistory.splice(existingIdx, 1);                    // evict stale record
             }
@@ -1592,7 +1600,13 @@
             const idx = assetHistory.findIndex(h => h.id === entryId);
             if (idx === -1) return;
             assetHistory.splice(idx, 1);
+            // Stamp tombstone — peers will reject any re-broadcast of this entry id
+            assetHistoryBlock[entryId] = Date.now();
             saveAssetHistory();
+            saveAssetHistoryBlock();
+            // Tell all peers about the deletion immediately
+            const msg = { type: 'REF_SYNC', assetHistoryBlock: { [entryId]: assetHistoryBlock[entryId] } };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
             if (activeRefTab === 'assethistory') {
                 const el = document.getElementById('assethistory-count-label');
                 if (el) el.textContent = assetHistory.length + ' records';
@@ -2690,6 +2704,16 @@
                 const savedAssetHistory = storageGet(ASSET_HISTORY_KEY);
                 if (savedAssetHistory) assetHistory = JSON.parse(savedAssetHistory);
             } catch(e) { console.warn("Could not load asset history:", e); }
+            try {
+                const savedAssetHistoryBlock = storageGet(ASSET_HISTORY_BLOCK_KEY);
+                if (savedAssetHistoryBlock) assetHistoryBlock = JSON.parse(savedAssetHistoryBlock);
+                // Purge any history entries that were tombstoned (e.g. deleted on another device then synced)
+                if (Object.keys(assetHistoryBlock).length) {
+                    const before = assetHistory.length;
+                    assetHistory = assetHistory.filter(h => !assetHistoryBlock[h.id]);
+                    if (assetHistory.length !== before) saveAssetHistory();
+                }
+            } catch(e) { console.warn("Could not load asset history block:", e); }
             try {
                 const savedFinTable = storageGet(SYNC_TABLE_KEY);
                 if (savedFinTable) finTable = JSON.parse(savedFinTable);
@@ -4397,7 +4421,7 @@
                 agentRef: agents, agentBlock, sharedDb: sharedEntries, sharedDbClearTs,
                 aircraftRef: acRef, aircraftRefBlock,
                 assetRef: asRef, assetRefTs: asRefTs, assetRefBlock,
-                assetHistory: ahEntries,
+                assetHistory: ahEntries, assetHistoryBlock,
                 pPlusFlags, pPlusFlagTs
             };
         }
@@ -5062,12 +5086,30 @@
                 if (asChanged) { saveAssetRef(); saveAssetRefTs(); saveAssetRefBlock(); anyChanged = true; }
             }
 
+            // ── Merge assetHistoryBlock tombstones ────────────────────────────
+            if (msg.assetHistoryBlock && typeof msg.assetHistoryBlock === 'object') {
+                let blockChanged = false;
+                Object.entries(msg.assetHistoryBlock).forEach(([idStr, ts]) => {
+                    const id = Number(idStr);
+                    if (!assetHistoryBlock[id] || ts > assetHistoryBlock[id]) {
+                        assetHistoryBlock[id] = ts;
+                        blockChanged = true;
+                        // Evict the matching entry from local history if present
+                        const idx = assetHistory.findIndex(h => h.id === id);
+                        if (idx !== -1) { assetHistory.splice(idx, 1); }
+                    }
+                });
+                if (blockChanged) { saveAssetHistoryBlock(); saveAssetHistory(); anyChanged = true; }
+            }
+
             // ── Merge assetHistory ────────────────────────────────────────────
             if (msg.assetHistory && Array.isArray(msg.assetHistory) && msg.assetHistory.length) {
                 let ahChanged = false;
-                // Upsert: one record per assetId, latest dt wins
+                // Upsert: one record per assetId, latest dt wins — tombstoned entries are never re-inserted
                 msg.assetHistory.forEach(incoming => {
                     if (!incoming.id || !incoming.assetId) return;
+                    // Tombstone guard: reject if this specific entry id was deliberately deleted
+                    if (assetHistoryBlock[incoming.id]) return;
                     const existingIdx = assetHistory.findIndex(h => h.assetId === incoming.assetId);
                     if (existingIdx !== -1) {
                         if ((incoming.dt || '') <= (assetHistory[existingIdx].dt || '')) return; // existing is newer — skip
