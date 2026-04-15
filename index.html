@@ -1546,6 +1546,72 @@
             return histEntry;
         }
 
+        // ─── Write a single MS (Potential Missing) entry into Asset History ──
+        // Triggered when an asset appears in the NRO column after a Sync Table import.
+        // One record per assetId — only written if nroTs is strictly newer than any
+        // existing Asset_History row for that asset (= MAX(DateTime) guard).
+        // assetId  : normalised "GGC####" string
+        // nroTs    : epoch timestamp from nroIndex[assetId].ts
+        // loc      : lastFin from nroIndex — the FIN the asset was last expected on
+        // batchMode: if true, skip save+broadcast — caller must flush after the loop
+        // Returns the written entry object, or null if an equal-or-newer record exists.
+        function writeMSHistoryEntry(assetId, nroTs, loc, batchMode = false) {
+            if (!assetId || !loc) return null;
+            const dtStr = new Date(nroTs).toISOString();
+            const histEntry = {
+                id:      Date.now() + Math.floor(Math.random() * 1000),
+                assetId,
+                dt:      dtStr,
+                tr:      'MS',
+                loc:     loc.trim().toUpperCase(),
+                nt:      'Potential Missing'
+            };
+            // MAX(DateTime) guard: only insert if this NRO timestamp is strictly newer
+            // than any existing Asset_History record for this asset (OB, RM, or prior MS).
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // tombstoned — never resurrect
+                if (dtStr <= assetHistory[existingIdx].dt) return null;           // existing is same age or newer
+                assetHistory.splice(existingIdx, 1);                              // evict stale record
+            }
+            assetHistory.push(histEntry);
+            if (!batchMode) {
+                saveAssetHistory();
+                broadcastAssetHistorySync([histEntry]);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                    renderRefList();
+                }
+            }
+            return histEntry;
+        }
+
+        // ─── Process all NRO assets → MS entries in Asset_History ────────────
+        // Called after every Sync Table import (applyHistoryRows) once nroIndex is
+        // fully reconciled.  For each asset still in nroIndex (= Potential Missing),
+        // attempt to write a TR:'MS' / LOC:<lastFin> history entry.
+        // The MAX(DateTime) guard inside writeMSHistoryEntry ensures we never
+        // overwrite a newer OB or RM record with a stale missing flag.
+        function processMissingAssets() {
+            if (!Object.keys(nroIndex).length) return;
+            const batchedMS = [];
+            Object.entries(nroIndex).forEach(([assetId, rec]) => {
+                if (!rec.lastFin || !rec.ts) return;
+                const written = writeMSHistoryEntry(assetId, rec.ts, rec.lastFin, /*batchMode=*/true);
+                if (written) batchedMS.push(written);
+            });
+            if (batchedMS.length) {
+                saveAssetHistory();
+                broadcastAssetHistorySync(batchedMS);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                }
+                console.log(`[MS Import] ${batchedMS.length} Potential Missing entr${batchedMS.length === 1 ? 'y' : 'ies'} written to Asset History`);
+            }
+        }
+
         // ─── Asset History ────────────────────────────────────────────────────
         function renderAssetHistory(container) {
             if (!assetHistory.length) {
@@ -3201,6 +3267,12 @@
             // Final reconcile pass after all rows processed — catches any cross-FIN
             // conflicts that only become apparent once all entries are in
             reconcileFinTableSnapshots();
+
+            // ── MS (Potential Missing) pass ────────────────────────────────────
+            // Write TR:'MS' / LOC:<FIN> Asset_History entries for every asset still
+            // in nroIndex after reconciliation. MAX(DateTime) guard inside
+            // writeMSHistoryEntry prevents overwriting a newer OB or RM record.
+            processMissingAssets();
 
             // Refresh the sync table view
             renderRefList();
