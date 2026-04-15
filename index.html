@@ -1548,32 +1548,41 @@
 
         // ─── Write a single MS (Potential Missing) entry into Asset History ──
         // Triggered when an asset appears in the NRO column after a Sync Table import.
-        // One record per assetId — only written if nroTs is strictly newer than any
-        // existing Asset_History row for that asset (= MAX(DateTime) guard).
+        // Two dates are intentionally kept separate:
+        //   nroTs (guard) — nroIndex detection ts from the CSV service entry that flagged
+        //                   the asset missing. Guards against overwriting a newer OB/RM.
+        //   dt (stored)   — Date.now() at write time: the NRO declaration date. An asset
+        //                   may already have been in NRO from a prior import (rec.ts is
+        //                   an old service date); stored dt always reflects when the MS
+        //                   entry is actually written, not the historical service date.
         // assetId  : normalised "GGC####" string
-        // nroTs    : epoch timestamp from nroIndex[assetId].ts
+        // nroTs    : epoch ts from nroIndex[assetId].ts  (MAX guard only — not stored)
         // loc      : lastFin from nroIndex — the FIN the asset was last expected on
         // batchMode: if true, skip save+broadcast — caller must flush after the loop
         // Returns the written entry object, or null if an equal-or-newer record exists.
         function writeMSHistoryEntry(assetId, nroTs, loc, batchMode = false) {
             if (!assetId || !loc) return null;
-            const dtStr = new Date(nroTs).toISOString();
+            // MAX(DateTime) guard: use nroTs (CSV service date when NRO was detected),
+            // NOT Date.now(). Correctly skips the write when a newer OB/RM record
+            // already exists, meaning the asset was accounted for after the NRO event.
+            const guardDtStr = new Date(nroTs).toISOString();
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // tombstoned — never resurrect
+                if (guardDtStr <= assetHistory[existingIdx].dt) return null;      // existing is same age or newer
+                assetHistory.splice(existingIdx, 1);                              // evict stale record
+            }
+            // Stored dt = Date.now() — the NRO declaration date, not the CSV service
+            // date (rec.ts). An asset may already be in NRO from a prior import with
+            // an old rec.ts; dt must reflect when the MS entry is actually written.
             const histEntry = {
                 id:      Date.now() + Math.floor(Math.random() * 1000),
                 assetId,
-                dt:      dtStr,
+                dt:      new Date().toISOString(),  // NRO declaration date (now)
                 tr:      'MS',
                 loc:     loc.trim().toUpperCase(),
                 nt:      'Potential Missing'
             };
-            // MAX(DateTime) guard: only insert if this NRO timestamp is strictly newer
-            // than any existing Asset_History record for this asset (OB, RM, or prior MS).
-            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
-            if (existingIdx !== -1) {
-                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // tombstoned — never resurrect
-                if (dtStr <= assetHistory[existingIdx].dt) return null;           // existing is same age or newer
-                assetHistory.splice(existingIdx, 1);                              // evict stale record
-            }
             assetHistory.push(histEntry);
             if (!batchMode) {
                 saveAssetHistory();
@@ -1585,7 +1594,7 @@
                 }
             }
             return histEntry;
-        }
+        }}
 
         // ─── Process all NRO assets → MS entries in Asset_History ────────────
         // Called after every Sync Table import (applyHistoryRows) once nroIndex is
