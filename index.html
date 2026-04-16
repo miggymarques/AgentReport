@@ -1628,35 +1628,53 @@
                 return (b.dt || '') < (a.dt || '') ? -1 : 1; // newer date first within same asset
             });
 
-            // sticky column header  — extra 1.75rem column for the delete button
+            // Sticky column header
             const hdr = document.createElement('div');
-            hdr.className = 'grid text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 pb-1 mb-1 sticky top-0 bg-white z-10';
-            hdr.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr 1.75rem';
-            hdr.innerHTML = `<span>Asst#</span><span>TR Date</span><span>TR</span><span>LOC</span><span>NT</span><span></span>`;
+            hdr.className = 'grid text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 pb-1 mb-0.5 sticky top-0 bg-white z-10 px-1';
+            hdr.style.gridTemplateColumns = '4.5rem 2rem 3.5rem 1fr 1.5rem';
+            hdr.innerHTML = `<span>Asst#</span><span>TR</span><span>LOC</span><span>Date · NT</span><span></span>`;
             container.appendChild(hdr);
 
+            // TR badge colour map
+            const trStyle = {
+                OB: 'background:#dbeafe;color:#1d4ed8;',   // blue
+                RM: 'background:#fee2e2;color:#b91c1c;',   // red
+                MS: 'background:#fef3c7;color:#92400e;',   // amber
+            };
+
+            const now = new Date();
+            const thisYear = now.getFullYear();
+
             sorted.forEach(row => {
-                // Format datetime for display: "Apr 13 2026 14:35"
-                let dtDisplay = row.dt || '';
-                if (dtDisplay) {
+                // Compact date: omit year if current year → "Apr 13 14:35" or "Apr 13 2025 14:35"
+                let dtDisplay = '—';
+                if (row.dt) {
                     try {
-                        const d = new Date(dtDisplay);
-                        dtDisplay = d.toLocaleString('en-CA', {
-                            month: 'short', day: 'numeric', year: 'numeric',
-                            hour: '2-digit', minute: '2-digit', hour12: false
-                        });
+                        const d = new Date(row.dt);
+                        const yr = d.getFullYear();
+                        const opts = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false };
+                        if (yr !== thisYear) opts.year = 'numeric';
+                        dtDisplay = d.toLocaleString('en-CA', opts);
                     } catch(e) {}
                 }
+
+                const trKey  = (row.tr || '').toUpperCase();
+                const trBadgeStyle = trStyle[trKey] || 'background:#f1f5f9;color:#475569;';
+                const ntText = row.nt || '';
+                const locText = row.loc || '—';
+
                 const div = document.createElement('div');
-                div.className = 'grid items-center gap-x-2 py-1.5 border-b border-slate-100 text-xs hover:bg-slate-50 transition-colors';
-                div.style.gridTemplateColumns = '5rem 1fr 3rem 4rem 1fr 1.75rem';
+                div.className = 'grid items-center gap-x-2 py-1.5 border-b border-slate-100 hover:bg-slate-50 transition-colors px-1';
+                div.style.gridTemplateColumns = '4.5rem 2rem 3.5rem 1fr 1.5rem';
                 div.innerHTML = `
-                    <span class="font-mono font-black text-indigo-600 truncate">${row.assetId || '—'}</span>
-                    <span class="font-mono text-slate-600 text-[10px] truncate">${dtDisplay || '—'}</span>
-                    <span class="font-bold text-blue-700 uppercase truncate">${row.tr || '—'}</span>
-                    <span class="font-bold text-violet-700 uppercase truncate">${row.loc || '—'}</span>
-                    <span class="text-slate-500 truncate">${row.nt || ''}</span>
-                    <button class="text-slate-300 hover:text-red-500 transition-colors text-base leading-none font-black flex-shrink-0" title="Delete record" onclick="deleteAssetHistoryEntry(${row.id})">×</button>`;
+                    <span class="font-mono font-black text-[11px] text-indigo-600 truncate leading-tight">${row.assetId || '—'}</span>
+                    <span style="${trBadgeStyle}border-radius:4px;padding:1px 4px;font-size:9px;font-weight:900;line-height:1.4;display:inline-block;text-align:center;letter-spacing:0.03em;">${row.tr || '—'}</span>
+                    <span class="font-black text-[10px] text-violet-700 uppercase truncate leading-tight">${locText}</span>
+                    <span class="leading-tight">
+                        <span class="block font-mono text-[10px] text-slate-500">${dtDisplay}</span>
+                        ${ntText ? `<span class="block text-[10px] text-slate-400 leading-snug">${ntText}</span>` : ''}
+                    </span>
+                    <button class="text-slate-300 hover:text-red-500 transition-colors text-base leading-none font-black flex-shrink-0 text-center" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})">×</button>`;
                 container.appendChild(div);
             });
         }
