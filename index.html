@@ -3922,6 +3922,11 @@
             addToSharedDb(entry);
             broadcastNewEntry(entry);
             updateFinTable(entry);
+            // Immediately write MS Asset History for any asset that just went NRO as a
+            // result of this live save — mirrors what the CSV import path does via
+            // processMissingAssets() after applyHistoryRows(). Without this call, MS
+            // entries were only written the next time a Sync Table import ran.
+            processMissingAssets();
             clearPPlusForFin(entry.FIN); // auto-reset P+ now that this FIN has been serviced
 
             // ── OB history: each real HHD currently onboard ─────────────────
@@ -5204,6 +5209,13 @@
             // After all merges, reconcile snapshots to enforce single-location rule
             if (anyChanged) reconcileFinTableSnapshots();
 
+            // Write MS Asset History entries for any NRO assets that arrived via this
+            // sync — covers both nroIndex entries merged from peers and any that became
+            // NRO as a side-effect of merging assetIndex / finTable snapshots.
+            // Without this call, a peer that received NRO data via FULL_SYNC or
+            // DELTA_SYNC would never write MS entries into its own Asset History.
+            if (anyChanged) processMissingAssets();
+
             return anyChanged;
         }
 
@@ -5257,6 +5269,10 @@
                 addToSharedDb(inEntry);
                 // Write OB history — use the original save timestamp from the source device
                 writeOBHistoryForHHDs(inEntry, new Date(inEntry.id));
+                // Write MS Asset History for any asset now NRO as a result of this peer's entry.
+                // updateFinTable may have just flagged assets missing; without this call those
+                // MS entries would never be written on the receiving device.
+                processMissingAssets();
 
                 // ── All Data Sync: RM history for INV RTN Base entries ────────
                 // Criteria: FIN="INV" AND SrvcIssCAT contains "RT"+"INV RTN"
