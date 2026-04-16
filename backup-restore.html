@@ -87,7 +87,7 @@
     <div class="card border-red-100">
         <h2 class="font-extrabold text-slate-800 uppercase tracking-wide text-sm mb-1">Step 2 — Clear (optional)</h2>
         <p class="text-xs text-slate-500 mb-3">Wipes all app data from localStorage. <span class="font-bold text-red-600">Only do this after a successful backup.</span> Agent name and station are preserved so the form still works after clearing.</p>
-        <div class="flex gap-2">
+        <div class="flex gap-2 mb-2">
             <button onclick="askClear('operational')" class="btn btn-amber flex-1 text-xs">
                 Clear Operational Data
                 <span class="block text-[10px] font-normal opacity-80">(records, finTable, assetIndex, NRO, assetHistory)</span>
@@ -95,6 +95,37 @@
             <button onclick="askClear('all')" class="btn btn-red flex-1 text-xs">
                 Clear Everything
                 <span class="block text-[10px] font-normal opacity-80">(all keys including refs)</span>
+            </button>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="askClear('aircraftRef')" class="btn btn-red flex-1 text-xs">
+                Clear Aircraft Ref
+                <span class="block text-[10px] font-normal opacity-80">(yul_aircraft_ref_v3 + block)</span>
+            </button>
+            <button onclick="askClear('assetRef')" class="btn btn-red flex-1 text-xs">
+                Clear Initial Assets
+                <span class="block text-[10px] font-normal opacity-80">(yul_asset_ref_v2 + ts + block)</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Factory Defaults -->
+    <div class="card border-indigo-100">
+        <h2 class="font-extrabold text-slate-800 uppercase tracking-wide text-sm mb-1">Step 2b — Factory Defaults</h2>
+        <p class="text-xs text-slate-500 mb-3">Seeds the built-in <strong>Default Aircraft Ref</strong> and <strong>Initial Assets</strong> tables directly to localStorage. Use this to restore these reference tables to their factory state, or to ensure they are captured in your next backup even if they have never been modified.</p>
+        <div class="flex gap-2">
+            <button onclick="askSeedDefault('aircraft')" class="btn btn-slate flex-1 text-xs">
+                ✈ Restore Default Aircraft Ref
+                <span class="block text-[10px] font-normal opacity-80">(yul_aircraft_ref_v3)</span>
+            </button>
+            <button onclick="askSeedDefault('assets')" class="btn btn-slate flex-1 text-xs">
+                📦 Restore Initial Assets
+                <span class="block text-[10px] font-normal opacity-80">(yul_asset_ref_v2)</span>
+            </button>
+        </div>
+        <div class="mt-2">
+            <button onclick="askSeedDefault('both')" class="btn btn-slate w-full text-xs">
+                ✈ 📦 Restore Both Factory Defaults
             </button>
         </div>
     </div>
@@ -152,6 +183,83 @@ function storageSet(key, jsonValue) {
     }
 }
 
+// ─── Factory defaults (mirrored from index.html) ─────────────────────────────
+const DEFAULT_AIRCRAFT_REF = {
+    "AC101": { type: "A220", body: "NB" }, "AC102": { type: "A220", body: "NB" }, "AC103": { type: "A220", body: "NB" }, "AC104": { type: "A220", body: "NB" }, "AC105": { type: "A220", body: "NB" },
+    "AC106": { type: "A220", body: "NB" }, "AC107": { type: "A220", body: "NB" }, "AC108": { type: "A220", body: "NB" }, "AC109": { type: "A220", body: "NB" }, "AC110": { type: "A220", body: "NB" },
+    "AC111": { type: "A220", body: "NB" }, "AC112": { type: "A220", body: "NB" }, "AC113": { type: "A220", body: "NB" }, "AC114": { type: "A220", body: "NB" }, "AC115": { type: "A220", body: "NB" },
+    "AC116": { type: "A220", body: "NB" }, "AC117": { type: "A220", body: "NB" }, "AC118": { type: "A220", body: "NB" }, "AC119": { type: "A220", body: "NB" }, "AC120": { type: "A220", body: "NB" },
+    "AC121": { type: "A220", body: "NB" }, "AC122": { type: "A220", body: "NB" }, "AC123": { type: "A220", body: "NB" }, "AC124": { type: "A220", body: "NB" }, "AC125": { type: "A220", body: "NB" },
+    "AC126": { type: "A220", body: "NB" }, "AC127": { type: "A220", body: "NB" }, "AC128": { type: "A220", body: "NB" }, "AC129": { type: "A220", body: "NB" }, "AC130": { type: "A220", body: "NB" },
+    "AC131": { type: "A320", body: "NB" }, "AC132": { type: "A320", body: "NB" }, "AC133": { type: "A320", body: "NB" }, "AC134": { type: "A320", body: "NB" }, "AC135": { type: "A320", body: "NB" },
+    "AC136": { type: "A320", body: "NB" }, "AC137": { type: "A320", body: "NB" }, "AC138": { type: "A320", body: "NB" }, "AC139": { type: "A320", body: "NB" }, "AC140": { type: "A320", body: "NB" },
+    "AC141": { type: "A320", body: "NB" }, "AC142": { type: "A220", body: "NB" }, "AC225": { type: "A320", body: "NB" }, "AC226": { type: "A320", body: "NB" }, "AC232": { type: "A320", body: "NB" },
+    "AC235": { type: "A320", body: "NB" }, "AC236": { type: "A320", body: "NB" }, "AC237": { type: "A320", body: "NB" }, "AC238": { type: "A320", body: "NB" }, "AC239": { type: "A320", body: "NB" },
+    "AC240": { type: "A320", body: "NB" }, "AC241": { type: "A320", body: "NB" }, "AC242": { type: "A320", body: "NB" }, "AC251": { type: "A319", body: "NB" }, "AC252": { type: "A319", body: "NB" },
+    "AC402": { type: "A320", body: "NB" }, "AC405": { type: "A320", body: "NB" }, "AC416": { type: "A320", body: "NB" }, "AC417": { type: "A320", body: "NB" }, "AC418": { type: "A320", body: "NB" },
+    "AC419": { type: "A320", body: "NB" }, "AC420": { type: "A320", body: "NB" }, "AC421": { type: "A320", body: "NB" }, "AC422": { type: "A320", body: "NB" }, "AC451": { type: "A321", body: "NB" },
+    "AC452": { type: "A321", body: "NB" }, "AC453": { type: "A321", body: "NB" }, "AC454": { type: "A321", body: "NB" }, "AC455": { type: "A321", body: "NB" }, "AC456": { type: "A321", body: "NB" },
+    "AC457": { type: "A321", body: "NB" }, "AC458": { type: "A321", body: "NB" }, "AC459": { type: "A321", body: "NB" }, "AC460": { type: "A321", body: "NB" }, "AC461": { type: "A321", body: "NB" },
+    "AC462": { type: "A321", body: "NB" }, "AC463": { type: "A321", body: "NB" }, "AC464": { type: "A321", body: "NB" }, "AC465": { type: "A321", body: "NB" }, "AC466": { type: "A321", body: "NB" },
+    "AC467": { type: "A321", body: "NB" }, "AC468": { type: "A321", body: "NB" }, "AC473": { type: "A321", body: "NB" }, "AC483": { type: "A321", body: "NB" }, "AC484": { type: "A321", body: "NB" },
+    "AC503": { type: "737-8", body: "NB" }, "AC504": { type: "737-8", body: "NB" }, "AC505": { type: "737-8", body: "NB" }, "AC506": { type: "737-8", body: "NB" }, "AC507": { type: "737-8", body: "NB" },
+    "AC508": { type: "737-8", body: "NB" }, "AC509": { type: "737-8", body: "NB" }, "AC510": { type: "737-8", body: "NB" }, "AC511": { type: "737-8", body: "NB" }, "AC512": { type: "737-8", body: "NB" },
+    "AC513": { type: "737-8", body: "NB" }, "AC514": { type: "737-8", body: "NB" }, "AC515": { type: "737-8", body: "NB" }, "AC516": { type: "737-8", body: "NB" }, "AC517": { type: "737-8", body: "NB" },
+    "AC518": { type: "737-8", body: "NB" }, "AC519": { type: "737-8", body: "NB" }, "AC520": { type: "737-8", body: "NB" }, "AC521": { type: "737-8", body: "NB" }, "AC522": { type: "737-8", body: "NB" },
+    "AC523": { type: "737-8", body: "NB" }, "AC524": { type: "737-8", body: "NB" }, "AC525": { type: "737-8", body: "NB" }, "AC526": { type: "737-8", body: "NB" }, "AC527": { type: "737-8", body: "NB" },
+    "AC528": { type: "737-8", body: "NB" }, "AC529": { type: "737-8", body: "NB" }, "AC530": { type: "737-8", body: "NB" }, "AC531": { type: "737-8", body: "NB" }, "AC532": { type: "737-8", body: "NB" },
+    "AC533": { type: "737-8", body: "NB" }, "AC534": { type: "737-8", body: "NB" }, "AC535": { type: "737-8", body: "NB" }, "AC536": { type: "737-8", body: "NB" }, "AC537": { type: "737-8", body: "NB" },
+    "AC538": { type: "737-8", body: "NB" }, "AC539": { type: "737-8", body: "NB" }, "AC540": { type: "737-8", body: "NB" }, "AC541": { type: "737-8", body: "NB" }, "AC542": { type: "737-8", body: "NB" },
+    "AC543": { type: "737-8", body: "NB" }, "AC544": { type: "737-8", body: "NB" }, "AC545": { type: "737-8", body: "NB" }, "AC571": { type: "737-8", body: "NB" }, "AC573": { type: "737-8", body: "NB" },
+    "AC574": { type: "737-8", body: "NB" }, "AC575": { type: "737-8", body: "NB" }, "AC576": { type: "737-8", body: "NB" }, "AC577": { type: "737-8", body: "NB" }, "AC578": { type: "737-8", body: "NB" },
+    "AC701": { type: "777-200", body: "WB" }, "AC702": { type: "777-200", body: "WB" }, "AC703": { type: "777-200", body: "WB" }, "AC704": { type: "777-200", body: "WB" }, "AC705": { type: "777-200", body: "WB" },
+    "AC706": { type: "777-200", body: "WB" }, "AC731": { type: "777-300", body: "WB" }, "AC732": { type: "777-300", body: "WB" }, "AC733": { type: "777-300", body: "WB" }, "AC734": { type: "777-300", body: "WB" },
+    "AC735": { type: "777-300", body: "WB" }, "AC736": { type: "777-300", body: "WB" }, "AC737": { type: "777-300", body: "WB" }, "AC738": { type: "777-300", body: "WB" }, "AC739": { type: "777-300", body: "WB" },
+    "AC740": { type: "777-300", body: "WB" }, "AC741": { type: "777-300", body: "WB" }, "AC742": { type: "777-300", body: "WB" }, "AC743": { type: "777-300HD", body: "WB" }, "AC744": { type: "777-300HD", body: "WB" },
+    "AC745": { type: "777-300HD", body: "WB" }, "AC746": { type: "777-300HD", body: "WB" }, "AC747": { type: "777-300HD", body: "WB" }, "AC748": { type: "777-300HD", body: "WB" }, "AC749": { type: "777-300HD", body: "WB" },
+    "AC801": { type: "787-8", body: "WB" }, "AC802": { type: "787-8", body: "WB" }, "AC803": { type: "787-8", body: "WB" }, "AC804": { type: "787-8", body: "WB" }, "AC805": { type: "787-8", body: "WB" },
+    "AC806": { type: "787-8", body: "WB" }, "AC807": { type: "787-8", body: "WB" }, "AC808": { type: "787-8", body: "WB" }, "AC831": { type: "787-9", body: "WB" }, "AC832": { type: "787-9", body: "WB" },
+    "AC833": { type: "787-9", body: "WB" }, "AC834": { type: "787-9", body: "WB" }, "AC835": { type: "787-9", body: "WB" }, "AC836": { type: "787-9", body: "WB" }, "AC837": { type: "787-9", body: "WB" },
+    "AC838": { type: "787-9", body: "WB" }, "AC839": { type: "787-9", body: "WB" }, "AC840": { type: "787-9", body: "WB" }, "AC841": { type: "787-9", body: "WB" }, "AC842": { type: "787-9", body: "WB" },
+    "AC843": { type: "787-9", body: "WB" }, "AC844": { type: "787-9", body: "WB" }, "AC845": { type: "787-9", body: "WB" }, "AC846": { type: "787-9", body: "WB" }, "AC847": { type: "787-9", body: "WB" },
+    "AC848": { type: "787-9", body: "WB" }, "AC849": { type: "787-9", body: "WB" }, "AC850": { type: "787-9", body: "WB" }, "AC851": { type: "787-9", body: "WB" }, "AC852": { type: "787-9", body: "WB" },
+    "AC853": { type: "787-9", body: "WB" }, "AC854": { type: "787-9", body: "WB" }, "AC855": { type: "787-9", body: "WB" }, "AC856": { type: "787-9", body: "WB" }, "AC857": { type: "787-9", body: "WB" },
+    "AC858": { type: "787-9", body: "WB" }, "AC859": { type: "787-9", body: "WB" }, "AC860": { type: "787-9", body: "WB" }, "AC861": { type: "787-9", body: "WB" }, "AC862": { type: "787-9", body: "WB" },
+    "AC931": { type: "A330", body: "WB" }, "AC932": { type: "A330", body: "WB" }, "AC933": { type: "A330", body: "WB" }, "AC934": { type: "A330", body: "WB" }, "AC935": { type: "A330", body: "WB" },
+    "AC936": { type: "A330", body: "WB" }, "AC937": { type: "A330", body: "WB" }, "AC938": { type: "A330", body: "WB" }, "AC939": { type: "A330", body: "WB" }, "AC940": { type: "A330", body: "WB" },
+    "AC941": { type: "A330", body: "WB" }, "AC942": { type: "A330", body: "WB" }, "AC943": { type: "A330", body: "WB" }, "AC944": { type: "A330", body: "WB" }, "AC945": { type: "A330", body: "WB" },
+    "AC946": { type: "A330", body: "WB" }, "AC947": { type: "A330", body: "WB" }, "AC948": { type: "A330", body: "WB" }, "AC949": { type: "A330", body: "WB" }, "AC950": { type: "A330", body: "WB" },
+    "QK521": { type: "E75", body: "NB" }, "QK522": { type: "E75", body: "NB" }, "QK523": { type: "E75", body: "NB" }, "QK524": { type: "E75", body: "NB" }, "QK525": { type: "E75", body: "NB" },
+    "QK526": { type: "E75", body: "NB" }, "QK527": { type: "E75", body: "NB" }, "QK528": { type: "E75", body: "NB" }, "QK529": { type: "E75", body: "NB" }, "QK530": { type: "E75", body: "NB" },
+    "QK531": { type: "E75", body: "NB" }, "QK532": { type: "E75", body: "NB" }, "QK533": { type: "E75", body: "NB" }, "QK534": { type: "E75", body: "NB" }, "QK535": { type: "E75", body: "NB" },
+    "QK536": { type: "E75", body: "NB" }, "QK537": { type: "E75", body: "NB" }, "QK538": { type: "E75", body: "NB" }, "QK539": { type: "E75", body: "NB" }, "QK540": { type: "E75", body: "NB" },
+    "QK541": { type: "E75", body: "NB" }, "QK542": { type: "E75", body: "NB" }, "QK543": { type: "E75", body: "NB" }, "QK544": { type: "E75", body: "NB" }, "QK545": { type: "E75", body: "NB" },
+    "QK701": { type: "CRJ705", body: "NB" }, "QK702": { type: "CRJ705", body: "NB" }, "QK703": { type: "CRJ705", body: "NB" }, "QK704": { type: "CRJ705", body: "NB" }, "QK705": { type: "CRJ705", body: "NB" },
+    "QK706": { type: "CRJ705", body: "NB" }, "QK707": { type: "CRJ705", body: "NB" }, "QK708": { type: "CRJ705", body: "NB" }, "QK709": { type: "CRJ705", body: "NB" }, "QK710": { type: "CRJ705", body: "NB" },
+    "QK711": { type: "CRJ705", body: "NB" }, "QK712": { type: "CRJ705", body: "NB" }, "QK713": { type: "CRJ705", body: "NB" }, "QK714": { type: "CRJ705", body: "NB" }, "QK715": { type: "CRJ705", body: "NB" },
+    "QK716": { type: "CRJ705", body: "NB" }, "QK717": { type: "CRJ705", body: "NB" }, "QK718": { type: "CRJ705", body: "NB" }, "QK719": { type: "CRJ705", body: "NB" }, "QK720": { type: "CRJ705", body: "NB" },
+    "QK721": { type: "CRJ705", body: "NB" }, "QK722": { type: "CRJ705", body: "NB" }, "QK723": { type: "CRJ705", body: "NB" }, "QK724": { type: "CRJ705", body: "NB" }, "QK725": { type: "CRJ705", body: "NB" },
+    "QK726": { type: "CRJ705", body: "NB" }, "QK727": { type: "CRJ705", body: "NB" }, "QK728": { type: "CRJ705", body: "NB" }, "QK729": { type: "CRJ705", body: "NB" }, "QK730": { type: "CRJ705", body: "NB" },
+    "RV243": { type: "A320", body: "NB" }, "RV244": { type: "A320", body: "NB" }, "RV245": { type: "A320", body: "NB" }, "RV246": { type: "A320", body: "NB" }, "RV247": { type: "A320", body: "NB" },
+    "RV255": { type: "A319", body: "NB" }, "RV256": { type: "A319", body: "NB" }, "RV257": { type: "A319", body: "NB" }, "RV259": { type: "A319", body: "NB" }, "RV262": { type: "A319", body: "NB" },
+    "RV263": { type: "A319", body: "NB" }, "RV273": { type: "A319", body: "NB" }, "RV278": { type: "A319", body: "NB" }, "RV279": { type: "A319", body: "NB" }, "RV281": { type: "A319", body: "NB" },
+    "RV283": { type: "A319", body: "NB" }, "RV284": { type: "A319", body: "NB" }, "RV286": { type: "A319", body: "NB" }, "RV287": { type: "A319", body: "NB" }, "RV290": { type: "A319", body: "NB" },
+    "RV469": { type: "A321", body: "NB" }, "RV470": { type: "A321", body: "NB" }, "RV471": { type: "A321", body: "NB" }, "RV472": { type: "A321", body: "NB" }, "RV474": { type: "A321", body: "NB" },
+    "RV475": { type: "A321", body: "NB" }, "RV476": { type: "A321", body: "NB" }, "RV477": { type: "A321", body: "NB" }, "RV478": { type: "A321", body: "NB" }, "RV479": { type: "A321", body: "NB" },
+    "RV480": { type: "A321", body: "NB" }, "RV481": { type: "A321", body: "NB" }, "RV482": { type: "A321", body: "NB" }, "RV501": { type: "A220", body: "NB" }, "RV502": { type: "A220", body: "NB" }
+};
+
+const INITIAL_ASSETS = (function() {
+    const a = {
+        "2140": "Urovo", "2141": "Urovo", "2142": "Urovo", "2143": "Urovo", "2144": "Urovo", "2146": "Urovo", "2147": "Urovo", "2148": "Urovo", "2149": "Urovo", "2150": "Urovo", "2151": "Urovo", "2152": "Urovo", "2153": "Urovo", "2156": "Urovo", "2158": "Urovo", "2159": "Urovo", "2161": "Urovo", "2163": "Urovo", "2164": "Urovo", "2165": "Urovo", "2166": "Urovo", "2167": "Urovo", "2169": "Urovo", "2170": "Urovo", "2171": "Urovo", "2172": "Urovo", "2174": "Urovo", "2175": "Urovo", "2176": "Urovo", "2177": "Urovo", "2178": "Urovo", "2180": "Urovo", "2181": "Urovo", "2182": "Urovo", "2183": "Urovo", "2184": "Urovo", "2185": "Urovo", "2186": "Urovo", "2188": "Urovo", "2190": "Urovo", "2192": "Urovo", "2193": "Urovo",
+        "3100": "Urovo", "3101": "Urovo", "3102": "Urovo", "3103": "Urovo", "3104": "Urovo", "3105": "Urovo", "3106": "Urovo", "3107": "Urovo", "3108": "Urovo", "3109": "Urovo", "3110": "Urovo", "3111": "Urovo", "3112": "Urovo", "3113": "Urovo", "3114": "Urovo", "3115": "Urovo", "3116": "Urovo", "3117": "Urovo", "3118": "Urovo", "3119": "Urovo", "3120": "Urovo", "3121": "Urovo", "3122": "Urovo", "3123": "Urovo", "3124": "Urovo", "3125": "Urovo", "3126": "Urovo", "3127": "Urovo", "3128": "Urovo", "3129": "Urovo", "3130": "Urovo", "3131": "Urovo", "3132": "Urovo", "3133": "Urovo", "3134": "Urovo", "3135": "Urovo", "3136": "Urovo", "3137": "Urovo", "3138": "Urovo", "3139": "Urovo", "3140": "Urovo", "3141": "Urovo", "3142": "Urovo", "3143": "Urovo", "3144": "Urovo", "3145": "Urovo", "3146": "Urovo", "3147": "Urovo", "3148": "Urovo", "3149": "Urovo", "3150": "Urovo", "3151": "Urovo", "3152": "Urovo", "3153": "Urovo", "3154": "Urovo", "3155": "Urovo", "3156": "Urovo", "3157": "Urovo", "3158": "Urovo", "3159": "Urovo", "3160": "Urovo", "3161": "Urovo", "3162": "Urovo", "3163": "Urovo", "3164": "Urovo", "3165": "Urovo", "3166": "Urovo", "3167": "Urovo", "3168": "Urovo", "3169": "Urovo", "3170": "Urovo", "3171": "Urovo", "3172": "Urovo", "3173": "Urovo", "3174": "Urovo", "3175": "Urovo", "3176": "Urovo", "3177": "Urovo", "3178": "Urovo", "3179": "Urovo", "3180": "Urovo", "3181": "Urovo", "3182": "Urovo", "3183": "Urovo", "3184": "Urovo", "3185": "Urovo", "3186": "Urovo", "3187": "Urovo", "3188": "Urovo", "3189": "Urovo", "3190": "Urovo", "3191": "Urovo", "3192": "Urovo", "3193": "Urovo", "3194": "Urovo", "3195": "Urovo", "3196": "Urovo", "3197": "Urovo", "3198": "Urovo", "3199": "Urovo",
+        "3300": "Urovo", "3301": "Urovo", "3302": "Urovo", "3303": "Urovo", "3304": "Urovo", "3305": "Urovo", "3306": "Urovo", "3307": "Urovo", "3308": "Urovo", "3309": "Urovo", "3310": "Urovo", "3311": "Urovo", "3312": "Urovo", "3313": "Urovo", "3314": "Urovo", "3315": "Urovo", "3316": "Urovo", "3317": "Urovo", "3318": "Urovo", "3319": "Urovo", "3320": "Urovo", "3321": "Urovo", "3322": "Urovo", "3323": "Urovo", "3324": "Urovo", "3325": "Urovo", "3326": "Urovo", "3327": "Urovo", "3328": "Urovo", "3329": "Urovo", "3330": "Urovo", "3331": "Urovo", "3332": "Urovo", "3333": "Urovo", "3334": "Urovo", "3335": "Urovo", "3336": "Urovo", "3337": "Urovo", "3338": "Urovo", "3339": "Urovo", "3340": "Urovo", "3341": "Urovo", "3342": "Urovo", "3343": "Urovo", "3344": "Urovo", "3345": "Urovo", "3346": "Urovo", "3347": "Urovo", "3348": "Urovo", "3349": "Urovo", "3350": "Urovo", "3351": "Urovo", "3352": "Urovo", "3353": "Urovo", "3354": "Urovo", "3355": "Urovo", "3356": "Urovo", "3357": "Urovo", "3358": "Urovo", "3359": "Urovo", "3360": "Urovo", "3361": "Urovo", "3362": "Urovo", "3363": "Urovo", "3364": "Urovo", "3365": "Urovo", "3366": "Urovo", "3367": "Urovo", "3368": "Urovo", "3369": "Urovo", "3370": "Urovo", "3371": "Urovo", "3372": "Urovo", "3373": "Urovo", "3374": "Urovo", "3375": "Urovo", "3376": "Urovo", "3377": "Urovo", "3378": "Urovo", "3379": "Urovo", "3380": "Urovo", "3381": "Urovo", "3382": "Urovo", "3383": "Urovo", "3384": "Urovo", "3385": "Urovo",
+        "3449": "Urovo", "3450": "Urovo", "3451": "Urovo", "3452": "Urovo", "3453": "Urovo", "3454": "Urovo", "3455": "Urovo", "3456": "Urovo", "3457": "Urovo", "3458": "Urovo", "3459": "Urovo", "3460": "Urovo", "3461": "Urovo", "3462": "Urovo", "3463": "Urovo", "3464": "Urovo", "3465": "Urovo", "3466": "Urovo", "3467": "Urovo", "3468": "Urovo", "3469": "Urovo", "3470": "Urovo", "3471": "Urovo", "3472": "Urovo", "3473": "Urovo", "3474": "Urovo", "3475": "Urovo", "3476": "Urovo", "3477": "Urovo", "3478": "Urovo", "3479": "Urovo", "3480": "Urovo", "3481": "Urovo", "3482": "Urovo", "3483": "Urovo", "3484": "Urovo", "3485": "Urovo", "3486": "Urovo", "3487": "Urovo", "3488": "Urovo", "3489": "Urovo", "3490": "Urovo"
+    };
+    for (let i = 3501; i <= 3585; i++) a[i.toString()] = "Urovo";
+    return a;
+})();
+
 // ─── All known keys with metadata ────────────────────────────────────────────
 const KEYS = [
     // Operational — cleared in "operational" mode
@@ -208,7 +316,11 @@ function refreshStats() {
         }
         const raw = localStorage.getItem(key);
         if (!raw) {
-            html += `<div class="stat-row"><span class="stat-key">${label}</span><span class="stat-empty">empty</span></div>`;
+            const hasDefault = !!FACTORY_DEFAULTS[key];
+            const emptyLabel = hasDefault
+                ? `<span class="stat-empty">empty</span> <span style="color:#6366f1;font-size:0.72rem;font-style:italic">(factory default available)</span>`
+                : `<span class="stat-empty">empty</span>`;
+            html += `<div class="stat-row"><span class="stat-key">${label}</span>${emptyLabel}</div>`;
             return;
         }
         totalBytes += raw.length;
@@ -228,6 +340,12 @@ function refreshStats() {
     container.innerHTML = html;
 }
 
+// ─── Keys that have a factory-default fallback when localStorage is empty ─────
+const FACTORY_DEFAULTS = {
+    'yul_aircraft_ref_v3': () => JSON.stringify(DEFAULT_AIRCRAFT_REF),
+    'yul_asset_ref_v2':    () => JSON.stringify(INITIAL_ASSETS),
+};
+
 // ─── Backup ───────────────────────────────────────────────────────────────────
 function doBackup() {
     log('Starting backup…', 'info');
@@ -243,16 +361,29 @@ function doBackup() {
 
     let count = 0;
     let empty = 0;
+    let defaulted = 0;
     KEYS.forEach(({ key }) => {
         const decoded = storageGet(key);
-        if (decoded === null) { empty++; return; }
-        backup.data[key] = decoded;
-        count++;
+        if (decoded !== null) {
+            backup.data[key] = decoded;
+            count++;
+        } else if (FACTORY_DEFAULTS[key]) {
+            // Key is absent from localStorage — use the built-in factory default
+            backup.data[key] = FACTORY_DEFAULTS[key]();
+            count++;
+            defaulted++;
+            log(`  ${key}: not in localStorage — factory default included in backup.`, 'warn');
+        } else {
+            empty++;
+        }
     });
 
     if (count === 0) {
         log('Nothing to back up — localStorage appears empty.', 'warn');
         return;
+    }
+    if (defaulted > 0) {
+        log(`Note: ${defaulted} key(s) were missing from localStorage and were substituted with their factory defaults in the backup file.`, 'warn');
     }
 
     const json   = JSON.stringify(backup, null, 2);
@@ -268,20 +399,46 @@ function doBackup() {
     URL.revokeObjectURL(url);
 
     const sizeKb = (json.length / 1024).toFixed(1);
-    log(`Backup complete — ${count} keys exported, ${empty} empty keys skipped (${sizeKb} KB).`, 'ok');
+    const defaultedNote = defaulted > 0 ? `, ${defaulted} from factory defaults` : '';
+    log(`Backup complete — ${count} keys exported${defaultedNote}, ${empty} empty keys skipped (${sizeKb} KB).`, 'ok');
     refreshStats();
 }
 
 // ─── Clear ────────────────────────────────────────────────────────────────────
 let _pendingClearMode = null;
 
+const CLEAR_CONFIGS = {
+    operational: {
+        title: 'Clear operational data?',
+        msg: 'This will clear all service records, the FIN table, asset index, NRO index, asset history, P+ flags, schedule, and shared DB. Reference databases (aircraft, assets, agents) are kept. Make sure you have a backup.',
+        keys: () => OPERATIONAL_KEYS,
+        logType: 'ok',
+    },
+    all: {
+        title: 'Clear ALL data?',
+        msg: 'This will wipe every app key from localStorage (except agent name and station). Reference databases (aircraft, assets, agents) will also be cleared. Make sure you have a backup.',
+        keys: () => ALL_CLEARABLE_KEYS,
+        logType: 'warn',
+    },
+    aircraftRef: {
+        title: 'Clear Aircraft Reference DB?',
+        msg: 'This will remove yul_aircraft_ref_v3 and its tombstone key from localStorage. Use "Restore Default Aircraft Ref" afterwards to re-seed factory data, or restore from a backup file.',
+        keys: () => ['yul_aircraft_ref_v3', 'yul_aircraft_ref_block_v1'],
+        logType: 'warn',
+    },
+    assetRef: {
+        title: 'Clear Initial Assets DB?',
+        msg: 'This will remove yul_asset_ref_v2, its timestamps, and its tombstone key from localStorage. Use "Restore Initial Assets" afterwards to re-seed factory data, or restore from a backup file.',
+        keys: () => ['yul_asset_ref_v2', 'yul_asset_ref_ts_v1', 'yul_asset_ref_block_v1'],
+        logType: 'warn',
+    },
+};
+
 function askClear(mode) {
     _pendingClearMode = mode;
-    const isAll = mode === 'all';
-    document.getElementById('confirm-title').textContent = isAll ? 'Clear ALL data?' : 'Clear operational data?';
-    document.getElementById('confirm-msg').textContent = isAll
-        ? 'This will wipe every app key from localStorage (except agent name and station). Reference databases (aircraft, assets, agents) will also be cleared. Make sure you have a backup.'
-        : 'This will clear all service records, the FIN table, asset index, NRO index, asset history, P+ flags, schedule, and shared DB. Reference databases (aircraft, assets, agents) are kept. Make sure you have a backup.';
+    const cfg = CLEAR_CONFIGS[mode];
+    document.getElementById('confirm-title').textContent = cfg.title;
+    document.getElementById('confirm-msg').textContent   = cfg.msg;
     document.getElementById('confirm-yes').onclick = () => { closeConfirm(); doClear(mode); };
     document.getElementById('confirm-overlay').classList.add('open');
 }
@@ -292,15 +449,70 @@ function closeConfirm() {
 }
 
 function doClear(mode) {
-    const keys = mode === 'all' ? ALL_CLEARABLE_KEYS : OPERATIONAL_KEYS;
+    const cfg = CLEAR_CONFIGS[mode];
+    if (!cfg) { log(`Unknown clear mode: ${mode}`, 'err'); return; }
     let cleared = 0;
-    keys.forEach(key => {
+    cfg.keys().forEach(key => {
         if (localStorage.getItem(key) !== null) {
             localStorage.removeItem(key);
             cleared++;
         }
     });
-    log(`Clear (${mode}) complete — ${cleared} keys removed from localStorage.`, mode === 'all' ? 'warn' : 'ok');
+    log(`Clear (${mode}) complete — ${cleared} key(s) removed from localStorage.`, cfg.logType);
+    refreshStats();
+}
+
+// ─── Factory-default seeding ─────────────────────────────────────────────────
+let _pendingSeedTarget = null;
+
+const SEED_CONFIGS = {
+    aircraft: {
+        title: 'Restore Default Aircraft Ref?',
+        msg: 'This will write the full factory aircraft reference table (DEFAULT_AIRCRAFT_REF) to yul_aircraft_ref_v3, overwriting any existing data for that key.',
+        fn: () => {
+            const ok = storageSet('yul_aircraft_ref_v3', JSON.stringify(DEFAULT_AIRCRAFT_REF));
+            if (ok) log(`  ✓ yul_aircraft_ref_v3 written — ${Object.keys(DEFAULT_AIRCRAFT_REF).length} aircraft entries.`, 'ok');
+            else     log(`  ✗ Failed to write yul_aircraft_ref_v3.`, 'err');
+        },
+    },
+    assets: {
+        title: 'Restore Initial Assets?',
+        msg: 'This will write the full factory asset table (INITIAL_ASSETS) to yul_asset_ref_v2, overwriting any existing data for that key.',
+        fn: () => {
+            const ok = storageSet('yul_asset_ref_v2', JSON.stringify(INITIAL_ASSETS));
+            if (ok) log(`  ✓ yul_asset_ref_v2 written — ${Object.keys(INITIAL_ASSETS).length} asset entries.`, 'ok');
+            else     log(`  ✗ Failed to write yul_asset_ref_v2.`, 'err');
+        },
+    },
+    both: {
+        title: 'Restore Both Factory Defaults?',
+        msg: 'This will write DEFAULT_AIRCRAFT_REF to yul_aircraft_ref_v3 AND INITIAL_ASSETS to yul_asset_ref_v2, overwriting any existing data for those keys.',
+        fn: () => {
+            const okAc = storageSet('yul_aircraft_ref_v3', JSON.stringify(DEFAULT_AIRCRAFT_REF));
+            if (okAc) log(`  ✓ yul_aircraft_ref_v3 written — ${Object.keys(DEFAULT_AIRCRAFT_REF).length} aircraft entries.`, 'ok');
+            else       log(`  ✗ Failed to write yul_aircraft_ref_v3.`, 'err');
+            const okAs = storageSet('yul_asset_ref_v2', JSON.stringify(INITIAL_ASSETS));
+            if (okAs) log(`  ✓ yul_asset_ref_v2 written — ${Object.keys(INITIAL_ASSETS).length} asset entries.`, 'ok');
+            else       log(`  ✗ Failed to write yul_asset_ref_v2.`, 'err');
+        },
+    },
+};
+
+function askSeedDefault(target) {
+    _pendingSeedTarget = target;
+    const cfg = SEED_CONFIGS[target];
+    document.getElementById('confirm-title').textContent = cfg.title;
+    document.getElementById('confirm-msg').textContent   = cfg.msg;
+    document.getElementById('confirm-yes').onclick = () => { closeConfirm(); doSeedDefault(target); };
+    document.getElementById('confirm-overlay').classList.add('open');
+}
+
+function doSeedDefault(target) {
+    const cfg = SEED_CONFIGS[target];
+    if (!cfg) { log(`Unknown seed target: ${target}`, 'err'); return; }
+    log(`Seeding factory default(s) for: ${target}…`, 'info');
+    cfg.fn();
+    log('Done. Reload index.html to apply the seeded data.', 'info');
     refreshStats();
 }
 
