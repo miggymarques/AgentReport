@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Report — Backup & Restore</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        .card { background: white; border-radius: 1rem; border: 1px solid #e2e8f0; padding: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.75rem 1.25rem; border-radius: 0.625rem; font-weight: 700; font-size: 0.9rem; cursor: pointer; border: none; transition: all 0.15s; }
+        .btn:active { transform: scale(0.97); }
+        .btn-green  { background: #10b981; color: white; }
+        .btn-green:hover  { background: #059669; }
+        .btn-blue   { background: #3b82f6; color: white; }
+        .btn-blue:hover   { background: #2563eb; }
+        .btn-red    { background: #ef4444; color: white; }
+        .btn-red:hover    { background: #dc2626; }
+        .btn-slate  { background: #475569; color: white; }
+        .btn-slate:hover  { background: #334155; }
+        .btn-amber  { background: #f59e0b; color: white; }
+        .btn-amber:hover  { background: #d97706; }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid #f1f5f9; font-size: 0.82rem; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-key  { color: #64748b; font-family: monospace; }
+        .stat-val  { font-weight: 700; color: #0f172a; }
+        .stat-empty { color: #94a3b8; font-style: italic; }
+        #log { font-family: monospace; font-size: 0.78rem; line-height: 1.6; }
+        .log-ok   { color: #10b981; }
+        .log-warn { color: #f59e0b; }
+        .log-err  { color: #ef4444; }
+        .log-info { color: #94a3b8; }
+        .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 50; align-items: center; justify-content: center; }
+        .confirm-overlay.open { display: flex; }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+
+<!-- Confirm Dialog -->
+<div id="confirm-overlay" class="confirm-overlay">
+    <div class="card max-w-sm w-full mx-4">
+        <div class="text-lg font-extrabold text-slate-800 mb-2" id="confirm-title">Are you sure?</div>
+        <div class="text-sm text-slate-500 mb-6" id="confirm-msg"></div>
+        <div class="flex gap-3">
+            <button id="confirm-yes" class="btn btn-red flex-1">Yes, proceed</button>
+            <button onclick="closeConfirm()" class="btn btn-slate flex-1">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div class="max-w-xl mx-auto p-4 pb-16 space-y-4">
+
+    <!-- Header -->
+    <div class="bg-slate-900 text-white rounded-2xl px-5 py-4 shadow-lg">
+        <h1 class="text-lg font-extrabold tracking-tight">Service Report</h1>
+        <p class="text-slate-400 text-sm mt-0.5">Backup · Clear · Restore</p>
+    </div>
+
+    <!-- Warning -->
+    <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+        <span class="font-black">⚠ Important:</span> This tool must be opened from the <span class="font-bold">same location</span> as <code class="bg-amber-100 px-1 rounded">index.html</code> — same folder or same server — so it shares the same localStorage origin. Opening it from a different location will see empty storage.
+    </div>
+
+    <!-- Storage Snapshot -->
+    <div class="card">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="font-extrabold text-slate-800 uppercase tracking-wide text-sm">Current Storage</h2>
+            <button onclick="refreshStats()" class="btn btn-slate text-xs py-1.5 px-3">↻ Refresh</button>
+        </div>
+        <div id="stats-container">
+            <p class="text-xs text-slate-400 italic">Click Refresh to scan storage.</p>
+        </div>
+    </div>
+
+    <!-- Backup -->
+    <div class="card">
+        <h2 class="font-extrabold text-slate-800 uppercase tracking-wide text-sm mb-1">Step 1 — Backup</h2>
+        <p class="text-xs text-slate-500 mb-4">Exports all app data as a single <code>.json</code> file. Store it somewhere safe before making changes.</p>
+        <button onclick="doBackup()" class="btn btn-green w-full">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+            Download Backup File
+        </button>
+    </div>
+
+    <!-- Clear -->
+    <div class="card border-red-100">
+        <h2 class="font-extrabold text-slate-800 uppercase tracking-wide text-sm mb-1">Step 2 — Clear (optional)</h2>
+        <p class="text-xs text-slate-500 mb-3">Wipes all app data from localStorage. <span class="font-bold text-red-600">Only do this after a successful backup.</span> Agent name and station are preserved so the form still works after clearing.</p>
+        <div class="flex gap-2">
+            <button onclick="askClear('operational')" class="btn btn-amber flex-1 text-xs">
+                Clear Operational Data
+                <span class="block text-[10px] font-normal opacity-80">(records, finTable, assetIndex, NRO, assetHistory)</span>
+            </button>
+            <button onclick="askClear('all')" class="btn btn-red flex-1 text-xs">
+                Clear Everything
+                <span class="block text-[10px] font-normal opacity-80">(all keys including refs)</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Restore -->
+    <div class="card">
+        <h2 class="font-extrabold text-slate-800 uppercase tracking-wide text-sm mb-1">Step 3 — Restore</h2>
+        <p class="text-xs text-slate-500 mb-4">Select a backup <code>.json</code> file to restore. Each key is validated before writing. Existing data for the same key is overwritten.</p>
+        <label class="btn btn-blue w-full cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            Select Backup File
+            <input type="file" accept=".json" class="hidden" onchange="doRestore(this)">
+        </label>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+        <h2 class="font-extrabold text-slate-800 uppercase tracking-wide text-sm mb-3">Activity Log</h2>
+        <div id="log" class="space-y-0.5 min-h-[80px]">
+            <span class="log-info">Ready. No operations performed yet.</span>
+        </div>
+    </div>
+
+</div>
+
+<script>
+// ─── XOR codec — must exactly match index.html ───────────────────────────────
+const _STORE_KEY = 'ggc@s3rv1c3#2024';
+function _xor(str) {
+    let out = '';
+    for (let i = 0; i < str.length; i++) {
+        out += String.fromCharCode(str.charCodeAt(i) ^ _STORE_KEY.charCodeAt(i % _STORE_KEY.length));
+    }
+    return out;
+}
+function storageGet(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const firstChar = raw.trimStart()[0];
+        if (firstChar === '{' || firstChar === '[' || firstChar === '"' || firstChar === 't' || firstChar === 'f' || firstChar === 'n') return raw;
+        return _xor(decodeURIComponent(escape(atob(raw))));
+    } catch(e) {
+        return localStorage.getItem(key);
+    }
+}
+function storageSet(key, jsonValue) {
+    try {
+        const encoded = btoa(unescape(encodeURIComponent(_xor(jsonValue))));
+        localStorage.setItem(key, encoded);
+        return true;
+    } catch(e) {
+        log(`storageSet failed for ${key}: ${e.message}`, 'err');
+        return false;
+    }
+}
+
+// ─── All known keys with metadata ────────────────────────────────────────────
+const KEYS = [
+    // Operational — cleared in "operational" mode
+    { key: 'yul_field_data_v2',          label: 'Service Records (db)',      group: 'operational', countFn: j => Array.isArray(j) ? j.length + ' records' : null },
+    { key: 'yul_shared_db_v1',           label: 'Shared DB',                group: 'operational', countFn: j => Array.isArray(j) ? j.length + ' records' : null },
+    { key: 'yul_shared_db_clear_v1',     label: 'Shared DB Clear TS',       group: 'operational' },
+    { key: 'yul_fin_table_v1',           label: 'FIN Table (Sync Table)',    group: 'operational', countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' FINs' : null },
+    { key: 'yul_asset_index_v1',         label: 'Asset Index',              group: 'operational', countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' assets' : null },
+    { key: 'yul_nro_index_v1',           label: 'NRO Index',                group: 'operational', countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' NRO' : null },
+    { key: 'yul_asset_history_v1',       label: 'Asset History',            group: 'operational', countFn: j => Array.isArray(j) ? j.length + ' entries' : null },
+    { key: 'yul_asset_history_block_v1', label: 'Asset History Tombstones', group: 'operational', countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' tombstones' : null },
+    { key: 'yul_p_plus_flags_v1',        label: 'P+ Flags',                 group: 'operational', countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' flags' : null },
+    { key: 'yul_p_plus_ts_v1',           label: 'P+ Timestamps',            group: 'operational' },
+    { key: 'yul_schedule_v1',            label: 'Schedule Data',            group: 'operational', countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' FINs' : null },
+    // Reference — only cleared in "all" mode
+    { key: 'yul_aircraft_ref_v3',        label: 'Aircraft Reference DB',    group: 'reference',   countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' aircraft' : null },
+    { key: 'yul_aircraft_ref_block_v1',  label: 'Aircraft Ref Tombstones',  group: 'reference' },
+    { key: 'yul_asset_ref_v2',           label: 'Asset Reference DB',       group: 'reference',   countFn: j => j && typeof j === 'object' ? Object.keys(j).length + ' assets' : null },
+    { key: 'yul_asset_ref_ts_v1',        label: 'Asset Ref Timestamps',     group: 'reference' },
+    { key: 'yul_asset_ref_block_v1',     label: 'Asset Ref Tombstones',     group: 'reference' },
+    { key: 'yul_agent_ref_v1',           label: 'Agent Reference',          group: 'reference',   countFn: j => Array.isArray(j) ? j.length + ' agents' : null },
+    { key: 'yul_agent_block_v1',         label: 'Agent Block Tombstones',   group: 'reference' },
+    // Session — never cleared
+    { key: 'yul_agent_name_session',     label: 'Agent Name (session)',      group: 'session' },
+    { key: 'yul_station_id_session',     label: 'Station (session)',         group: 'session' },
+];
+
+const OPERATIONAL_KEYS = KEYS.filter(k => k.group === 'operational').map(k => k.key);
+const ALL_CLEARABLE_KEYS = KEYS.filter(k => k.group !== 'session').map(k => k.key);
+
+// ─── Logging ─────────────────────────────────────────────────────────────────
+function log(msg, type = 'info') {
+    const el = document.getElementById('log');
+    const cls = { ok: 'log-ok', warn: 'log-warn', err: 'log-err', info: 'log-info' }[type] || 'log-info';
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    el.innerHTML += `<div class="${cls}">[${ts}] ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+}
+
+// ─── Stats ───────────────────────────────────────────────────────────────────
+function refreshStats() {
+    const container = document.getElementById('stats-container');
+    let html = '';
+    let totalBytes = 0;
+
+    const groups = { operational: 'Operational Data', reference: 'Reference Data', session: 'Session' };
+    let lastGroup = null;
+
+    KEYS.forEach(({ key, label, group, countFn }) => {
+        if (group !== lastGroup) {
+            if (lastGroup !== null) html += '</div>';
+            html += `<div class="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-3 mb-1">${groups[group]}</div><div>`;
+            lastGroup = group;
+        }
+        const raw = localStorage.getItem(key);
+        if (!raw) {
+            html += `<div class="stat-row"><span class="stat-key">${label}</span><span class="stat-empty">empty</span></div>`;
+            return;
+        }
+        totalBytes += raw.length;
+        let displayVal = '✓ present';
+        try {
+            const decoded = storageGet(key);
+            const parsed  = JSON.parse(decoded);
+            if (countFn) displayVal = countFn(parsed) || '✓ present';
+            else if (typeof parsed === 'string') displayVal = `"${parsed.substring(0, 30)}"`;
+            else if (typeof parsed === 'number') displayVal = String(parsed);
+        } catch(e) { displayVal = '✓ (raw)'; }
+        html += `<div class="stat-row"><span class="stat-key">${label}</span><span class="stat-val">${displayVal}</span></div>`;
+    });
+    if (lastGroup !== null) html += '</div>';
+    const kb = (totalBytes / 1024).toFixed(1);
+    html += `<div class="text-[10px] text-slate-400 text-right mt-2">Total raw storage: ~${kb} KB</div>`;
+    container.innerHTML = html;
+}
+
+// ─── Backup ───────────────────────────────────────────────────────────────────
+function doBackup() {
+    log('Starting backup…', 'info');
+    const backup = {
+        _meta: {
+            version: 2,
+            createdAt: new Date().toISOString(),
+            appName: 'Agent Service Report',
+            note: 'All values are stored as decoded JSON strings. Re-encoding is handled automatically on restore.'
+        },
+        data: {}
+    };
+
+    let count = 0;
+    let empty = 0;
+    KEYS.forEach(({ key }) => {
+        const decoded = storageGet(key);
+        if (decoded === null) { empty++; return; }
+        backup.data[key] = decoded;
+        count++;
+    });
+
+    if (count === 0) {
+        log('Nothing to back up — localStorage appears empty.', 'warn');
+        return;
+    }
+
+    const json   = JSON.stringify(backup, null, 2);
+    const blob   = new Blob([json], { type: 'application/json' });
+    const url    = URL.createObjectURL(blob);
+    const date   = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+    const a      = document.createElement('a');
+    a.href       = url;
+    a.download   = `service-report-backup_${date}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    const sizeKb = (json.length / 1024).toFixed(1);
+    log(`Backup complete — ${count} keys exported, ${empty} empty keys skipped (${sizeKb} KB).`, 'ok');
+    refreshStats();
+}
+
+// ─── Clear ────────────────────────────────────────────────────────────────────
+let _pendingClearMode = null;
+
+function askClear(mode) {
+    _pendingClearMode = mode;
+    const isAll = mode === 'all';
+    document.getElementById('confirm-title').textContent = isAll ? 'Clear ALL data?' : 'Clear operational data?';
+    document.getElementById('confirm-msg').textContent = isAll
+        ? 'This will wipe every app key from localStorage (except agent name and station). Reference databases (aircraft, assets, agents) will also be cleared. Make sure you have a backup.'
+        : 'This will clear all service records, the FIN table, asset index, NRO index, asset history, P+ flags, schedule, and shared DB. Reference databases (aircraft, assets, agents) are kept. Make sure you have a backup.';
+    document.getElementById('confirm-yes').onclick = () => { closeConfirm(); doClear(mode); };
+    document.getElementById('confirm-overlay').classList.add('open');
+}
+
+function closeConfirm() {
+    document.getElementById('confirm-overlay').classList.remove('open');
+    _pendingClearMode = null;
+}
+
+function doClear(mode) {
+    const keys = mode === 'all' ? ALL_CLEARABLE_KEYS : OPERATIONAL_KEYS;
+    let cleared = 0;
+    keys.forEach(key => {
+        if (localStorage.getItem(key) !== null) {
+            localStorage.removeItem(key);
+            cleared++;
+        }
+    });
+    log(`Clear (${mode}) complete — ${cleared} keys removed from localStorage.`, mode === 'all' ? 'warn' : 'ok');
+    refreshStats();
+}
+
+// ─── Restore ─────────────────────────────────────────────────────────────────
+function doRestore(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = ''; // reset so same file can be selected again
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        let backup;
+        try {
+            backup = JSON.parse(e.target.result);
+        } catch(err) {
+            log(`Restore failed: file is not valid JSON — ${err.message}`, 'err');
+            return;
+        }
+
+        // Validate structure
+        if (!backup._meta || !backup.data || typeof backup.data !== 'object') {
+            log('Restore failed: file does not look like a Service Report backup (missing _meta or data).', 'err');
+            return;
+        }
+
+        const knownKeys = new Set(KEYS.map(k => k.key));
+        let written = 0;
+        let skipped = 0;
+        let unknown = 0;
+
+        log(`Restoring from backup created ${backup._meta.createdAt || 'unknown time'}…`, 'info');
+
+        Object.entries(backup.data).forEach(([key, decodedValue]) => {
+            if (!knownKeys.has(key)) {
+                log(`  Unknown key "${key}" — skipped.`, 'warn');
+                unknown++;
+                return;
+            }
+            // Validate: must be parseable JSON or a plain string/number
+            try {
+                JSON.parse(decodedValue);
+            } catch(err) {
+                log(`  Key "${key}": value is not valid JSON — skipped.`, 'warn');
+                skipped++;
+                return;
+            }
+            const ok = storageSet(key, decodedValue);
+            if (ok) {
+                written++;
+            } else {
+                skipped++;
+            }
+        });
+
+        log(`Restore complete — ${written} keys written, ${skipped} skipped, ${unknown} unrecognised.`, written > 0 ? 'ok' : 'warn');
+        if (written > 0) {
+            log('Reload index.html to apply the restored data.', 'info');
+        }
+        refreshStats();
+    };
+    reader.readAsText(file);
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+refreshStats();
+</script>
+
+</body>
+</html>
