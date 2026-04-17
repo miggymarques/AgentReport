@@ -1212,10 +1212,20 @@
                 if (rec.accounted) return;             // was deliberately removed from this FIN on a prior
                                                        // visit — not expected onboard, must not become NRO
                 // Asset was expected onboard but missing with no explanation → NRO
+                // Only write on FIRST detection — never overwrite an existing record.
+                // The original ts is the source of truth for when the asset first went
+                // missing. Overwriting it with a newer entryTs causes processMissingAssets()
+                // to produce a newer dtStr that defeats the MAX(DateTime) guard in
+                // writeMSHistoryEntry(), silently replacing the historical MS date on
+                // every subsequent run. Preserving the original ts fixes both tables.
                 const existingNro = nroIndex[assetId];
-                if (!existingNro || entryTs > (existingNro.ts || 0)) {
+                if (!existingNro) {
                     nroIndex[assetId] = { lastFin: fin, lastSeen: entry.displayDate || '', ts: entryTs };
                 }
+                // If existingNro already exists do NOT touch it.
+                // The "returned onboard" path (Step 2 above) already deletes the NRO
+                // entry when the asset is reported back, so a fresh first-detection stamp
+                // is correctly written on the next time it goes missing.
             });
 
             saveFinTable();
@@ -1477,10 +1487,14 @@
                 const paddedDigits = digits.padStart(4, '0');
                 const assetId = 'GGC' + paddedDigits;
 
-                // Validate against asset database — assetRef is keyed by numeric string (no GGC prefix)
-                if (!assetRef[digits] && !assetRef[paddedDigits]) return;
+                // Check asset database — assetRef is keyed by numeric string (no GGC prefix).
+                // Even if the asset is not registered we still write the OB history entry so
+                // the sighting is preserved. Unregistered assets are flagged in the NT field
+                // so they are easily identifiable in the history view.
+                const inDb = !!(assetRef[digits] || assetRef[paddedDigits]);
+                const obNt = inDb ? '' : 'Asset not in database';
 
-                const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc };
+                const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc, ...(obNt ? { nt: obNt } : {}) };
 
                 // Upsert: one record per assetId (canonical GGC#### key), latest wins
                 // Skip if an existing record for this assetId was tombstoned — respect the deletion.
@@ -1516,7 +1530,14 @@
         // batchMode: if true, skip save+broadcast — caller must flush after the loop
         // Returns the written entry object, or null if the existing record is newer.
         function writeRMHistoryEntry(assetId, dt, loc, nt, batchMode = false) {
-            if (!assetId || !isValidAssetId(assetId)) return null;
+            if (!assetId) return null;
+            // Check whether the asset is registered in the database. If it isn't we still
+            // write the record — the event happened and must be preserved. Unregistered
+            // assets are flagged by appending "Asset not in database" to the NT field so
+            // they are clearly identifiable without silently dropping the history entry.
+            const inDb = isValidAssetId(assetId);
+            const ntRaw  = (nt  || '').trim();
+            const ntFull = [ntRaw, inDb ? '' : 'Asset not in database'].filter(Boolean).join(' | ');
             const dtStr = (dt instanceof Date ? dt : new Date(dt)).toISOString();
             const histEntry = {
                 id:      Date.now() + Math.floor(Math.random() * 1000),
@@ -1524,7 +1545,7 @@
                 dt:      dtStr,
                 tr:      'RM',
                 loc:     (loc || '').trim().toUpperCase(),
-                nt:      (nt  || '').trim()
+                nt:      ntFull
             };
             // Upsert: one record per assetId, latest dt wins (regardless of TR type)
             const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
