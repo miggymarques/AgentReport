@@ -2388,11 +2388,12 @@
 
         function claimFin(fin) {
             if (!fin) return;
-            const agentVal = document.getElementById('agent-field')?.value || '';
-            const agentName = agentVal.split(',')[0].trim();
-            finClaims[fin] = { agent: agentName, ts: Date.now(), sessionId: MY_SESSION_ID };
+            const agentVal   = document.getElementById('agent-field')?.value || '';
+            const agentName  = agentVal.split(',')[0].trim();
+            const stationVal = document.getElementById('station-field')?.value || '';
+            finClaims[fin] = { agent: agentName, ts: Date.now(), sessionId: MY_SESSION_ID, station: stationVal };
             // Broadcast to peers
-            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts, sessionId: MY_SESSION_ID };
+            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts, sessionId: MY_SESSION_ID, station: stationVal };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
         }
 
@@ -2693,7 +2694,13 @@
                 }
             }
 
-            // Claim this FIN so other agents skip it
+            // Claim this FIN so other agents skip it.
+            // Bug fix: release the previous suggestion first — without this, stale CLAIM_FIN
+            // broadcasts pile up on peers making FINs appear locked even when no one committed.
+            const prevSuggested = updateFinPlaceholder._lastSuggested;
+            if (prevSuggested && prevSuggested !== suggestedFin) {
+                releaseFin(prevSuggested);
+            }
             claimFin(suggestedFin);
             updateFinPlaceholder._lastSuggested = suggestedFin;
         }
@@ -3741,7 +3748,7 @@
                     const inProgressBadge = isMyCard
                         ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-300 animate-pulse">⏱ IN PROGRESS</span>`
                         : isPeerCard
-                            ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-300">🔒 CLAIMED</span>`
+                            ? `<span class="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-300">🔒 CLAIMED${(() => { const cd = finClaims[r.fin]; const fn = (cd?.agent || '').split(' ')[0]; const st = cd?.station || ''; const who = [st, fn].filter(Boolean).join(' · '); return who ? ' · ' + who : ''; })()}</span>`
                             : '';
 
                     const turnInfo = getTurnInfoCompact(r.fin);
@@ -5053,7 +5060,7 @@
                     if (finClaimReleases[fin] && c.ts <= finClaimReleases[fin]) return;
                     const existing = finClaims[fin];
                     if (!existing || c.ts > existing.ts) {
-                        finClaims[fin] = { agent: c.agent, ts: c.ts, sessionId: c.sessionId || null };
+                        finClaims[fin] = { agent: c.agent, ts: c.ts, sessionId: c.sessionId || null, station: c.station || '' };
                         claimChanged = true;
                     }
                 });
@@ -5382,7 +5389,7 @@
                     // Only store if newer than existing claim
                     const existing = finClaims[msg.fin];
                     if (!existing || msg.ts > existing.ts) {
-                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts, sessionId: msg.sessionId || null };
+                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts, sessionId: msg.sessionId || null, station: msg.station || '' };
                         // If this FIN is our current suggestion, re-suggest
                         if (updateFinPlaceholder._lastSuggested === msg.fin) {
                             updateFinPlaceholder._lastSuggested = null;
