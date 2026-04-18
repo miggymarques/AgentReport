@@ -2110,18 +2110,23 @@
                 : upcoming[0];
         }
 
-        // Returns a single display line for the next/current rotation for a given FIN
+        // Returns a single display line for the next/current rotation for a given FIN.
+        // IDT and ODT are always displayed in the anchor STN tz (unchanged from stored values).
+        // A parenthetical agent-local time is appended when the agent has selected one of the
+        // four known stations (YYZ/YUL/YVR/YYC) and that station's tz differs from the STN tz.
+        // This lets team members on different bases quickly see what the time means for them,
+        // without relying on the device clock (so any station can be simulated by selection).
         function getNextRotationLine(fin) {
             const rot = getNextRotation(fin);
             if (!rot) return '';
 
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
-            // agentKnownTz: strictly the selected-station tz — used for comparison and () content.
-            // Undefined when no station is selected so () is never shown against the device tz.
+            // agentKnownTz: tz of the agent's selected station (YYZ/YUL/YVR/YYC).
+            // Undefined when no known station is selected — suppresses the () label entirely.
             const agentKnownTz = STATION_TZ[agentStation];
-            // fallbackTz: only used when a rotation/inbound station isn't in STATION_TZ so the
-            // primary time still renders something sensible.
-            const fallbackTz   = agentKnownTz || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            // fallbackTz: used only when a rotation's STN code is not in STATION_TZ so the
+            // primary time still renders something rather than crashing.
+            const fallbackTz   = Intl.DateTimeFormat().resolvedOptions().timeZone;
             const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
             const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
 
@@ -2129,26 +2134,26 @@
             const idtDate = parseT(rot.idt);
             if (!odtDate) return '';
 
-            const rotStn = (rot.stn  || '').toUpperCase();
-            const iStn   = (rot.iStn || '').toUpperCase();
-            const oStn   = (rot.oStn || '').toUpperCase();
-            // Primary display tz: station's own tz, fallbackTz only for rendering — never for comparison.
-            const rotTz  = STATION_TZ[rotStn] || fallbackTz;
-            const iStnTz = STATION_TZ[iStn]   || fallbackTz;
+            const rotStn    = (rot.stn  || '').toUpperCase();
+            const iStn      = (rot.iStn || '').toUpperCase();
+            const oStn      = (rot.oStn || '').toUpperCase();
+            // rotTz: the anchor STN tz — primary reference for both IDT and ODT.
+            const rotTz     = STATION_TZ[rotStn] || fallbackTz;
             const atStation = agentStation && rotStn === agentStation;
 
-            // ODT: show in rotation's station tz.
-            // () only when agent has a known station tz AND it differs from rotTz.
-            const odtRot   = fmtInTz(odtDate, rotTz);
-            const odtLocal = (agentKnownTz && rotTz !== agentKnownTz)
+            // ── ODT: primary in STN tz (anchor), unchanged from stored value ──────
+            const odtAnchor = fmtInTz(odtDate, rotTz);
+            // Agent-local () only when a known station is selected AND it differs from the anchor STN.
+            const odtLocal  = (agentKnownTz && agentKnownTz !== rotTz)
                 ? ' (' + fmtInTz(odtDate, agentKnownTz) + ' ' + agentStation + ')' : '';
 
-            // IDT: only show if it has a meaningful time (non-midnight UTC)
+            // ── IDT: primary in STN tz (anchor), unchanged from stored value ──────
+            // Suppressed entirely when the time is midnight UTC (no meaningful arrival time).
             let idtStr = '';
             if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
-                idtStr = fmtInTz(idtDate, iStnTz);
-                // () only when agent has a known station tz AND it differs from iStnTz.
-                if (agentKnownTz && iStnTz !== agentKnownTz)
+                idtStr = fmtInTz(idtDate, rotTz);   // anchor STN tz as primary
+                // Agent-local () only when a known station is selected AND differs from STN tz.
+                if (agentKnownTz && agentKnownTz !== rotTz)
                     idtStr += ' (' + fmtInTz(idtDate, agentKnownTz) + ' ' + agentStation + ')';
             }
 
@@ -2170,45 +2175,52 @@
 
             let timeParts = [];
             if (idtStr) timeParts.push('✈in ' + idtStr);
-            timeParts.push('✈out ' + odtRot + odtLocal);
+            timeParts.push('✈out ' + odtAnchor + odtLocal);
 
             return `<span class="block text-slate-500">${routeParts.join('  ')}</span>`
                  + `<span class="block text-[13px] font-black text-blue-600 mt-0.5">${timeParts.join('   ')}</span>`;
         }
 
         // Returns compact turn info string for priority list: ITM | ISTN | STN | OSTN | OTM
-        // Times are shown in the service station's tz; if STN ≠ agentStation, agent-local time appended in ()
+        // IDT (ITM) and ODT (OTM) are always in the anchor STN tz (unchanged stored values).
+        // A parenthetical agent-local time is appended to each when the agent has selected one
+        // of the four known stations (YYZ/YUL/YVR/YYC) and its tz differs from the STN tz.
         function getTurnInfoCompact(fin) {
             const rot = getNextRotation(fin);
             if (!rot) return '';
 
             const agentStation = (document.getElementById('station-field')?.value || '').toUpperCase();
+            // agentKnownTz: tz of the agent's selected station (YYZ/YUL/YVR/YYC only).
+            // Undefined when no known station is selected — suppresses () entirely.
             const agentKnownTz = STATION_TZ[agentStation];
-            const fallbackTz   = agentKnownTz || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            // fallbackTz: used only when a rotation's STN code is not in STATION_TZ.
+            const fallbackTz   = Intl.DateTimeFormat().resolvedOptions().timeZone;
             const parseT  = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d) ? null : d; };
             const fmtInTz = (d, tz) => d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
 
             const rotStn = (rot.stn  || '').toUpperCase();
             const iStn   = (rot.iStn || '').toUpperCase();
             const oStn   = (rot.oStn || '').toUpperCase();
+            // rotTz: anchor STN tz — primary reference for both IDT and ODT.
             const rotTz  = STATION_TZ[rotStn] || fallbackTz;
-            const iStnTz = STATION_TZ[iStn]   || fallbackTz;
 
             const odtDate = parseT(rot.odt);
             const idtDate = parseT(rot.idt);
 
-            // ITM: time in ISTN tz; agent-local in () only if agent has a known station tz AND it differs
+            // ITM: IDT in STN tz (anchor/primary). Agent-local () when selected station ≠ STN.
             let itmStr = '—';
             if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
-                itmStr = fmtInTz(idtDate, iStnTz);
-                if (agentKnownTz && iStnTz !== agentKnownTz) itmStr += '(' + fmtInTz(idtDate, agentKnownTz) + ')';
+                itmStr = fmtInTz(idtDate, rotTz);
+                if (agentKnownTz && agentKnownTz !== rotTz)
+                    itmStr += '(' + fmtInTz(idtDate, agentKnownTz) + ')';
             }
 
-            // OTM: time in STN tz; agent-local in () only if agent has a known station tz AND it differs
+            // OTM: ODT in STN tz (anchor/primary). Agent-local () when selected station ≠ STN.
             let otmStr = '—';
             if (odtDate) {
                 otmStr = fmtInTz(odtDate, rotTz);
-                if (agentKnownTz && rotTz !== agentKnownTz) otmStr += '(' + fmtInTz(odtDate, agentKnownTz) + ')';
+                if (agentKnownTz && agentKnownTz !== rotTz)
+                    otmStr += '(' + fmtInTz(odtDate, agentKnownTz) + ')';
             }
 
             return [itmStr, iStn || '—', rotStn || '—', oStn || '—', otmStr].join('|');
