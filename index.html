@@ -1633,6 +1633,110 @@
             }
         }
 
+        // ─── Build the NT note string for a DM (Reported Damaged) history entry ──
+        // Called from both handleSave (live) and applyHistoryRows (import batch).
+        //
+        // Prefix logic:
+        //   Service record  → "FIN AC101 | …"   (real aircraft FIN included)
+        //   Inventory Only  → no FIN prefix      (FIN = "INV" carries no flight meaning)
+        //
+        // Suffix: <Category>: <Specific Issue> | <Issue Details> | <General Comments> | <FirstName>
+        //
+        // entry  : full record object from FormData (live) or applyHistoryRows (import)
+        // isInv  : true when the record is an Inventory Only entry (FIN = "INV")
+        function buildDMNote(entry, isInv) {
+            const parts = [];
+
+            // Prefix — FIN for Service records only
+            if (!isInv) {
+                const fin = (entry.FIN || '').trim().toUpperCase();
+                if (fin && fin !== 'INV') parts.push('FIN ' + fin);
+            }
+
+            // Suffix — issue details + agent first name
+            const cat    = (entry.SrvcIssCAT      || '').trim();
+            const iss    = (entry.SrvcIss         || '').trim();
+            const detail = (entry.IssueDetails    || '').trim();
+            const genCmt = (entry.GeneralComments || '').trim(); // present on live save; absent on CSV import
+
+            // Agent first name — option value format: "FirstName LastName ,STN Phone"
+            const agentFirstName = (entry.Agent || '').split(',')[0].trim().split(/\s+/)[0] || '';
+
+            if (cat && cat !== '---') {
+                parts.push(iss && iss !== '---' ? `${cat}: ${iss}` : cat);
+            }
+            if (detail)          parts.push(detail);
+            if (genCmt)          parts.push(genCmt);
+            if (agentFirstName)  parts.push(agentFirstName);
+
+            return parts.filter(Boolean).join(' | ');
+        }
+
+        // ─── Write a single DM (Reported Damaged) entry into Asset History ──────
+        //
+        // Trigger Condition 1 — Service Record:
+        //   SrvcIssCAT === "Damaged"
+        //   (specific issues: Abuse / Battery / HHD / MCG / Printer / SafeMode / Screen / Unknown)
+        //
+        // Trigger Condition 2 — Inventory Only Record:
+        //   FIN = "INV"  AND  SrvcIssCAT ≈ "RT ( INV RTN Base )"
+        //   AND  SrvcIss contains the word "Damaged"
+        //   (matches: Damaged Hardware Body/LCD/Printer/Unknown/Water Damage/WIFI)
+        //
+        // Field Mapping:
+        //   ASST# → assetId  |  TR → "DM"  |  LOC → User Selected Base Station
+        //   Date/Time → dt (now on live save, entry.id timestamp on import)
+        //   NT → buildDMNote() — FIN prefix only on Service records
+        //
+        // Upsert rule (identical to OB / RM / MS):
+        //   One record per assetId. Latest dt always wins, regardless of prior TR type.
+        //   Tombstoned entries (assetHistoryBlock) are never resurrected.
+        //
+        // batchMode: if true, skip save+broadcast — caller must flush after the loop.
+        // Returns the written entry object, or null if skipped (newer/tombstoned).
+        function writeDMHistoryEntry(assetId, dt, loc, nt, batchMode = false) {
+            if (!assetId) return null;
+
+            // Unregistered-but-valid IDs are allowed — flag them in NT so they are
+            // identifiable without silently dropping the history entry (same as OB/RM).
+            const inDb   = isValidAssetId(assetId);
+            const ntRaw  = (nt  || '').trim();
+            const ntFull = [ntRaw, inDb ? '' : 'Asset not in database'].filter(Boolean).join(' | ');
+
+            const dtStr = (dt instanceof Date ? dt : new Date(dt)).toISOString();
+
+            const histEntry = {
+                id:      Date.now() + Math.floor(Math.random() * 1000),
+                assetId,
+                dt:      dtStr,
+                tr:      'DM',
+                loc:     (loc || '').trim().toUpperCase(),
+                nt:      ntFull
+            };
+
+            // MAX(DateTime) guard — one record per assetId, latest dt wins
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // tombstoned — never resurrect
+                if (dtStr <= assetHistory[existingIdx].dt) return null;           // existing is same age or newer
+                assetHistory.splice(existingIdx, 1);                              // evict stale record
+            }
+
+            assetHistory.push(histEntry);
+
+            if (!batchMode) {
+                saveAssetHistory();
+                broadcastAssetHistorySync([histEntry]);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                    renderRefList();
+                }
+            }
+
+            return histEntry;
+        }
+
         // ─── Asset History ────────────────────────────────────────────────────
         function renderAssetHistory(container) {
             if (!assetHistory.length) {
@@ -1661,6 +1765,7 @@
                 OB: 'background:#dbeafe;color:#1d4ed8;',   // blue
                 RM: 'background:#fee2e2;color:#b91c1c;',   // red
                 MS: 'background:#fef3c7;color:#92400e;',   // amber
+                DM: 'background:#ffedd5;color:#c2410c;',   // orange — Reported Damaged
             };
 
             const now = new Date();
@@ -3309,6 +3414,46 @@
                 });
                 if (rmAlerts.length) console.warn('[Sync Import] RM mapping failed —', rmAlerts.join(' | '));
 
+                // ── DM history: Reported Damaged Equipment (Sync Table Import) ──
+                // Mirrors the handleSave DM logic — same two conditions, same field mapping.
+                // Runs in batchMode=true so all entries flush together after the loop.
+                //
+                // Condition 1 — Service record:  FIN ≠ INV  AND  SrvcIssCAT === "Damaged"
+                // Condition 2 — Inventory Only:  FIN = INV  AND  SrvcIssCAT ≈ RT (INV RTN Base)
+                //                                             AND  SrvcIss contains "Damaged"
+                (function() {
+                    const fin     = (entry.FIN        || '').trim().toUpperCase();
+                    const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+                    const issNorm = (entry.SrvcIss    || '').toLowerCase();
+
+                    const isServiceDamaged = fin !== '' && fin !== 'INV'
+                                             && (entry.SrvcIssCAT || '').trim() === 'Damaged';
+
+                    const isInvRtnDamaged  = fin === 'INV'
+                                             && catNorm.includes('rt') && catNorm.includes('inv rtn')
+                                             && issNorm.includes('damaged');
+
+                    if (!isServiceDamaged && !isInvRtnDamaged) return; // neither condition — skip
+
+                    const assetId = (entry.ASST || '').trim().toUpperCase();
+                    if (!assetId || assetId === 'N/A' || assetId === '---') {
+                        console.warn('[Sync Import] DM history: no ASST value on row —', entry);
+                        return;
+                    }
+
+                    if (!isValidAssetId(assetId)) {
+                        console.warn(`[Sync Import] DM history: ASST "${assetId}" is not a valid asset ID — skipped`);
+                        return;
+                    }
+
+                    const stationCode = (entry['Service Station'] || '').trim().toUpperCase();
+                    const noteText    = buildDMNote(entry, isInvRtnDamaged);
+                    const dmDt        = new Date(entry.id); // entry.id = parsed row timestamp
+
+                    const written = writeDMHistoryEntry(assetId, dmDt, stationCode, noteText, /*batchMode=*/true);
+                    if (written) batchedHistoryEntries.push(written);
+                })();
+
                 processed++;
             });
 
@@ -4069,6 +4214,49 @@
                     }
                 }
             }
+
+            // ── DM history: Reported Damaged Equipment (File Save) ───────────
+            // Condition 1 — Service Record:  SrvcIssCAT === "Damaged"
+            // Condition 2 — Inventory Only:  SrvcIssCAT ≈ "RT ( INV RTN Base )"
+            //                                AND SrvcIss contains the word "Damaged"
+            // Asset identifier: ASST field (Reported Asset#).
+            // LOC: always User Selected Base Station (Service Station field).
+            // NT:  buildDMNote() — FIN prefix included only for Service records.
+            // Upsert: same MAX(DateTime) guard as OB / RM / MS — latest dt wins.
+            (function() {
+                const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+                const issNorm = (entry.SrvcIss    || '').toLowerCase();
+
+                const isServiceDamaged = !isInvMode
+                                         && (entry.SrvcIssCAT || '').trim() === 'Damaged';
+
+                const isInvRtnDamaged  = isInvMode
+                                         && catNorm.includes('rt') && catNorm.includes('inv rtn')
+                                         && issNorm.includes('damaged');
+
+                if (!isServiceDamaged && !isInvRtnDamaged) return; // neither condition — skip
+
+                const assetId = (entry.ASST || '').trim().toUpperCase();
+                if (!assetId || assetId === 'N/A' || assetId === '---') {
+                    console.warn('[File Save] DM history: no ASST value — skipped');
+                    return;
+                }
+
+                const stationCode = (
+                    entry['Service Station'] ||
+                    document.getElementById('station-field')?.value || ''
+                ).trim().toUpperCase();
+
+                const noteText = buildDMNote(entry, isInvRtnDamaged);
+
+                if (isValidAssetId(assetId)) {
+                    writeDMHistoryEntry(assetId, now, stationCode, noteText);
+                    console.log(`[File Save] DM history written — ${assetId} @ ${stationCode}`);
+                } else {
+                    showToast(`⚠️ DM History: ASST "${assetId}" not a valid asset ID — skipped`);
+                    console.warn('[File Save] DM Asset History: invalid ASST field —', assetId);
+                }
+            })();
 
             try {
                 storageSet(APP_STORAGE_KEY, JSON.stringify(db));
