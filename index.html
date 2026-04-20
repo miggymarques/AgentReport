@@ -464,6 +464,7 @@
             </div>
 
             <div id="synctable-col-header" class="hidden border-b border-slate-200 bg-white"></div>
+            <div id="assethistory-col-header" class="hidden border-b border-slate-200 bg-white"></div>
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
             
             <div class="p-4 bg-slate-50 border-t flex gap-2" id="add-aircraft-ui">
@@ -491,6 +492,8 @@
             </div>
 
             <div class="p-3 bg-slate-50 border-t hidden" id="add-assethistory-ui">
+                <!-- Summary tables -->
+                <div id="asset-history-summary" class="mb-2"></div>
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Asset Transaction Log · <span id="assethistory-count-label">0 records</span></span>
                     <div class="flex gap-2">
@@ -500,8 +503,6 @@
                         </button>
                     </div>
                 </div>
-                <!-- Asset Summary Table -->
-                <div id="asset-history-summary" class="mt-2 mb-1"></div>
                 <!-- Manual add row -->
                 <div class="flex gap-2 flex-wrap">
                     <input type="text"           id="ah-asset-id"  placeholder="Asst#"   class="w-20 uppercase font-mono !text-xs">
@@ -1386,6 +1387,7 @@
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
             const _colHdr = document.getElementById('synctable-col-header'); if (tab !== 'synctable') { _colHdr.classList.add('hidden'); _colHdr.innerHTML = ''; }
+            const _ahHdr  = document.getElementById('assethistory-col-header'); if (tab !== 'assethistory') { _ahHdr.classList.add('hidden'); _ahHdr.innerHTML = ''; }
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; }
             if (tab === 'assethistory') {
                 const el = document.getElementById('assethistory-count-label');
@@ -1697,14 +1699,19 @@
         //
         // batchMode: if true, skip save+broadcast — caller must flush after the loop.
         // Returns the written entry object, or null if skipped (newer/tombstoned).
-        function writeDMHistoryEntry(assetId, dt, loc, nt, batchMode = false) {
+        function writeDMHistoryEntry(assetId, dt, loc, nt, batchMode = false, fin = '') {
             if (!assetId) return null;
 
             // Unregistered-but-valid IDs are allowed — flag them in NT so they are
             // identifiable without silently dropping the history entry (same as OB/RM).
             const inDb   = isValidAssetId(assetId);
             const ntRaw  = (nt  || '').trim();
-            const ntFull = [ntRaw, inDb ? '' : 'Asset not in database'].filter(Boolean).join(' | ');
+            const finVal = (fin || '').trim().toUpperCase();
+            // Append FIN to NT if provided and not already present
+            const ntWithFin = (finVal && finVal !== 'INV' && !ntRaw.includes(finVal))
+                ? [ntRaw, finVal].filter(Boolean).join(' | ')
+                : ntRaw;
+            const ntFull = [ntWithFin, inDb ? '' : 'Asset not in database'].filter(Boolean).join(' | ');
 
             const dtStr = (dt instanceof Date ? dt : new Date(dt)).toISOString();
 
@@ -1756,13 +1763,6 @@
                 return (b.dt || '') < (a.dt || '') ? -1 : 1; // newer date first within same asset
             });
 
-            // Sticky column header
-            const hdr = document.createElement('div');
-            hdr.className = 'grid text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-200 pb-1 mb-0.5 sticky top-0 bg-white z-10 px-1';
-            hdr.style.gridTemplateColumns = '4.5rem 2rem 3.5rem 1fr 1.5rem';
-            hdr.innerHTML = `<span>Asst#</span><span>TR</span><span>LOC</span><span>Date · NT</span><span></span>`;
-            container.appendChild(hdr);
-
             // TR badge colour map
             const trStyle = {
                 OB: 'background:#dbeafe;color:#1d4ed8;',   // blue
@@ -1810,68 +1810,114 @@
 
         // ─── Asset History Summary Table (compact columnar) ──────────────────
         function renderAssetHistorySummary() {
+            // Pin column headers at top (under tab bar)
+            const topHdr = document.getElementById('assethistory-col-header');
+            if (topHdr) {
+                const F = 'font-family:ui-monospace,monospace;font-size:9px;';
+                topHdr.innerHTML = `<div style="display:grid;grid-template-columns:4.5rem 2rem 3.5rem 1fr 1.5rem;${F}font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;padding:3px 4px 2px;gap:0 8px;"><span>Asst#</span><span>TR</span><span>LOC</span><span>Date · NT</span><span></span></div>`;
+                topHdr.classList.remove('hidden');
+            }
+
+            // Summary tables go in the bottom footer
             const el = document.getElementById('asset-history-summary');
             if (!el) return;
 
             const ah = assetHistory;
 
-            // OB: TR = 'OB'
-            const ob    = ah.filter(e => (e.tr || '').toUpperCase() === 'OB');
-            const obAC  = ob.filter(e => (e.loc || '').toUpperCase().startsWith('AC')).length;
-            const obQK  = ob.filter(e => (e.loc || '').toUpperCase().startsWith('QK')).length;
-            const obRV  = ob.filter(e => (e.loc || '').toUpperCase().startsWith('RV')).length;
-            const obTot = obAC + obQK + obRV;
+            // ── Block 1: Onboard by airline (TR=OB, LOC starts with airline code) ──
+            const ob      = ah.filter(e => (e.tr || '').toUpperCase() === 'OB');
+            const obAC    = ob.filter(e => (e.loc || '').toUpperCase().startsWith('AC')).length;
+            const obRV    = ob.filter(e => (e.loc || '').toUpperCase().startsWith('RV')).length;
+            const obQK    = ob.filter(e => (e.loc || '').toUpperCase().startsWith('QK')).length;
+            const obTot   = obAC + obRV + obQK;
 
-            // STN · AV: TR in {RM, RT, RP, FN}
-            const stnSet = new Set(['RM','RT','RP','FN']);
-            const stn    = ah.filter(e => stnSet.has((e.tr || '').toUpperCase()));
-            const stnYUL = stn.filter(e => (e.loc || '').toUpperCase() === 'YUL').length;
-            const stnYVR = stn.filter(e => (e.loc || '').toUpperCase() === 'YVR').length;
-            const stnYYC = stn.filter(e => (e.loc || '').toUpperCase() === 'YYC').length;
-            const stnYYZ = stn.filter(e => (e.loc || '').toUpperCase() === 'YYZ').length;
-            const stnTot = stnYUL + stnYVR + stnYYC + stnYYZ;
+            // ── Block 1: Damaged by airline (TR=DM, NT starts with airline code) ──
+            const dm      = ah.filter(e => (e.tr || '').toUpperCase() === 'DM');
+            const dmAirAC = dm.filter(e => (e.nt || '').toUpperCase().startsWith('AC')).length;
+            const dmAirRV = dm.filter(e => (e.nt || '').toUpperCase().startsWith('RV')).length;
+            const dmAirQK = dm.filter(e => (e.nt || '').toUpperCase().startsWith('QK')).length;
+            const dmAirTot = dmAirAC + dmAirRV + dmAirQK;
 
-            // DM: TR = 'DM'
-            const dm    = ah.filter(e => (e.tr || '').toUpperCase() === 'DM');
-            const dmYUL = dm.filter(e => (e.loc || '').toUpperCase() === 'YUL').length;
-            const dmYVR = dm.filter(e => (e.loc || '').toUpperCase() === 'YVR').length;
-            const dmYYC = dm.filter(e => (e.loc || '').toUpperCase() === 'YYC').length;
-            const dmYYZ = dm.filter(e => (e.loc || '').toUpperCase() === 'YYZ').length;
+            // ── Block 2: Available at station (TR in {RM, RC, FN}, LOC = station) ──
+            const avSet   = new Set(['RM','RC','FN']);
+            const av      = ah.filter(e => avSet.has((e.tr || '').toUpperCase()));
+            const avYYZ   = av.filter(e => (e.loc || '').toUpperCase() === 'YYZ').length;
+            const avYUL   = av.filter(e => (e.loc || '').toUpperCase() === 'YUL').length;
+            const avYYC   = av.filter(e => (e.loc || '').toUpperCase() === 'YYC').length;
+            const avYVR   = av.filter(e => (e.loc || '').toUpperCase() === 'YVR').length;
+            const avTot   = avYYZ + avYUL + avYYC + avYVR;
 
-            // Footer
-            const trCount    = ah.filter(e => (e.tr || '').toUpperCase() === 'TR').length;
-            const asstsCount = Object.keys(assetRef).length;
+            // ── Block 2: Damaged at station (TR=DM, LOC = station) ──
+            const dmYYZ   = dm.filter(e => (e.loc || '').toUpperCase() === 'YYZ').length;
+            const dmYUL   = dm.filter(e => (e.loc || '').toUpperCase() === 'YUL').length;
+            const dmYYC   = dm.filter(e => (e.loc || '').toUpperCase() === 'YYC').length;
+            const dmYVR   = dm.filter(e => (e.loc || '').toUpperCase() === 'YVR').length;
+            const dmStnTot = dmYYZ + dmYUL + dmYYC + dmYVR;
 
-            // Style tokens
-            const F  = 'font-family:ui-monospace,monospace;';
-            const hS = `${F}font-size:8px;font-weight:900;letter-spacing:.06em;color:#94a3b8;text-transform:uppercase;display:block;padding-bottom:2px;margin-bottom:2px;border-bottom:1px solid #e2e8f0;`;
-            const rS = `${F}font-size:9px;color:#64748b;display:flex;justify-content:space-between;gap:4px;line-height:1.55;`;
-            const nS = 'font-weight:700;color:#0f172a;';
-            const totS = `${F}font-size:9px;color:#94a3b8;display:flex;justify-content:space-between;gap:4px;line-height:1.55;border-top:1px solid #e2e8f0;margin-top:1px;padding-top:1px;`;
+            // ── Block 3: Totals ──
+            const ttl     = Object.keys(assetRef).length;
+            // TRK = unique assets appearing in history with a tracked status (OB, AV, DM)
+            const trackedSet = new Set(['RM','RC','FN','OB','DM']);
+            const trkCount = ah.filter(e => trackedSet.has((e.tr || '').toUpperCase())).length;
+            const naCount  = Math.max(0, ttl - trkCount);
 
-            const row = (k, v) => `<div style="${rS}"><span>${k}</span><span style="${nS}">${v}</span></div>`;
-            const tot = (v)    => `<div style="${totS}"><span>∑</span><span style="${nS}">${v}</span></div>`;
-            const col = (hdr, rows, totVal) => `
-                <div style="flex:1;min-width:0;">
-                    <span style="${hS}">${hdr}</span>
-                    ${rows.map(([k,v]) => row(k,v)).join('')}
-                    ${totVal !== null ? tot(totVal) : ''}
-                </div>`;
-            const vdiv = `<div style="width:1px;background:#e2e8f0;margin:0 5px;align-self:stretch;flex-shrink:0;"></div>`;
+            // ── Shared style tokens ──
+            const F   = 'font-family:ui-monospace,monospace;font-size:9px;';
+            const thS = `${F}font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;text-align:center;padding:1px 4px;border-bottom:1px solid #e2e8f0;white-space:nowrap;`;
+            const rhS = `${F}font-weight:900;color:#475569;text-transform:uppercase;padding:1px 3px;border-right:1px solid #e2e8f0;`;
+            const tdS = `${F}font-weight:700;color:#0f172a;text-align:center;padding:1px 4px;`;
+            const ttS = `${F}font-weight:900;color:#0ea5e9;text-align:center;padding:1px 4px;border-top:1px solid #e2e8f0;`;  // total col
+
+            const cell  = (v, extra='') => `<td style="${tdS}${extra}">${v}</td>`;
+            const tot   = (v)           => `<td style="${ttS}">${v}</td>`;
+            const rhead = (v)           => `<td style="${rhS}">${v}</td>`;
+            const thead = (v, extra='') => `<th style="${thS}${extra}">${v}</th>`;
 
             el.innerHTML = `
-                <div style="display:flex;align-items:stretch;padding:3px 0 2px;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;margin-bottom:2px;">
-                    ${col('OB',     [['AC',obAC],['QK',obQK],['RV',obRV]], obTot)}
-                    ${vdiv}
-                    ${col('STN·AV', [['YUL',stnYUL],['YVR',stnYVR],['YYC',stnYYC],['YYZ',stnYYZ]], stnTot)}
-                    ${vdiv}
-                    ${col('DM',     [['YUL',dmYUL],['YVR',dmYVR],['YYC',dmYYC],['YYZ',dmYYZ]], null)}
-                    ${vdiv}
-                    ${col('TR',     [['TR',trCount]], null)}
-                </div>
-                <div style="${F}font-size:9px;color:#64748b;display:flex;justify-content:space-between;line-height:1.5;">
-                    <span>Assts</span><span style="${nS}">${asstsCount}</span>
-                </div>`;
+            <div style="display:flex;gap:6px;align-items:flex-start;padding:3px 0 2px;border-top:1px solid #e2e8f0;overflow-x:auto;">
+
+                <!-- Block 1: Airline OB / DM -->
+                <table style="border-collapse:collapse;border:1px solid #e2e8f0;flex-shrink:0;">
+                    <tr>
+                        <th style="${thS}border-right:1px solid #e2e8f0;"></th>
+                        ${thead('AC')}${thead('RV')}${thead('QK')}${thead('TOT','color:#0ea5e9;')}
+                    </tr>
+                    <tr>
+                        ${rhead('OB')}${cell(obAC)}${cell(obRV)}${cell(obQK)}${tot(obTot)}
+                    </tr>
+                    <tr>
+                        ${rhead('DM')}${cell(dmAirAC)}${cell(dmAirRV)}${cell(dmAirQK)}${tot(dmAirTot)}
+                    </tr>
+                </table>
+
+                <!-- Block 2: Station AV / DM -->
+                <table style="border-collapse:collapse;border:1px solid #e2e8f0;flex-shrink:0;">
+                    <tr>
+                        <th style="${thS}border-right:1px solid #e2e8f0;"></th>
+                        ${thead('YYZ')}${thead('YUL')}${thead('YYC')}${thead('YVR')}${thead('TOT','color:#0ea5e9;')}
+                    </tr>
+                    <tr>
+                        ${rhead('AV')}${cell(avYYZ)}${cell(avYUL)}${cell(avYYC)}${cell(avYVR)}${tot(avTot)}
+                    </tr>
+                    <tr>
+                        ${rhead('DM')}${cell(dmYYZ)}${cell(dmYUL)}${cell(dmYYC)}${cell(dmYVR)}${tot(dmStnTot)}
+                    </tr>
+                </table>
+
+                <!-- Block 3: TTL / TRK / N/A -->
+                <table style="border-collapse:collapse;border:1px solid #e2e8f0;flex-shrink:0;">
+                    <tr>
+                        ${thead('TTL','border-right:1px solid #e2e8f0;')}${thead('')}
+                    </tr>
+                    <tr>
+                        ${rhead('TRK')}${cell(trkCount)}
+                    </tr>
+                    <tr>
+                        ${rhead('N/A')}${cell(naCount)}
+                    </tr>
+                </table>
+
+            </div>`;
         }
 
         // ─── Delete a single Asset History record by its id ───────────────────
@@ -3518,8 +3564,8 @@
                     const stationCode = (entry['Service Station'] || '').trim().toUpperCase();
                     const noteText    = buildDMNote(entry, isInvRtnDamaged);
                     const dmDt        = new Date(entry.id); // entry.id = parsed row timestamp
-
-                    const written = writeDMHistoryEntry(assetId, dmDt, stationCode, noteText, /*batchMode=*/true);
+                    const dmFin       = (entry.FIN || '').trim().toUpperCase();
+                    const written = writeDMHistoryEntry(assetId, dmDt, stationCode, noteText, /*batchMode=*/true, dmFin);
                     if (written) batchedHistoryEntries.push(written);
                 })();
 
@@ -4317,9 +4363,10 @@
                 ).trim().toUpperCase();
 
                 const noteText = buildDMNote(entry, isInvRtnDamaged);
+                const dmFin   = (entry.FIN || '').trim().toUpperCase();
 
                 if (isValidAssetId(assetId)) {
-                    writeDMHistoryEntry(assetId, now, stationCode, noteText);
+                    writeDMHistoryEntry(assetId, now, stationCode, noteText, /*batchMode=*/false, dmFin);
                     console.log(`[File Save] DM history written — ${assetId} @ ${stationCode}`);
                 } else {
                     showToast(`⚠️ DM History: ASST "${assetId}" not a valid asset ID — skipped`);
