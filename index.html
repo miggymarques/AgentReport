@@ -500,6 +500,8 @@
                         </button>
                     </div>
                 </div>
+                <!-- Asset Summary Table -->
+                <div id="asset-history-summary" class="mt-2 mb-1"></div>
                 <!-- Manual add row -->
                 <div class="flex gap-2 flex-wrap">
                     <input type="text"           id="ah-asset-id"  placeholder="Asst#"   class="w-20 uppercase font-mono !text-xs">
@@ -1451,6 +1453,7 @@
                     container.appendChild(div);
                 });
             } else if (activeRefTab === 'assethistory') {
+                renderAssetHistorySummary();
                 renderAssetHistory(container);
             } else if (activeRefTab === 'synctable') {
                 renderSyncTable(container);
@@ -1803,6 +1806,72 @@
                     <button class="text-slate-200 hover:text-red-500 transition-all p-2 flex-shrink-0" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})"><svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>`;
                 container.appendChild(div);
             });
+        }
+
+        // ─── Asset History Summary Table (compact columnar) ──────────────────
+        function renderAssetHistorySummary() {
+            const el = document.getElementById('asset-history-summary');
+            if (!el) return;
+
+            const ah = assetHistory;
+
+            // OB: TR = 'OB'
+            const ob    = ah.filter(e => (e.tr || '').toUpperCase() === 'OB');
+            const obAC  = ob.filter(e => (e.loc || '').toUpperCase().startsWith('AC')).length;
+            const obQK  = ob.filter(e => (e.loc || '').toUpperCase().startsWith('QK')).length;
+            const obRV  = ob.filter(e => (e.loc || '').toUpperCase().startsWith('RV')).length;
+            const obTot = obAC + obQK + obRV;
+
+            // STN · AV: TR in {RM, RT, RP, FN}
+            const stnSet = new Set(['RM','RT','RP','FN']);
+            const stn    = ah.filter(e => stnSet.has((e.tr || '').toUpperCase()));
+            const stnYUL = stn.filter(e => (e.loc || '').toUpperCase() === 'YUL').length;
+            const stnYVR = stn.filter(e => (e.loc || '').toUpperCase() === 'YVR').length;
+            const stnYYC = stn.filter(e => (e.loc || '').toUpperCase() === 'YYC').length;
+            const stnYYZ = stn.filter(e => (e.loc || '').toUpperCase() === 'YYZ').length;
+            const stnTot = stnYUL + stnYVR + stnYYC + stnYYZ;
+
+            // DM: TR = 'DM'
+            const dm    = ah.filter(e => (e.tr || '').toUpperCase() === 'DM');
+            const dmYUL = dm.filter(e => (e.loc || '').toUpperCase() === 'YUL').length;
+            const dmYVR = dm.filter(e => (e.loc || '').toUpperCase() === 'YVR').length;
+            const dmYYC = dm.filter(e => (e.loc || '').toUpperCase() === 'YYC').length;
+            const dmYYZ = dm.filter(e => (e.loc || '').toUpperCase() === 'YYZ').length;
+
+            // Footer
+            const trCount    = ah.filter(e => (e.tr || '').toUpperCase() === 'TR').length;
+            const asstsCount = Object.keys(assetRef).length;
+
+            // Style tokens
+            const F  = 'font-family:ui-monospace,monospace;';
+            const hS = `${F}font-size:8px;font-weight:900;letter-spacing:.06em;color:#94a3b8;text-transform:uppercase;display:block;padding-bottom:2px;margin-bottom:2px;border-bottom:1px solid #e2e8f0;`;
+            const rS = `${F}font-size:9px;color:#64748b;display:flex;justify-content:space-between;gap:4px;line-height:1.55;`;
+            const nS = 'font-weight:700;color:#0f172a;';
+            const totS = `${F}font-size:9px;color:#94a3b8;display:flex;justify-content:space-between;gap:4px;line-height:1.55;border-top:1px solid #e2e8f0;margin-top:1px;padding-top:1px;`;
+
+            const row = (k, v) => `<div style="${rS}"><span>${k}</span><span style="${nS}">${v}</span></div>`;
+            const tot = (v)    => `<div style="${totS}"><span>∑</span><span style="${nS}">${v}</span></div>`;
+            const col = (hdr, rows, totVal) => `
+                <div style="flex:1;min-width:0;">
+                    <span style="${hS}">${hdr}</span>
+                    ${rows.map(([k,v]) => row(k,v)).join('')}
+                    ${totVal !== null ? tot(totVal) : ''}
+                </div>`;
+            const vdiv = `<div style="width:1px;background:#e2e8f0;margin:0 5px;align-self:stretch;flex-shrink:0;"></div>`;
+
+            el.innerHTML = `
+                <div style="display:flex;align-items:stretch;padding:3px 0 2px;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;margin-bottom:2px;">
+                    ${col('OB',     [['AC',obAC],['QK',obQK],['RV',obRV]], obTot)}
+                    ${vdiv}
+                    ${col('STN·AV', [['YUL',stnYUL],['YVR',stnYVR],['YYC',stnYYC],['YYZ',stnYYZ]], stnTot)}
+                    ${vdiv}
+                    ${col('DM',     [['YUL',dmYUL],['YVR',dmYVR],['YYC',dmYYC],['YYZ',dmYYZ]], null)}
+                    ${vdiv}
+                    ${col('TR',     [['TR',trCount]], null)}
+                </div>
+                <div style="${F}font-size:9px;color:#64748b;display:flex;justify-content:space-between;line-height:1.5;">
+                    <span>Assts</span><span style="${nS}">${asstsCount}</span>
+                </div>`;
         }
 
         // ─── Delete a single Asset History record by its id ───────────────────
