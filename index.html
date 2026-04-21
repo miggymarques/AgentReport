@@ -1831,12 +1831,15 @@
             const obQK    = ob.filter(e => (e.loc || '').toUpperCase().startsWith('QK')).length;
             const obTot   = obAC + obRV + obQK;
 
-            // ── Block 1: Damaged by airline (TR=DM, NT starts with airline code) ──
+            // ── Block 1: Missing by airline (TR=MS, LOC starts with airline code) ──
+            const ms      = ah.filter(e => (e.tr || '').toUpperCase() === 'MS');
+            const msAC    = ms.filter(e => (e.loc || '').toUpperCase().startsWith('AC')).length;
+            const msRV    = ms.filter(e => (e.loc || '').toUpperCase().startsWith('RV')).length;
+            const msQK    = ms.filter(e => (e.loc || '').toUpperCase().startsWith('QK')).length;
+            const msTot   = msAC + msRV + msQK;
+
+            // ── Block 2: Damaged by airline (TR=DM, NT starts with airline code) — kept for Block 2 station table ──
             const dm      = ah.filter(e => (e.tr || '').toUpperCase() === 'DM');
-            const dmAirAC = dm.filter(e => (e.nt || '').toUpperCase().startsWith('AC')).length;
-            const dmAirRV = dm.filter(e => (e.nt || '').toUpperCase().startsWith('RV')).length;
-            const dmAirQK = dm.filter(e => (e.nt || '').toUpperCase().startsWith('QK')).length;
-            const dmAirTot = dmAirAC + dmAirRV + dmAirQK;
 
             // ── Block 2: Available at station (TR in {RM, RC, FN}, LOC = station) ──
             const avSet   = new Set(['RM','RC','FN']);
@@ -1886,7 +1889,7 @@
                         ${rhead('OB')}${cell(obAC)}${cell(obRV)}${cell(obQK)}${tot(obTot)}
                     </tr>
                     <tr>
-                        ${rhead('DM')}${cell(dmAirAC)}${cell(dmAirRV)}${cell(dmAirQK)}${tot(dmAirTot)}
+                        ${rhead('MS')}${cell(msAC)}${cell(msRV)}${cell(msQK)}${tot(msTot)}
                     </tr>
                 </table>
 
@@ -2104,7 +2107,7 @@
                 const nroSet = new Set((finNro[fin] || []).map(n => n.assetId));
                 const onboardAssets = (finAssetMap[fin] || []).filter(a => !nroSet.has(a)).sort(numSort);
                 const onboardHtml = onboardAssets.length > 0
-                    ? onboardAssets.map(a => `<span class="text-slate-600">${hl(a)}</span>`).join(', ')
+                    ? onboardAssets.map(a => `<span class="text-slate-800">${hl(a)}</span>`).join(', ')
                     : '<span class="text-slate-300">—</span>';
 
                 // Removed: from finTable snapshot of last visit — assets explicitly taken off
@@ -2138,7 +2141,7 @@
                     </span>
                     <span class="font-mono text-[9px] leading-relaxed">${onboardHtml}${removedHtml}</span>
                     <span class="text-[9px] leading-relaxed">${agentDisplay}</span>
-                    <span class="text-slate-400 text-[9px]">${entry.lastSeen || '—'}${entry.lastTime ? `<span class="block text-slate-500">${entry.lastTime}</span>` : ''}</span>
+                    <span class="text-slate-700 text-[9px]">${entry.lastSeen || '—'}${entry.lastTime ? `<span class="block text-slate-600">${entry.lastTime}</span>` : ''}</span>
                     <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
                 container.appendChild(div);
             });
