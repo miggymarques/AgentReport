@@ -1911,10 +1911,11 @@
 
             // ── Block 3: Totals ──
             const ttl     = Object.keys(assetRef).length;
-            // TRK = unique assets appearing in history with a tracked status (OB, AV, DM)
+            // TRK = unique asset IDs in history with a tracked status
             const trackedSet = new Set(['RM','RC','FN','OB','DM']);
-            const trkCount = ah.filter(e => trackedSet.has((e.tr || '').toUpperCase())).length;
-            const naCount  = Math.max(0, ttl - trkCount);
+            const trkCount = new Set(ah.filter(e => trackedSet.has((e.tr || '').toUpperCase())).map(e => e.assetId)).size;
+            // N/A = assets in the DB not covered by TRK or MS (TTL minus everything shown in TRK)
+            const naCount  = Math.max(0, ttl - trkCount - msTot);
 
             // ── Shared style tokens ──
             const F   = 'font-family:ui-monospace,monospace;font-size:9px;';
