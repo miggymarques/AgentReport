@@ -4898,7 +4898,12 @@
                             urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478?transport=tcp',
                             username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'),
                             credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==')
-                        }
+                        },
+                        // ── Fallback: Metered Open Relay Project (free public TURN) ──────
+                        { urls: 'stun:openrelay.metered.ca:80' },
+                        { urls: 'turn:openrelay.metered.ca:80',                    username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:443',                   username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:443?transport=tcp',     username: 'openrelayproject', credential: 'openrelayproject' }
                     ]
                 }
             };
