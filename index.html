@@ -4797,7 +4797,6 @@
         let _lastLocalChangeTs = 0;   // timestamp of the last local data mutation — used to skip empty delta syncs
         let finClaims        = {};    // fin → { agent, ts, sessionId } — in-memory only, not persisted
         let finClaimReleases = {};    // fin → releaseTs tombstones — broadcast so peers clear stale claims
-        const p2pPendingConnects = new Set(); // peers where connect() was called but open hasn't fired yet
 
         // Stable per-device session ID — used to identify our own claims reliably,
         // regardless of agent name (avoids false-positives when two agents share a name).
@@ -4885,16 +4884,11 @@
                 port: 443,
                 path: '/',
                 secure: true,
-                pingInterval: 3000,   // was 5000 — tighter keepalive prevents WS drop on mobile
+                pingInterval: 5000,
                 config: {
-                    iceCandidatePoolSize: 2, // pre-gather candidates so first connect is faster
                     iceServers: [
-                        // ── Primary STUN (most reliable, lowest latency) ──────────────
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
-                        // ── Cloudflare STUN — excellent reliability & global coverage ─
-                        { urls: 'stun:stun.cloudflare.com:3478' },
-                        // ── Private TURN — primary relay for symmetric NAT ────────────
                         {
                             urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478',
                             username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'),
@@ -4905,9 +4899,6 @@
                             username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'),
                             credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==')
                         }
-                        // ── NOTE: openrelay.metered.ca removed — public TURN is
-                        //    severely overloaded and causes more ICE failures than it
-                        //    prevents. Private TURN above handles relay needs. ─────────
                     ]
                 }
             };
@@ -4973,8 +4964,8 @@
         // ─── P2P: Zombie-connection heartbeat ─────────────────────────────────
         // Application-level PING/PONG — catches connections that PeerJS reports as
         // open but whose underlying data channel has silently died.
-        const HEARTBEAT_INTERVAL_MS = 10000; // send ping every 10 s (was 20 s)
-        const HEARTBEAT_TIMEOUT_MS  =  8000; // close conn if no pong within 8 s (was 15 s)
+        const HEARTBEAT_INTERVAL_MS = 20000; // send ping every 20 s
+        const HEARTBEAT_TIMEOUT_MS  = 15000; // close conn if no pong within 15 s
         const p2pLastPong  = {}; // peerId → timestamp of last pong received
         let   p2pHeartbeatTimer = null;
 
@@ -5137,9 +5128,6 @@
             if (!p2pPeer || !p2pReady) return;
             // Don't open a duplicate outgoing connection to an already-open peer
             if (p2pConnections[theirId]?.open) return;
-            // Don't fire a second connect() while one is already in-flight (not yet open)
-            if (p2pPendingConnects.has(theirId)) return;
-            p2pPendingConnects.add(theirId);
             const conn = p2pPeer.connect(theirId, { reliable: true });
             setupP2PConnection(conn);
         }
@@ -5151,23 +5139,8 @@
             if (p2pConnections[peerId] && p2pConnections[peerId].open && p2pConnections[peerId] !== conn) {
                 // Keep the existing open connection — close the redundant one gracefully
                 try { conn.close(); } catch(_) {}
-                p2pPendingConnects.delete(peerId);
                 return;
             }
-
-            // ── Connection-attempt timeout ─────────────────────────────────────────
-            // ICE negotiation can hang silently (especially on restrictive mobile networks).
-            // If the connection hasn't opened within 15 s, force-close it so _scheduleReconnect
-            // can retry with a fresh connection object.
-            const _connTimeoutMs = 15000;
-            let _connOpenTimer = setTimeout(() => {
-                if (!conn.open) {
-                    console.warn('[P2P] Connection to', peerId, 'timed out after', _connTimeoutMs / 1000, 's — closing');
-                    p2pPendingConnects.delete(peerId);
-                    try { conn.close(); } catch(_) {}
-                    // close event fires → _scheduleReconnect handles the retry
-                }
-            }, _connTimeoutMs);
 
             conn.on('data', (msg) => {
                 // Application-level PONG reply
@@ -5185,8 +5158,6 @@
             });
 
             conn.on('close', () => {
-                clearTimeout(_connOpenTimer);
-                p2pPendingConnects.delete(peerId);
                 if (p2pConnections[peerId] === conn) {
                     delete p2pConnections[peerId];
                     // Reset sync cursor so next reconnect triggers a full sync
@@ -5197,8 +5168,6 @@
             });
 
             conn.on('error', (err) => {
-                clearTimeout(_connOpenTimer);
-                p2pPendingConnects.delete(peerId);
                 console.warn('[P2P] conn error for', peerId, err);
                 if (p2pConnections[peerId] === conn) {
                     delete p2pConnections[peerId];
@@ -5209,41 +5178,10 @@
             });
 
             const doSync = () => {
-                clearTimeout(_connOpenTimer);
-                p2pPendingConnects.delete(peerId);
                 p2pConnections[peerId] = conn;
                 p2pLastPong[peerId]    = Date.now(); // treat open as an implicit pong
                 _resetRetryDelay(peerId);
                 updateSyncCount();
-
-                // ── ICE connection state monitoring ───────────────────────────────
-                // PeerJS only exposes high-level 'close'/'error' events; the underlying
-                // RTCPeerConnection's iceConnectionState gives us much faster failure
-                // detection — especially for "disconnected" (network hiccup) vs "failed"
-                // (unrecoverable). We handle both here so reconnect starts immediately
-                // instead of waiting for the heartbeat timeout.
-                const pc = conn.peerConnection;
-                if (pc) {
-                    pc.addEventListener('iceconnectionstatechange', () => {
-                        const state = pc.iceConnectionState;
-                        console.log('[P2P] ICE state for', peerId, '→', state);
-                        if (state === 'failed') {
-                            // Unrecoverable — force-close so _scheduleReconnect kicks in
-                            console.warn('[P2P] ICE failed for', peerId, '— closing');
-                            try { conn.close(); } catch(_) {}
-                        } else if (state === 'disconnected') {
-                            // Transient network drop — give it 5 s to self-recover (ICE restart)
-                            // before we close and reschedule
-                            setTimeout(() => {
-                                if (pc.iceConnectionState === 'disconnected' ||
-                                    pc.iceConnectionState === 'failed') {
-                                    console.warn('[P2P] ICE stayed', pc.iceConnectionState, 'for', peerId, '— closing');
-                                    try { conn.close(); } catch(_) {}
-                                }
-                            }, 5000);
-                        }
-                    });
-                }
 
                 // Always do a FULL_SYNC on fresh open (lastSyncTs was cleared on close)
                 const sinceTs = lastSyncTs[peerId] || 0;
