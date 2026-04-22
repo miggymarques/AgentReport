@@ -735,8 +735,9 @@
         const ASSET_REF_KEY          = 'yul_asset_ref_v2';
         const ASSET_REF_TS_KEY       = 'yul_asset_ref_ts_v1';
         const ASSET_REF_BLOCK_KEY    = 'yul_asset_ref_block_v1';
-        const ASSET_HISTORY_KEY      = 'yul_asset_history_v1';
-        const ASSET_HISTORY_BLOCK_KEY = 'yul_asset_history_block_v1'; // tombstone map: { entryId → deletedAt ts }
+        const ASSET_HISTORY_KEY            = 'yul_asset_history_v1';
+        const ASSET_HISTORY_BLOCK_KEY      = 'yul_asset_history_block_v1'; // tombstone map: { entryId → deletedAt ts }
+        const ASSET_HISTORY_ASSET_BLOCK_KEY = 'yul_asset_history_asset_block_v1'; // per-assetId tombstone: { assetId → deletedAt ts }
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
         const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
         const NRO_INDEX_KEY    = 'yul_nro_index_v1';
@@ -753,6 +754,12 @@
         // assetHistoryBlock: tombstone map { entryId → deletedAt timestamp }
         // An entry id in here was explicitly deleted; peers must never re-insert it.
         let assetHistoryBlock = {};
+        // assetHistoryAssetBlock: per-assetId tombstone { assetId → deletedAt timestamp }
+        // Blocks any peer entry whose id (creation ts) is ≤ the deletion ts.
+        // New entries created AFTER the deletion (id > deletedAt) are still allowed.
+        // Closes the gap where evicting the local entry makes existingIdx === -1,
+        // bypassing the per-entry tombstone check and letting peers repopulate the row.
+        let assetHistoryAssetBlock = {};
 
         // pPlusFlags: { "AC101": true, ... } — FINs manually escalated to top priority
         let pPlusFlags = {};
@@ -991,8 +998,9 @@
         function saveAssetRef()         { storageSet(ASSET_REF_KEY,         JSON.stringify(assetRef)); }
         function saveAssetRefTs()       { storageSet(ASSET_REF_TS_KEY,      JSON.stringify(assetRefTs)); }
         function saveAssetRefBlock()    { storageSet(ASSET_REF_BLOCK_KEY,   JSON.stringify(assetRefBlock)); }
-        function saveAssetHistory()      { storageSet(ASSET_HISTORY_KEY,       JSON.stringify(assetHistory)); }
-        function saveAssetHistoryBlock() { storageSet(ASSET_HISTORY_BLOCK_KEY, JSON.stringify(assetHistoryBlock)); }
+        function saveAssetHistory()           { storageSet(ASSET_HISTORY_KEY,            JSON.stringify(assetHistory)); }
+        function saveAssetHistoryBlock()      { storageSet(ASSET_HISTORY_BLOCK_KEY,      JSON.stringify(assetHistoryBlock)); }
+        function saveAssetHistoryAssetBlock() { storageSet(ASSET_HISTORY_ASSET_BLOCK_KEY, JSON.stringify(assetHistoryAssetBlock)); }
 
         function savePPlusFlags() {
             storageSet(P_PLUS_KEY,    JSON.stringify(pPlusFlags));
@@ -1517,10 +1525,14 @@
                 const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc, ...(obNt ? { nt: obNt } : {}) };
 
                 // Upsert: one record per assetId (canonical GGC#### key), latest wins
-                // Skip if an existing record for this assetId was tombstoned — respect the deletion.
+                // Per-assetId tombstone guard: blocks entries whose creation ts predates the deletion.
+                // This covers the case where existingIdx === -1 (entry already evicted) and a peer
+                // would otherwise re-insert a new entry for the same asset, bypassing the per-entry check.
+                const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+                if (assetTombTs && histEntry.id <= assetTombTs) return; // deleted more recently — skip
                 const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
                 if (existingIdx !== -1) {
-                    if (assetHistoryBlock[assetHistory[existingIdx].id]) return; // existing was deleted — don't resurrect
+                    if (assetHistoryBlock[assetHistory[existingIdx].id]) return; // existing entry-id tombstoned — don't resurrect
                     if (dt <= assetHistory[existingIdx].dt) return; // existing is same age or newer — keep it
                     assetHistory.splice(existingIdx, 1);            // remove stale record
                 }
@@ -1568,6 +1580,8 @@
                 nt:      ntFull
             };
             // Upsert: one record per assetId, latest dt wins (regardless of TR type)
+            const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+            if (assetTombTs && histEntry.id <= assetTombTs) return null; // per-assetId tombstone — skip
             const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
             if (existingIdx !== -1) {
                 if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // existing was deleted — don't resurrect
@@ -1609,6 +1623,8 @@
             };
             // MAX(DateTime) guard: only insert if this NRO timestamp is strictly newer
             // than any existing Asset_History record for this asset (OB, RM, or prior MS).
+            const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+            if (assetTombTs && histEntry.id <= assetTombTs) return null; // per-assetId tombstone — skip
             const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
             if (existingIdx !== -1) {
                 if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // tombstoned — never resurrect
@@ -1740,6 +1756,8 @@
             };
 
             // MAX(DateTime) guard — one record per assetId, latest dt wins
+            const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+            if (assetTombTs && histEntry.id <= assetTombTs) return null; // per-assetId tombstone — skip
             const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
             if (existingIdx !== -1) {
                 if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // tombstoned — never resurrect
@@ -1980,13 +1998,24 @@
         function deleteAssetHistoryEntry(entryId) {
             const idx = assetHistory.findIndex(h => h.id === entryId);
             if (idx === -1) return;
+            const deletedAssetId  = assetHistory[idx].assetId; // capture before splice
+            const deletedAtTs     = Date.now();
             assetHistory.splice(idx, 1);
-            // Stamp tombstone — peers will reject any re-broadcast of this entry id
-            assetHistoryBlock[entryId] = Date.now();
+            // Per-entry tombstone — peers will reject any re-broadcast of this specific entry id
+            assetHistoryBlock[entryId] = deletedAtTs;
+            // Per-assetId tombstone — prevents peers from repopulating the row with a
+            // brand-new entry (new id, same assetId) after this one is evicted locally.
+            // Only entries created strictly AFTER deletedAtTs are allowed through.
+            assetHistoryAssetBlock[deletedAssetId] = deletedAtTs;
             saveAssetHistory();
             saveAssetHistoryBlock();
-            // Tell all peers about the deletion immediately
-            const msg = { type: 'REF_SYNC', assetHistoryBlock: { [entryId]: assetHistoryBlock[entryId] } };
+            saveAssetHistoryAssetBlock();
+            // Tell all peers about both tombstones immediately
+            const msg = {
+                type: 'REF_SYNC',
+                assetHistoryBlock:      { [entryId]:       assetHistoryBlock[entryId] },
+                assetHistoryAssetBlock: { [deletedAssetId]: deletedAtTs }
+            };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
             if (activeRefTab === 'assethistory') {
                 const el = document.getElementById('assethistory-count-label');
@@ -3139,6 +3168,19 @@
                     if (assetHistory.length !== before) saveAssetHistory();
                 }
             } catch(e) { console.warn("Could not load asset history block:", e); }
+            try {
+                const savedAssetHistoryAssetBlock = storageGet(ASSET_HISTORY_ASSET_BLOCK_KEY);
+                if (savedAssetHistoryAssetBlock) assetHistoryAssetBlock = JSON.parse(savedAssetHistoryAssetBlock);
+                // Purge any live entries whose assetId tombstone is newer than the entry itself
+                if (Object.keys(assetHistoryAssetBlock).length) {
+                    const before = assetHistory.length;
+                    assetHistory = assetHistory.filter(h => {
+                        const tombTs = assetHistoryAssetBlock[h.assetId] || 0;
+                        return !tombTs || h.id > tombTs; // keep only entries created after the deletion
+                    });
+                    if (assetHistory.length !== before) saveAssetHistory();
+                }
+            } catch(e) { console.warn("Could not load asset history asset block:", e); }
             try {
                 const savedFinTable = storageGet(SYNC_TABLE_KEY);
                 if (savedFinTable) finTable = JSON.parse(savedFinTable);
@@ -4941,7 +4983,7 @@
                 agentRef: agents, agentBlock, sharedDb: sharedEntries, sharedDbClearTs,
                 aircraftRef: acRef, aircraftRefBlock,
                 assetRef: asRef, assetRefTs: asRefTs, assetRefBlock,
-                assetHistory: ahEntries, assetHistoryBlock,
+                assetHistory: ahEntries, assetHistoryBlock, assetHistoryAssetBlock,
                 pPlusFlags, pPlusFlagTs
             };
         }
@@ -4957,9 +4999,10 @@
         // ─── P2P: Shared config builder ───────────────────────────────────────
         // ICE server priority:
         //   1. STUN  — 5 servers across Google + Cloudflare for NAT candidate gathering
-        //   2. TURN primary — OpenRelay (open-source, free, no-auth, ports 80 & 443)
-        //      → Most reliable free relay; port 80/443 punches through restrictive firewalls
-        //   3. TURN fallback — private free.expressturn.com credentials (may be expired)
+        //   2. TURN primary — relay.metered.ca (Metered free public relay, ports 80/443)
+        //      → Replaced defunct openrelay.metered.ca (shut down 2024)
+        //   3. TURN secondary — freeturn.net (free, no registration, ports 3478/5349)
+        //   4. TURN fallback — private expressturn credentials
         function _buildPeerConfig() {
             const _t = _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0='); // private TURN host
             const _u = _rc('V1dTcEMDQkYDUwsaAQYADVJV');      // private TURN user
@@ -4981,12 +5024,15 @@
                         { urls: 'stun:stun2.l.google.com:19302' },
                         { urls: 'stun:stun3.l.google.com:19302' },
                         { urls: 'stun:stun.cloudflare.com:3478' },
-                        // ── TURN primary: OpenRelay (free, public, no registration) ─
+                        // ── TURN primary: relay.metered.ca (replaces defunct openrelay.metered.ca)
                         // Ports 80 & 443 traverse nearly all corporate/mobile firewalls
-                        { urls: 'turn:openrelay.metered.ca:80',             username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:openrelay.metered.ca:443',            username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:relay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:relay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:relay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turns:relay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+                        // ── TURN secondary: freeturn.net (free, no registration required) ─
+                        { urls: 'turn:freeturn.net:3478',  username: 'free', credential: 'free' },
+                        { urls: 'turns:freeturn.net:5349', username: 'free', credential: 'free' },
                         // ── TURN fallback: private expressturn (credentials may be expired) ─
                         { urls: 'turn:' + _t + ':3478',                username: _u, credential: _c },
                         { urls: 'turn:' + _t + ':3478?transport=tcp',  username: _u, credential: _c }
@@ -5635,14 +5681,36 @@
                 if (blockChanged) { saveAssetHistoryBlock(); saveAssetHistory(); anyChanged = true; }
             }
 
+            // ── Merge assetHistoryAssetBlock (per-assetId tombstones) ─────────
+            // Must be merged BEFORE live assetHistory entries so the guard in the
+            // live-entry loop below can reject entries that predate the deletion.
+            if (msg.assetHistoryAssetBlock && typeof msg.assetHistoryAssetBlock === 'object') {
+                let assetBlockChanged = false;
+                Object.entries(msg.assetHistoryAssetBlock).forEach(([assetId, ts]) => {
+                    if (!assetHistoryAssetBlock[assetId] || ts > assetHistoryAssetBlock[assetId]) {
+                        assetHistoryAssetBlock[assetId] = ts;
+                        assetBlockChanged = true;
+                        // Evict any live entry for this asset whose id predates the deletion
+                        const idx = assetHistory.findIndex(h => h.assetId === assetId);
+                        if (idx !== -1 && assetHistory[idx].id <= ts) {
+                            assetHistory.splice(idx, 1);
+                        }
+                    }
+                });
+                if (assetBlockChanged) { saveAssetHistoryAssetBlock(); saveAssetHistory(); anyChanged = true; }
+            }
+
             // ── Merge assetHistory ────────────────────────────────────────────
             if (msg.assetHistory && Array.isArray(msg.assetHistory) && msg.assetHistory.length) {
                 let ahChanged = false;
                 // Upsert: one record per assetId, latest dt wins — tombstoned entries are never re-inserted
                 msg.assetHistory.forEach(incoming => {
                     if (!incoming.id || !incoming.assetId) return;
-                    // Tombstone guard: reject if this specific entry id was deliberately deleted
+                    // Per-entry tombstone guard
                     if (assetHistoryBlock[incoming.id]) return;
+                    // Per-assetId tombstone guard: reject entries created before (or at) the deletion ts
+                    const assetTombTs = assetHistoryAssetBlock[incoming.assetId] || 0;
+                    if (assetTombTs && incoming.id <= assetTombTs) return;
                     const existingIdx = assetHistory.findIndex(h => h.assetId === incoming.assetId);
                     if (existingIdx !== -1) {
                         if ((incoming.dt || '') <= (assetHistory[existingIdx].dt || '')) return; // existing is newer — skip
