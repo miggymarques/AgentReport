@@ -4999,9 +4999,11 @@
         // ─── P2P: Shared config builder ───────────────────────────────────────
         // ICE server priority:
         //   1. STUN  — 5 servers across Google + Cloudflare for NAT candidate gathering
-        //   2. TURN primary — relay.metered.ca (Metered free public relay, ports 80/443)
-        //      → Replaced defunct openrelay.metered.ca (shut down 2024)
-        //   3. TURN secondary — freeturn.net (free, no registration, ports 3478/5349)
+        //   2. TURN primary — freeturn.net (free, no registration, UDP + TCP + TLS)
+        //      → relay.metered.ca/openrelayproject REMOVED — those credentials were
+        //        tied to the old OpenRelay Project (shut down 2024) and now silently
+        //        fail auth, wasting ICE negotiation time across all cross-network peers.
+        //   3. TURN secondary — metered.ca global relay (anonymous short-lived creds)
         //   4. TURN fallback — private expressturn credentials
         function _buildPeerConfig() {
             const _t = _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0='); // private TURN host
@@ -5024,16 +5026,20 @@
                         { urls: 'stun:stun2.l.google.com:19302' },
                         { urls: 'stun:stun3.l.google.com:19302' },
                         { urls: 'stun:stun.cloudflare.com:3478' },
-                        // ── TURN primary: relay.metered.ca (replaces defunct openrelay.metered.ca)
-                        // Ports 80 & 443 traverse nearly all corporate/mobile firewalls
-                        { urls: 'turn:relay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:relay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:relay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turns:relay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
-                        // ── TURN secondary: freeturn.net (free, no registration required) ─
-                        { urls: 'turn:freeturn.net:3478',  username: 'free', credential: 'free' },
-                        { urls: 'turns:freeturn.net:5349', username: 'free', credential: 'free' },
-                        // ── TURN fallback: private expressturn (credentials may be expired) ─
+                        // ── TURN primary: freeturn.net — UDP, TCP, and TLS variants ──
+                        // Ports 3478/5349 work on most networks; TCP variant helps on
+                        // restrictive firewalls that block UDP outright.
+                        { urls: 'turn:freeturn.net:3478',              username: 'free', credential: 'free' },
+                        { urls: 'turn:freeturn.net:3478?transport=tcp',username: 'free', credential: 'free' },
+                        { urls: 'turns:freeturn.net:5349',             username: 'free', credential: 'free' },
+                        // ── TURN secondary: metered.ca global relay (anonymous) ──────
+                        // These anonymous short-lived endpoints don't require an account
+                        // and traverse port-80/443 firewalls (corporate, mobile hotspot).
+                        { urls: 'turn:a.relay.metered.ca:80',                username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
+                        { urls: 'turn:a.relay.metered.ca:80?transport=tcp',  username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
+                        { urls: 'turn:a.relay.metered.ca:443',               username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
+                        { urls: 'turns:a.relay.metered.ca:443',              username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
+                        // ── TURN fallback: private expressturn ───────────────────────
                         { urls: 'turn:' + _t + ':3478',                username: _u, credential: _c },
                         { urls: 'turn:' + _t + ':3478?transport=tcp',  username: _u, credential: _c }
                     ]
