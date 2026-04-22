@@ -4955,7 +4955,15 @@
         }
 
         // ─── P2P: Shared config builder ───────────────────────────────────────
+        // ICE server priority:
+        //   1. STUN  — 5 servers across Google + Cloudflare for NAT candidate gathering
+        //   2. TURN primary — OpenRelay (open-source, free, no-auth, ports 80 & 443)
+        //      → Most reliable free relay; port 80/443 punches through restrictive firewalls
+        //   3. TURN fallback — private free.expressturn.com credentials (may be expired)
         function _buildPeerConfig() {
+            const _t = _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0='); // private TURN host
+            const _u = _rc('V1dTcEMDQkYDUwsaAQYADVJV');      // private TURN user
+            const _c = _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg=='); // private TURN cred
             return {
                 debug: 0,
                 host: '0.peerjs.com',
@@ -4964,19 +4972,24 @@
                 secure: true,
                 pingInterval: 5000,
                 config: {
+                    iceTransportPolicy: 'all',
+                    iceCandidatePoolSize: 4,
                     iceServers: [
+                        // ── STUN (NAT candidate gathering) ──────────────────────────
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
-                        {
-                            urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478',
-                            username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'),
-                            credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==')
-                        },
-                        {
-                            urls: 'turn:' + _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0=') + ':3478?transport=tcp',
-                            username: _rc('V1dTcEMDQkYDUwsaAQYADVJV'),
-                            credential: _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg==')
-                        }
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' },
+                        { urls: 'stun:stun.cloudflare.com:3478' },
+                        // ── TURN primary: OpenRelay (free, public, no registration) ─
+                        // Ports 80 & 443 traverse nearly all corporate/mobile firewalls
+                        { urls: 'turn:openrelay.metered.ca:80',             username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:443',            username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+                        // ── TURN fallback: private expressturn (credentials may be expired) ─
+                        { urls: 'turn:' + _t + ':3478',                username: _u, credential: _c },
+                        { urls: 'turn:' + _t + ':3478?transport=tcp',  username: _u, credential: _c }
                     ]
                 }
             };
