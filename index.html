@@ -75,6 +75,8 @@
 
         #editor-modal { display: none; }
         #editor-modal.open { display: flex; }
+        #p2p-diag-modal { display: none; }
+        #p2p-diag-modal.open { display: flex; }
 
         @keyframes pulse-sync {
             0%, 100% { opacity: 1; }
@@ -138,7 +140,7 @@
                     </svg>
                     Email
                 </button>
-                <div id="sync-status" title="P2P Sync Status" class="flex-1 h-10 flex items-center justify-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold font-mono cursor-default select-none">
+                <div id="sync-status" title="Tap to run P2P diagnostic" onclick="openP2PDiag()" class="flex-1 h-10 flex items-center justify-center gap-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold font-mono cursor-pointer select-none active:scale-95 transition-transform">
                     <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-600 inline-block shrink-0"></span>
                     <div class="flex flex-col leading-tight">
                         <span id="sync-label" class="text-slate-500">P2P</span>
@@ -596,6 +598,70 @@
 
     <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-3 rounded-full opacity-0 pointer-events-none transition-all duration-300 shadow-2xl z-50 font-bold border border-slate-700">
         Record Saved!
+    </div>
+
+    <!-- ─── P2P Diagnostic Modal ──────────────────────────────────────────── -->
+    <div id="p2p-diag-modal" class="hidden fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] items-center justify-center p-4">
+        <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
+
+            <!-- Header -->
+            <div class="px-4 py-3 bg-slate-900 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
+                    </svg>
+                    <span class="text-white font-black text-sm tracking-tight">P2P DIAGNOSTIC</span>
+                </div>
+                <button onclick="closeP2PDiag()" class="text-slate-400 hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <!-- Scrollable body -->
+            <div class="overflow-y-auto flex-1 p-4 space-y-3 text-xs font-mono">
+
+                <!-- My peer ID -->
+                <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                    <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">My Peer ID</div>
+                    <div id="diag-my-id" class="text-slate-700 break-all">—</div>
+                </div>
+
+                <!-- Connected peers -->
+                <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                    <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Connected Peers</div>
+                    <div id="diag-peers" class="text-slate-700">—</div>
+                </div>
+
+                <!-- ICE candidate test -->
+                <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest">ICE Candidate Test</div>
+                        <button id="diag-run-btn" onclick="runIceTest()"
+                            class="text-[10px] font-black bg-blue-600 text-white px-3 py-1 rounded-lg active:scale-95 transition-transform">
+                            RUN TEST
+                        </button>
+                    </div>
+                    <div id="diag-ice-status" class="text-slate-500 italic mb-2">Tap RUN TEST to check ICE servers.</div>
+                    <div id="diag-ice-results" class="space-y-1"></div>
+                </div>
+
+                <!-- Legend -->
+                <div class="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1">
+                    <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">What the results mean</div>
+                    <div><span class="text-emerald-600 font-black">relay</span> — TURN is working. Cross-network P2P will succeed.</div>
+                    <div><span class="text-blue-500 font-black">srflx</span> — STUN is working. Handles most home/mobile networks.</div>
+                    <div><span class="text-slate-500 font-black">host</span> — Local only. Same-network P2P only without the above.</div>
+                    <div class="pt-1 text-slate-400">If <span class="text-emerald-600 font-black">relay</span> is missing, cross-network connections will fail. Check your network — some corporate/VPN firewalls block TURN traffic.</div>
+                </div>
+
+                <!-- Configured servers -->
+                <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                    <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Configured ICE Servers</div>
+                    <div id="diag-servers" class="space-y-0.5 text-slate-600 break-all"></div>
+                </div>
+
+            </div>
+        </div>
     </div>
 
 
@@ -4997,34 +5063,35 @@
         }
 
         // ─── P2P: Shared config builder ───────────────────────────────────────
-        // ICE server strategy — minimal & reliable:
+        // ICE server strategy — tested Apr 2026:
         //
-        //   SIGNALING : 0.peerjs.com — unavoidable; peers cannot discover each
-        //               other or exchange SDP/ICE candidates without it.
+        //   SIGNALING : 0.peerjs.com — unavoidable.
         //
-        //   STUN      : stun.l.google.com:19302 — one server is all that is
-        //               needed. Google's primary STUN endpoint has been stable
-        //               for 15+ years and handles ~billions of requests/day.
-        //               Extra STUN servers add latency to ICE gathering without
-        //               meaningfully improving connectivity.
+        //   STUN      : stun.l.google.com:19302 — one server is all ICE needs.
         //
-        //   TURN      : freeturn.net — free, no registration, no expiring creds.
-        //               UDP + TCP + TLS variants cover the vast majority of
-        //               real-world firewalls. Bandwidth cap is 50 KBit/s per
-        //               peer-pair, which is more than enough for text data sync.
-        //               Credentials are literally "free"/"free" — they never
-        //               rotate, so there is nothing to expire.
+        //   TURN layer 1 — freestun.net (credentials: free / free, never expire)
+        //     UDP 3478 : primary relay path, lowest latency
+        //     TLS 5349 : last resort for deep-packet-inspection firewalls
+        //     ⚠ Note: freeturn.net (the old address) has DNS failure as of Apr 2026.
+        //              freestun.net is the replacement / successor.
         //
-        //   REMOVED   :
-        //     • stun1–3.l.google.com, stun.cloudflare.com — redundant STUN.
-        //     • a.relay.metered.ca — those static credentials
-        //       (e8dd65bec5a40d31e76b / uMNiYqFcbhb8wqQd) are hardcoded but
-        //       metered.ca credentials are short-lived tokens meant to be
-        //       generated via API; hardcoded ones silently fail auth and waste
-        //       the entire ICE negotiation window. THIS WAS THE PRIMARY CAUSE
-        //       OF CROSS-NETWORK P2P FAILURES.
-        //     • Private expressturn — obfuscated creds that may rotate/expire
-        //       without notice, causing the same silent auth failure.
+        //   TURN layer 2 — OpenRelay by metered.ca (free, 20 GB/month)
+        //     Ports 80 and 443 bypass corporate and mobile-hotspot firewalls.
+        //     TCP variants are the final fallback when UDP is blocked outright.
+        //     TCP/80 and TCP/443 confirmed reachable Apr 2026.
+        //     ⚠ The old hardcoded metered.ca credentials
+        //       (e8dd65bec5a40d31e76b / uMNiYqFcbhb8wqQd) are EXPIRED — they
+        //       were static tokens from a personal account. These have been
+        //       replaced with the public OpenRelay credentials below.
+        //       For production reliability, sign up for a free metered.ca
+        //       account (20 GB/month free) and replace with generated creds:
+        //       https://dashboard.metered.ca/signup?tool=turnserver
+        //
+        //   REMOVED:
+        //     • stun1-3.l.google.com, stun.cloudflare.com — redundant STUN
+        //     • freeturn.net — DNS failure (dead as of Apr 2026)
+        //     • a.relay.metered.ca with expired static creds
+        //     • Private expressturn — obfuscated creds, silently breaks on rotation
         function _buildPeerConfig() {
             return {
                 debug: 0,
@@ -5037,15 +5104,20 @@
                     iceTransportPolicy: 'all',
                     iceCandidatePoolSize: 2,
                     iceServers: [
-                        // ── STUN: one reliable server is sufficient ──────────────────
+                        // ── STUN ────────────────────────────────────────────────────
                         { urls: 'stun:stun.l.google.com:19302' },
-                        // ── TURN: freeturn.net — free, stable, no expiring creds ─────
-                        // UDP on 3478 — best latency, works on most home/mobile networks
-                        { urls: 'turn:freeturn.net:3478',               username: 'free', credential: 'free' },
-                        // TCP on 3478 — fallback for networks that block UDP
-                        { urls: 'turn:freeturn.net:3478?transport=tcp', username: 'free', credential: 'free' },
-                        // TLS on 5349 — last resort for deep-inspection / port-80-only firewalls
-                        { urls: 'turns:freeturn.net:5349',              username: 'free', credential: 'free' },
+
+                        // ── TURN layer 1: freestun.net (free/free, never expires) ───
+                        { urls: 'turn:freestun.net:3478',               username: 'free', credential: 'free' },
+                        { urls: 'turns:freestun.net:5349',              username: 'free', credential: 'free' },
+
+                        // ── TURN layer 2: OpenRelay by metered.ca (public creds) ────
+                        // Port 80/443 penetrates most firewalls; TCP is UDP fallback.
+                        { urls: 'turn:openrelay.metered.ca:80',                username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:443',               username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turns:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
                     ]
                 }
             };
@@ -6130,6 +6202,155 @@
         function updateSyncCount() {
             const count = Object.keys(p2pConnections).length;
             setSyncStatus(count > 0 ? 'online' : 'offline', count);
+        }
+
+        // ─── P2P Diagnostic Modal ─────────────────────────────────────────────
+        function openP2PDiag() {
+            const modal = document.getElementById('p2p-diag-modal');
+            modal.classList.add('open');
+
+            // My peer ID
+            const myIdEl = document.getElementById('diag-my-id');
+            myIdEl.textContent = p2pMyId || '(not registered yet)';
+
+            // Connected peers
+            const peersEl = document.getElementById('diag-peers');
+            const connected = Object.keys(p2pConnections).filter(pid => p2pConnections[pid]?.open);
+            peersEl.textContent = connected.length > 0 ? connected.join('\n') : 'None connected';
+            peersEl.style.whiteSpace = 'pre-line';
+
+            // Render configured ICE servers
+            const cfg = _buildPeerConfig().config;
+            const serversEl = document.getElementById('diag-servers');
+            serversEl.innerHTML = '';
+            (cfg.iceServers || []).forEach(s => {
+                const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+                urls.forEach(url => {
+                    const row = document.createElement('div');
+                    const isStun = url.startsWith('stun:');
+                    const isTurn = url.startsWith('turn:') || url.startsWith('turns:');
+                    const badge = isStun ? '<span class="text-blue-500">[STUN]</span>'
+                                : isTurn ? '<span class="text-amber-500">[TURN]</span>' : '';
+                    row.innerHTML = badge + ' ' + url;
+                    serversEl.appendChild(row);
+                });
+            });
+
+            // Reset ICE results
+            document.getElementById('diag-ice-status').textContent = 'Tap RUN TEST to check ICE servers.';
+            document.getElementById('diag-ice-status').className = 'text-slate-500 italic mb-2';
+            document.getElementById('diag-ice-results').innerHTML = '';
+            document.getElementById('diag-run-btn').disabled = false;
+            document.getElementById('diag-run-btn').textContent = 'RUN TEST';
+        }
+
+        function closeP2PDiag() {
+            document.getElementById('p2p-diag-modal').classList.remove('open');
+        }
+
+        function runIceTest() {
+            const btn       = document.getElementById('diag-run-btn');
+            const statusEl  = document.getElementById('diag-ice-status');
+            const resultsEl = document.getElementById('diag-ice-results');
+
+            btn.disabled    = true;
+            btn.textContent = 'Testing…';
+            statusEl.textContent  = 'Gathering ICE candidates (up to 10 s)…';
+            statusEl.className    = 'text-blue-500 font-bold mb-2';
+            resultsEl.innerHTML   = '';
+
+            const cfg = _buildPeerConfig().config;
+            let pc;
+            try {
+                pc = new RTCPeerConnection(cfg);
+            } catch(e) {
+                statusEl.textContent = 'RTCPeerConnection failed: ' + e.message;
+                statusEl.className   = 'text-red-500 font-bold mb-2';
+                btn.disabled = false; btn.textContent = 'RUN TEST';
+                return;
+            }
+
+            const collected = { host: [], srflx: [], relay: [] };
+
+            pc.onicecandidate = (evt) => {
+                if (!evt.candidate) return;
+                const c = evt.candidate;
+                const type = c.type; // 'host' | 'srflx' | 'relay'
+                if (!type) return;
+                const entry = (c.address || c.ip || '?') + ':' + c.port + ' (' + c.protocol + ')';
+                if (!collected[type]) collected[type] = [];
+                collected[type].push(entry);
+            };
+
+            pc.onicegatheringstatechange = () => {
+                if (pc.iceGatheringState !== 'complete') return;
+                finish();
+            };
+
+            // Create a dummy data channel so ICE actually gathers
+            pc.createDataChannel('diag');
+            pc.createOffer().then(offer => pc.setLocalDescription(offer)).catch(() => {});
+
+            // Timeout safety net
+            const timeout = setTimeout(finish, 10000);
+
+            function finish() {
+                clearTimeout(timeout);
+                try { pc.close(); } catch(_) {}
+
+                const hasRelay = collected.relay.length > 0;
+                const hasSrflx = collected.srflx.length > 0;
+                const hasHost  = collected.host.length > 0;
+
+                if (hasRelay) {
+                    statusEl.textContent = '✅ TURN relay working — cross-network P2P should succeed.';
+                    statusEl.className   = 'text-emerald-600 font-black mb-2';
+                } else if (hasSrflx) {
+                    statusEl.textContent = '⚠️ STUN only — TURN relay not gathered. Cross-network connections may fail on symmetric NAT.';
+                    statusEl.className   = 'text-amber-500 font-black mb-2';
+                } else if (hasHost) {
+                    statusEl.textContent = '❌ Host candidates only — STUN and TURN both failed. Same-network only.';
+                    statusEl.className   = 'text-red-500 font-black mb-2';
+                } else {
+                    statusEl.textContent = '❌ No candidates gathered — ICE completely blocked.';
+                    statusEl.className   = 'text-red-500 font-black mb-2';
+                }
+
+                // Render grouped results
+                resultsEl.innerHTML = '';
+                [['relay', '🟢', 'text-emerald-600'], ['srflx', '🔵', 'text-blue-500'], ['host', '⚪', 'text-slate-400']].forEach(([type, icon, cls]) => {
+                    const list = collected[type] || [];
+                    const section = document.createElement('div');
+                    section.className = 'mb-1';
+                    const header = document.createElement('div');
+                    header.className = 'font-black ' + cls;
+                    header.textContent = icon + ' ' + type.toUpperCase() + ' (' + list.length + ')';
+                    section.appendChild(header);
+                    if (list.length > 0) {
+                        list.slice(0, 4).forEach(e => {
+                            const row = document.createElement('div');
+                            row.className = 'pl-4 text-slate-500';
+                            row.textContent = e;
+                            section.appendChild(row);
+                        });
+                        if (list.length > 4) {
+                            const more = document.createElement('div');
+                            more.className = 'pl-4 text-slate-400';
+                            more.textContent = '+ ' + (list.length - 4) + ' more…';
+                            section.appendChild(more);
+                        }
+                    } else {
+                        const none = document.createElement('div');
+                        none.className = 'pl-4 text-slate-300';
+                        none.textContent = '(none)';
+                        section.appendChild(none);
+                    }
+                    resultsEl.appendChild(section);
+                });
+
+                btn.disabled    = false;
+                btn.textContent = 'RUN AGAIN';
+            }
         }
 
     </script>
