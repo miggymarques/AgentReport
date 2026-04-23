@@ -746,6 +746,7 @@
         let db = [];
         let sharedDb = [];  // all agents' entries — accumulates via P2P, cleared manually
         let sharedDbClearTs = 0; // tombstone: entries with id <= this were cleared; persisted & synced
+        let sharedDbBlock = {};  // tombstone map — deleted record ids; peers must never re-insert
         let finTable = {};  // persistent FIN → { type, body, assets, lastSeen, lastFlight }
         let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
         let aircraftRefBlock = {};
@@ -796,6 +797,7 @@
         const APP_STORAGE_KEY      = 'yul_field_data_v2';
         const SHARED_DB_KEY        = 'yul_shared_db_v1';
         const SHARED_DB_CLEAR_KEY  = 'yul_shared_db_clear_v1'; // tombstone timestamp for clear-all
+        const SHARED_DB_BLOCK_KEY  = 'yul_shared_db_block_v1'; // tombstone map: { id → deletedAt ts }
         const REF_STORAGE_KEY        = 'yul_aircraft_ref_v3';
         const AIRCRAFT_REF_BLOCK_KEY = 'yul_aircraft_ref_block_v1';
         const ASSET_REF_KEY          = 'yul_asset_ref_v2';
@@ -3293,6 +3295,16 @@
                     if (sharedDb.length !== before) saveSharedDb();
                 }
             } catch(e) { console.warn("Could not load shared clear ts:", e); }
+            try {
+                const savedSharedDbBlock = storageGet(SHARED_DB_BLOCK_KEY);
+                if (savedSharedDbBlock) sharedDbBlock = JSON.parse(savedSharedDbBlock);
+                // On load, purge any locally stored entries that are now tombstoned
+                if (Object.keys(sharedDbBlock).length > 0) {
+                    const before = sharedDb.length;
+                    sharedDb = sharedDb.filter(r => !sharedDbBlock[r.id]);
+                    if (sharedDb.length !== before) saveSharedDb();
+                }
+            } catch(e) { console.warn("Could not load shared db block:", e); }
 
             initAgentRef();
             rebuildAgentDropdown();
@@ -4687,6 +4699,13 @@
         function deleteRecord(id) {
             db = db.filter(r => r.id !== id);
             try { storageSet(APP_STORAGE_KEY, JSON.stringify(db)); } catch(e) { showToast("Storage full!"); }
+            // Tombstone — prevents this record ever being re-synced back by any peer
+            sharedDbBlock[id] = Date.now();
+            saveSharedDbBlock();
+            removeFromSharedDb(id);
+            // Broadcast tombstone immediately to all connected peers
+            const msg = { type: 'SHARED_DB_BLOCK', sharedDbBlock: { [id]: sharedDbBlock[id] } };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
             updateUI();
         }
 
@@ -4704,6 +4723,10 @@
             storageSet(SHARED_DB_KEY, JSON.stringify(sharedDb));
         }
 
+        function saveSharedDbBlock() {
+            storageSet(SHARED_DB_BLOCK_KEY, JSON.stringify(sharedDbBlock));
+        }
+
         function updateSharedCount() {
             const lbl = document.getElementById('shared-count-label');
             if (lbl) lbl.textContent = sharedDb.length + ' record' + (sharedDb.length !== 1 ? 's' : '');
@@ -4713,6 +4736,7 @@
         function addToSharedDb(entry) {
             if (!entry || !entry.id) return;
             if ((entry.id || 0) <= sharedDbClearTs) return; // predates the last clear — discard
+            if (sharedDbBlock[entry.id]) return;            // tombstoned — never re-insert
             if (sharedDb.find(r => r.id === entry.id)) return; // already present
             sharedDb.unshift(entry);
             saveSharedDb();
@@ -5047,6 +5071,7 @@
             return {
                 finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched,
                 agentRef: agents, agentBlock, sharedDb: sharedEntries, sharedDbClearTs,
+                sharedDbBlock,
                 aircraftRef: acRef, aircraftRefBlock,
                 assetRef: asRef, assetRefTs: asRefTs, assetRefBlock,
                 assetHistory: ahEntries, assetHistoryBlock, assetHistoryAssetBlock,
@@ -5662,6 +5687,25 @@
                 if (sharedDb.length !== before) { saveSharedDb(); updateSharedCount(); anyChanged = true; }
             }
 
+            // ── Merge sharedDbBlock tombstones ────────────────────────────────
+            // Must run BEFORE the live sharedDb merge so incoming entries are
+            // immediately rejected if their id appears in the tombstone map.
+            if (msg.sharedDbBlock && typeof msg.sharedDbBlock === 'object') {
+                let blockChanged = false;
+                Object.entries(msg.sharedDbBlock).forEach(([idStr, ts]) => {
+                    const id = Number(idStr);
+                    if (!sharedDbBlock[id] || ts > sharedDbBlock[id]) {
+                        sharedDbBlock[id] = ts;
+                        blockChanged = true;
+                        // Evict from local sharedDb if present
+                        const before = sharedDb.length;
+                        sharedDb = sharedDb.filter(r => r.id !== id);
+                        if (sharedDb.length !== before) { saveSharedDb(); updateSharedCount(); anyChanged = true; }
+                    }
+                });
+                if (blockChanged) saveSharedDbBlock();
+            }
+
             // Bug fix: merge incoming sharedDb entries (present on FULL_SYNC and DELTA_SYNC)
             // so newly connecting peers receive all existing shared records from peers.
             if (msg.sharedDb && Array.isArray(msg.sharedDb) && msg.sharedDb.length > 0) {
@@ -5959,6 +6003,12 @@
             if (msg.type === 'REF_SYNC') {
                 const changed = applyIncomingSyncMsg(msg, fromPeer);
                 if (changed && (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'assethistory')) renderRefList();
+                return;
+            }
+
+            if (msg.type === 'SHARED_DB_BLOCK') {
+                const changed = applyIncomingSyncMsg(msg, fromPeer);
+                if (changed && activeRefTab === 'alldata') renderSharedTable();
                 return;
             }
 
