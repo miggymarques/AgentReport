@@ -5063,35 +5063,49 @@
         }
 
         // ─── P2P: Shared config builder ───────────────────────────────────────
-        // ICE server strategy — tested Apr 2026:
+        // ICE server strategy:
         //
-        //   SIGNALING : 0.peerjs.com — unavoidable.
-        //
-        //   STUN      : stun.l.google.com:19302 — one server is all ICE needs.
-        //
-        //   TURN layer 1 — freestun.net (credentials: free / free, never expire)
-        //     UDP 3478 : primary relay path, lowest latency
-        //     TLS 5349 : last resort for deep-packet-inspection firewalls
-        //     ⚠ Note: freeturn.net (the old address) has DNS failure as of Apr 2026.
-        //              freestun.net is the replacement / successor.
-        //
-        //   TURN layer 2 — OpenRelay by metered.ca (free, 20 GB/month)
-        //     Ports 80 and 443 bypass corporate and mobile-hotspot firewalls.
-        //     TCP variants are the final fallback when UDP is blocked outright.
-        //     TCP/80 and TCP/443 confirmed reachable Apr 2026.
-        //     ⚠ The old hardcoded metered.ca credentials
-        //       (e8dd65bec5a40d31e76b / uMNiYqFcbhb8wqQd) are EXPIRED — they
-        //       were static tokens from a personal account. These have been
-        //       replaced with the public OpenRelay credentials below.
-        //       For production reliability, sign up for a free metered.ca
-        //       account (20 GB/month free) and replace with generated creds:
-        //       https://dashboard.metered.ca/signup?tool=turnserver
-        //
-        //   REMOVED:
-        //     • stun1-3.l.google.com, stun.cloudflare.com — redundant STUN
-        //     • freeturn.net — DNS failure (dead as of Apr 2026)
-        //     • a.relay.metered.ca with expired static creds
-        //     • Private expressturn — obfuscated creds, silently breaks on rotation
+        //   SIGNALING : 0.peerjs.com
+        //   STUN      : stun.l.google.com:19302
+        //   TURN      : metered.ca — credentials fetched fresh on load (rotating,
+        //               short-lived tokens). Falls back to freestun.net + OpenRelay
+        //               if the fetch fails (e.g. offline / quota exceeded).
+
+        // Fallback servers used if Metered fetch fails
+        const _ICE_FALLBACK = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'turn:freestun.net:3478',               username: 'free', credential: 'free' },
+            { urls: 'turns:freestun.net:5349',              username: 'free', credential: 'free' },
+            { urls: 'turn:openrelay.metered.ca:80',                username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443',               username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+            { urls: 'turns:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
+        ];
+
+        // Cache so we only fetch once per page load
+        let _cachedIceServers = null;
+
+        async function _prefetchIceServers() {
+            if (_cachedIceServers) return;
+            try {
+                const res = await fetch(
+                    'https://agentreport.metered.live/api/v1/turn/credentials?apiKey=496642bbdac2a80967b75da57cbf6f968e6c'
+                );
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const servers = await res.json();
+                if (Array.isArray(servers) && servers.length) {
+                    _cachedIceServers = servers;
+                    console.log('[P2P] Metered ICE servers loaded:', servers.length);
+                }
+            } catch (e) {
+                console.warn('[P2P] Metered fetch failed, using fallback ICE servers:', e.message);
+            }
+        }
+
+        // Fire prefetch immediately so servers are ready before initP2P is called
+        _prefetchIceServers();
+
         function _buildPeerConfig() {
             return {
                 debug: 0,
@@ -5103,22 +5117,7 @@
                 config: {
                     iceTransportPolicy: 'all',
                     iceCandidatePoolSize: 2,
-                    iceServers: [
-                        // ── STUN ────────────────────────────────────────────────────
-                        { urls: 'stun:stun.l.google.com:19302' },
-
-                        // ── TURN layer 1: freestun.net (free/free, never expires) ───
-                        { urls: 'turn:freestun.net:3478',               username: 'free', credential: 'free' },
-                        { urls: 'turns:freestun.net:5349',              username: 'free', credential: 'free' },
-
-                        // ── TURN layer 2: OpenRelay by metered.ca (public creds) ────
-                        // Port 80/443 penetrates most firewalls; TCP is UDP fallback.
-                        { urls: 'turn:openrelay.metered.ca:80',                username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:openrelay.metered.ca:443',               username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turns:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
-                    ]
+                    iceServers: _cachedIceServers || _ICE_FALLBACK
                 }
             };
         }
