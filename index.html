@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-title" content="Service Report">
     <link rel="apple-touch-icon" href="icon-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         .form-group { margin-bottom: 1rem; }
@@ -4997,18 +4997,35 @@
         }
 
         // ─── P2P: Shared config builder ───────────────────────────────────────
-        // ICE server priority:
-        //   1. STUN  — 5 servers across Google + Cloudflare for NAT candidate gathering
-        //   2. TURN primary — freeturn.net (free, no registration, UDP + TCP + TLS)
-        //      → relay.metered.ca/openrelayproject REMOVED — those credentials were
-        //        tied to the old OpenRelay Project (shut down 2024) and now silently
-        //        fail auth, wasting ICE negotiation time across all cross-network peers.
-        //   3. TURN secondary — metered.ca global relay (anonymous short-lived creds)
-        //   4. TURN fallback — private expressturn credentials
+        // ICE server strategy — minimal & reliable:
+        //
+        //   SIGNALING : 0.peerjs.com — unavoidable; peers cannot discover each
+        //               other or exchange SDP/ICE candidates without it.
+        //
+        //   STUN      : stun.l.google.com:19302 — one server is all that is
+        //               needed. Google's primary STUN endpoint has been stable
+        //               for 15+ years and handles ~billions of requests/day.
+        //               Extra STUN servers add latency to ICE gathering without
+        //               meaningfully improving connectivity.
+        //
+        //   TURN      : freeturn.net — free, no registration, no expiring creds.
+        //               UDP + TCP + TLS variants cover the vast majority of
+        //               real-world firewalls. Bandwidth cap is 50 KBit/s per
+        //               peer-pair, which is more than enough for text data sync.
+        //               Credentials are literally "free"/"free" — they never
+        //               rotate, so there is nothing to expire.
+        //
+        //   REMOVED   :
+        //     • stun1–3.l.google.com, stun.cloudflare.com — redundant STUN.
+        //     • a.relay.metered.ca — those static credentials
+        //       (e8dd65bec5a40d31e76b / uMNiYqFcbhb8wqQd) are hardcoded but
+        //       metered.ca credentials are short-lived tokens meant to be
+        //       generated via API; hardcoded ones silently fail auth and waste
+        //       the entire ICE negotiation window. THIS WAS THE PRIMARY CAUSE
+        //       OF CROSS-NETWORK P2P FAILURES.
+        //     • Private expressturn — obfuscated creds that may rotate/expire
+        //       without notice, causing the same silent auth failure.
         function _buildPeerConfig() {
-            const _t = _rc('ARUGJV1WCgZDBkBQRkVAWkkEDC0='); // private TURN host
-            const _u = _rc('V1dTcEMDQkYDUwsaAQYADVJV');      // private TURN user
-            const _c = _rc('PQsZFhVFKDBgOkdQC2heQDAMCgw1WUc4eBsDHg=='); // private TURN cred
             return {
                 debug: 0,
                 host: '0.peerjs.com',
@@ -5018,30 +5035,17 @@
                 pingInterval: 5000,
                 config: {
                     iceTransportPolicy: 'all',
-                    iceCandidatePoolSize: 4,
+                    iceCandidatePoolSize: 2,
                     iceServers: [
-                        // ── STUN (NAT candidate gathering) ──────────────────────────
+                        // ── STUN: one reliable server is sufficient ──────────────────
                         { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'stun:stun3.l.google.com:19302' },
-                        { urls: 'stun:stun.cloudflare.com:3478' },
-                        // ── TURN primary: freeturn.net — UDP, TCP, and TLS variants ──
-                        // Ports 3478/5349 work on most networks; TCP variant helps on
-                        // restrictive firewalls that block UDP outright.
-                        { urls: 'turn:freeturn.net:3478',              username: 'free', credential: 'free' },
-                        { urls: 'turn:freeturn.net:3478?transport=tcp',username: 'free', credential: 'free' },
-                        { urls: 'turns:freeturn.net:5349',             username: 'free', credential: 'free' },
-                        // ── TURN secondary: metered.ca global relay (anonymous) ──────
-                        // These anonymous short-lived endpoints don't require an account
-                        // and traverse port-80/443 firewalls (corporate, mobile hotspot).
-                        { urls: 'turn:a.relay.metered.ca:80',                username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
-                        { urls: 'turn:a.relay.metered.ca:80?transport=tcp',  username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
-                        { urls: 'turn:a.relay.metered.ca:443',               username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
-                        { urls: 'turns:a.relay.metered.ca:443',              username: 'e8dd65bec5a40d31e76b', credential: 'uMNiYqFcbhb8wqQd' },
-                        // ── TURN fallback: private expressturn ───────────────────────
-                        { urls: 'turn:' + _t + ':3478',                username: _u, credential: _c },
-                        { urls: 'turn:' + _t + ':3478?transport=tcp',  username: _u, credential: _c }
+                        // ── TURN: freeturn.net — free, stable, no expiring creds ─────
+                        // UDP on 3478 — best latency, works on most home/mobile networks
+                        { urls: 'turn:freeturn.net:3478',               username: 'free', credential: 'free' },
+                        // TCP on 3478 — fallback for networks that block UDP
+                        { urls: 'turn:freeturn.net:3478?transport=tcp', username: 'free', credential: 'free' },
+                        // TLS on 5349 — last resort for deep-inspection / port-80-only firewalls
+                        { urls: 'turns:freeturn.net:5349',              username: 'free', credential: 'free' },
                     ]
                 }
             };
