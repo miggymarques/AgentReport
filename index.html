@@ -2094,12 +2094,37 @@
 
         function addAssetHistoryEntry() {
             const assetId = (document.getElementById('ah-asset-id')?.value || '').trim().toUpperCase();
-            const dt      = (document.getElementById('ah-dt')?.value      || '').trim();
+            const dtRaw   = (document.getElementById('ah-dt')?.value      || '').trim();
             const tr      = (document.getElementById('ah-tr')?.value      || '').trim().toUpperCase();
             const loc     = (document.getElementById('ah-loc')?.value     || '').trim().toUpperCase();
             const nt      = (document.getElementById('ah-nt')?.value      || '').trim();
             if (!assetId) return showToast('Enter Asst#');
+
+            // Normalise to full ISO string so lexicographic dt comparison is consistent
+            // with every other write path (writeOBHistoryForHHDs / writeRMHistoryEntry
+            // both call .toISOString()). A raw datetime-local value like "2025-04-25T08:00"
+            // has no seconds and no Z, so it will always lose a string compare against an
+            // existing ISO entry like "2025-04-25T08:00:00.000Z" — causing peers to
+            // silently overwrite newer manual entries with older synced ones.
+            const dt = dtRaw ? new Date(dtRaw).toISOString() : '';
+
             const entry = { id: Date.now(), assetId, dt, tr, loc, nt };
+
+            // Upsert — one record per assetId, latest dt wins.
+            // Mirrors writeRMHistoryEntry so peers correctly reject this entry
+            // if they already hold something newer, and prevents duplicate rows
+            // for the same asset accumulating in the table.
+            const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+            if (assetTombTs && entry.id <= assetTombTs) return showToast('Entry predates deletion — skipped');
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (!assetHistoryBlock[assetHistory[existingIdx].id]) {
+                    // existing entry is live — only replace if our dt is strictly newer
+                    if (dt <= assetHistory[existingIdx].dt) return showToast('Existing record is same age or newer');
+                }
+                assetHistory.splice(existingIdx, 1);
+            }
+
             assetHistory.push(entry);
             saveAssetHistory();
             // broadcast to all peers immediately
