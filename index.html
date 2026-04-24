@@ -1979,8 +1979,8 @@
             // ── Block 2: Damaged by airline (TR=DM, NT starts with airline code) — kept for Block 2 station table ──
             const dm      = ah.filter(e => (e.tr || '').toUpperCase() === 'DM');
 
-            // ── Block 2: Available at station (TR in {RM, RC, FN}, LOC = station) ──
-            const avSet   = new Set(['RM','RC','FN']);
+            // ── Block 2: Available at station (TR in {RM, RC, FN, RP}, LOC = station) ──
+            const avSet   = new Set(['RM','RC','FN','RP']);
             const av      = ah.filter(e => avSet.has((e.tr || '').toUpperCase()));
             const avYYZ   = av.filter(e => (e.loc || '').toUpperCase() === 'YYZ').length;
             const avYUL   = av.filter(e => (e.loc || '').toUpperCase() === 'YUL').length;
@@ -1998,7 +1998,7 @@
             // ── Block 3: Totals ──
             const ttl     = Object.keys(assetRef).length;
             // TRK = unique asset IDs in history with a tracked status
-            const trackedSet = new Set(['RM','RC','FN','OB','DM']);
+            const trackedSet = new Set(['RM','RC','FN','RP','OB','DM']);
             const trkCount = new Set(ah.filter(e => trackedSet.has((e.tr || '').toUpperCase())).map(e => e.assetId)).size;
             // N/A = assets in the DB not covered by TRK or MS (TTL minus everything shown in TRK)
             const naCount  = Math.max(0, ttl - trkCount - msTot);
@@ -5110,25 +5110,33 @@
 
         // Cache so we only fetch once per page load
         let _cachedIceServers = null;
+        // Single shared promise — all callers await the same fetch; never fires twice
+        let _iceServersFetchPromise = null;
 
-        async function _prefetchIceServers() {
-            if (_cachedIceServers) return;
-            try {
-                const res = await fetch(
-                    'https://agentreport.metered.live/api/v1/turn/credentials?apiKey=496642bbdac2a80967b75da57cbf6f968e6c'
-                );
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                const servers = await res.json();
-                if (Array.isArray(servers) && servers.length) {
-                    _cachedIceServers = servers;
-                    console.log('[P2P] Metered ICE servers loaded:', servers.length);
+        function _prefetchIceServers() {
+            if (_iceServersFetchPromise) return _iceServersFetchPromise;
+            _iceServersFetchPromise = (async () => {
+                if (_cachedIceServers) return;
+                try {
+                    // Race the fetch against a 5-second timeout so startup is never stalled
+                    const res = await Promise.race([
+                        fetch('https://agentreport.metered.live/api/v1/turn/credentials?apiKey=496642bbdac2a80967b75da57cbf6f968e6c'),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+                    ]);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const servers = await res.json();
+                    if (Array.isArray(servers) && servers.length) {
+                        _cachedIceServers = servers;
+                        console.log('[P2P] Metered ICE servers loaded:', servers.length);
+                    }
+                } catch (e) {
+                    console.warn('[P2P] Metered fetch failed, using fallback ICE servers:', e.message);
                 }
-            } catch (e) {
-                console.warn('[P2P] Metered fetch failed, using fallback ICE servers:', e.message);
-            }
+            })();
+            return _iceServersFetchPromise;
         }
 
-        // Fire prefetch immediately so servers are ready before initP2P is called
+        // Fire prefetch immediately so it runs in parallel with page init
         _prefetchIceServers();
 
         function _buildPeerConfig() {
@@ -5249,7 +5257,7 @@
             return false;
         }
 
-        function initP2P(agentValue) {
+        async function initP2P(agentValue) {
             if (!agentValue) return;
             const peerId = agentToPeerId(agentValue);
 
@@ -5291,6 +5299,12 @@
                     }, 2000);
                 });
             }
+
+            // ── CRITICAL: await ICE server fetch before building Peer config ──
+            // Without this await, _cachedIceServers is null when _buildPeerConfig()
+            // runs (the fetch hasn't resolved yet), causing fallback to unreliable
+            // public TURN servers and silent failure on cross-network connections.
+            await _prefetchIceServers();
 
             // On initial open, bypass backoff to immediately try all peers
             _attachPeerHandlers(new Peer(peerId, _buildPeerConfig()), agentValue, peerId, { initialConnect: true });
