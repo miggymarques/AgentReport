@@ -6016,7 +6016,14 @@
 
             if (msg.type === 'REF_SYNC') {
                 const changed = applyIncomingSyncMsg(msg, fromPeer);
-                if (changed && (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'assethistory')) renderRefList();
+                if (changed) {
+                    // Advance the sync cursor so the periodic delta doesn't re-send
+                    // entries we just received — mirrors what FULL_SYNC/DELTA_SYNC do.
+                    lastSyncTs[fromPeer] = Date.now();
+                    if (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'assethistory') renderRefList();
+                    // Re-render summary footer if the assethistory tab is open
+                    if (activeRefTab === 'assethistory') renderAssetHistorySummary();
+                }
                 return;
             }
 
@@ -6194,7 +6201,9 @@
                         Object.keys(delta.assetIndex).length > 0 ||
                         Object.keys(delta.nroIndex).length   > 0 ||
                         (delta.agentRef || []).length         > 0 ||
-                        Object.keys(delta.scheduleData || {}).length > 0;
+                        Object.keys(delta.scheduleData || {}).length > 0 ||
+                        (delta.assetHistory || []).length     > 0 ||
+                        Object.keys(delta.assetHistoryBlock || {}).length > 0;
 
                     if (hasData) {
                         conn_p2p_send(pid, { type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
