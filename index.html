@@ -1588,7 +1588,15 @@
                 // the sighting is preserved. Unregistered assets are flagged in the NT field
                 // so they are easily identifiable in the history view.
                 const inDb = !!(assetRef[digits] || assetRef[paddedDigits]);
-                const obNt = inDb ? '' : 'Asset not in database';
+                const obNtBase = inDb ? '' : 'Asset not in database';
+
+                // Build "FirstName - STN" agent tag from the saved entry
+                const _obAgentEntry = agentRef.find(a => a.value === entry.Agent);
+                const _obDisplayName = _obAgentEntry ? _obAgentEntry.displayName : (entry.Agent || '');
+                const _obFirstName = _obDisplayName.split(' ')[0];
+                const _obStation = (entry['Service Station'] || '').trim().toUpperCase();
+                const _obAgentTag = [_obFirstName, _obStation].filter(Boolean).join(' - ');
+                const obNt = [obNtBase, _obAgentTag].filter(Boolean).join(' | ');
 
                 const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc, ...(obNt ? { nt: obNt } : {}) };
 
@@ -1678,16 +1686,17 @@
         // loc      : lastFin from nroIndex — the FIN the asset was last expected on
         // batchMode: if true, skip save+broadcast — caller must flush after the loop
         // Returns the written entry object, or null if an equal-or-newer record exists.
-        function writeMSHistoryEntry(assetId, nroTs, loc, batchMode = false) {
+        function writeMSHistoryEntry(assetId, nroTs, loc, batchMode = false, agentStr = '') {
             if (!assetId || !loc) return null;
             const dtStr = new Date(nroTs).toISOString();
+            const msNt = agentStr ? `Potential Missing | ${agentStr}` : 'Potential Missing';
             const histEntry = {
                 id:      Date.now() + Math.floor(Math.random() * 1000),
                 assetId,
                 dt:      dtStr,
                 tr:      'MS',
                 loc:     loc.trim().toUpperCase(),
-                nt:      'Potential Missing'
+                nt:      msNt
             };
             // MAX(DateTime) guard: only insert if this NRO timestamp is strictly newer
             // than any existing Asset_History record for this asset (OB, RM, or prior MS).
@@ -1718,12 +1727,12 @@
         // attempt to write a TR:'MS' / LOC:<lastFin> history entry.
         // The MAX(DateTime) guard inside writeMSHistoryEntry ensures we never
         // overwrite a newer OB or RM record with a stale missing flag.
-        function processMissingAssets() {
+        function processMissingAssets(agentStr = '') {
             if (!Object.keys(nroIndex).length) return;
             const batchedMS = [];
             Object.entries(nroIndex).forEach(([assetId, rec]) => {
                 if (!rec.lastFin || !rec.ts) return;
-                const written = writeMSHistoryEntry(assetId, rec.ts, rec.lastFin, /*batchMode=*/true);
+                const written = writeMSHistoryEntry(assetId, rec.ts, rec.lastFin, /*batchMode=*/true, agentStr);
                 if (written) batchedMS.push(written);
             });
             if (batchedMS.length) {
@@ -1819,6 +1828,65 @@
                 assetId,
                 dt:      dtStr,
                 tr:      'DM',
+                loc:     (loc || '').trim().toUpperCase(),
+                nt:      ntFull
+            };
+
+            // MAX(DateTime) guard — one record per assetId, latest dt wins
+            const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+            if (assetTombTs && histEntry.id <= assetTombTs) return null; // per-assetId tombstone — skip
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // tombstoned — never resurrect
+                if (dtStr <= assetHistory[existingIdx].dt) return null;           // existing is same age or newer
+                assetHistory.splice(existingIdx, 1);                              // evict stale record
+            }
+
+            assetHistory.push(histEntry);
+
+            if (!batchMode) {
+                saveAssetHistory();
+                broadcastAssetHistorySync([histEntry]);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                    renderRefList();
+                }
+            }
+
+            return histEntry;
+        }
+
+        // ─── Write a single RP (Repaired In-House) entry into Asset History ─────
+        //
+        // Trigger Condition — Inventory Only Record:
+        //   FIN = "INV"  AND  SrvcIssCAT = "RT ( INV RTN Base )"
+        //   AND  SrvcIss = "Repaired In-House"
+        //
+        // Field Mapping:
+        //   ASST# → assetId  |  TR → "RP"  |  LOC → Agent Base Station
+        //   Date/Time → dt (now on live save, entry.id timestamp on import)
+        //   NT → SrvcIss | IssueDetails | GeneralComments | Agent First Name
+        //
+        // Upsert rule (identical to OB / RM / MS / DM):
+        //   One record per assetId. Latest dt always wins, regardless of prior TR type.
+        //   Tombstoned entries (assetHistoryBlock) are never resurrected.
+        //
+        // batchMode: if true, skip save+broadcast — caller must flush after the loop.
+        // Returns the written entry object, or null if skipped (newer/tombstoned).
+        function writeRPHistoryEntry(assetId, dt, loc, nt, batchMode = false) {
+            if (!assetId) return null;
+
+            const inDb   = isValidAssetId(assetId);
+            const ntRaw  = (nt || '').trim();
+            const ntFull = [ntRaw, inDb ? '' : 'Asset not in database'].filter(Boolean).join(' | ');
+            const dtStr  = (dt instanceof Date ? dt : new Date(dt)).toISOString();
+
+            const histEntry = {
+                id:      Date.now() + Math.floor(Math.random() * 1000),
+                assetId,
+                dt:      dtStr,
+                tr:      'RP',
                 loc:     (loc || '').trim().toUpperCase(),
                 nt:      ntFull
             };
@@ -3795,6 +3863,51 @@
                     if (written) batchedHistoryEntries.push(written);
                 })();
 
+                // ── RP history: Repaired In-House (Sync Table Import) ─────────
+                // Condition: FIN = INV  AND  SrvcIssCAT = "RT ( INV RTN Base )"
+                //            AND  SrvcIss = "Repaired In-House"
+                // Mirrors handleSave RP logic. Runs batchMode=true; flushed after loop.
+                (function() {
+                    const fin     = (entry.FIN        || '').trim().toUpperCase();
+                    const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+                    const issVal  = (entry.SrvcIss    || '').trim();
+
+                    const isInvRtnRepaired = fin === 'INV'
+                                             && catNorm.includes('rt') && catNorm.includes('inv rtn')
+                                             && issVal === 'Repaired In-House';
+
+                    if (!isInvRtnRepaired) return;
+
+                    const assetId = (entry.ASST || '').trim().toUpperCase();
+                    if (!assetId || assetId === 'N/A' || assetId === '---') {
+                        console.warn('[Sync Import] RP history: no ASST value on row —', entry);
+                        return;
+                    }
+
+                    if (!isValidAssetId(assetId)) {
+                        console.warn(`[Sync Import] RP history: ASST "${assetId}" is not a valid asset ID — skipped`);
+                        return;
+                    }
+
+                    const stationCode = (entry['Service Station'] || '').trim().toUpperCase();
+                    const rpDt        = new Date(entry.id);
+
+                    // NT: Specific Issue | Issue Details | Comments column | Agent First Name
+                    // On import, GeneralComments is mapped from the 'Comments' column (see entry build above)
+                    const _rpAgentEntry  = agentRef.find(a => a.value === entry.Agent);
+                    const _rpDisplayName = _rpAgentEntry ? _rpAgentEntry.displayName : (entry.Agent || '');
+                    const _rpFirstName   = _rpDisplayName.split(' ')[0];
+                    const noteText = [
+                        issVal,
+                        (entry.IssueDetails    || '').trim(),
+                        (entry.GeneralComments || '').trim(),
+                        _rpFirstName
+                    ].filter(Boolean).join(' | ');
+
+                    const written = writeRPHistoryEntry(assetId, rpDt, stationCode, noteText, /*batchMode=*/true);
+                    if (written) batchedHistoryEntries.push(written);
+                })();
+
                 processed++;
             });
 
@@ -4470,7 +4583,12 @@
             // result of this live save — mirrors what the CSV import path does via
             // processMissingAssets() after applyHistoryRows(). Without this call, MS
             // entries were only written the next time a Sync Table import ran.
-            processMissingAssets();
+            const _saveAgentEntry = agentRef.find(a => a.value === entry.Agent);
+            const _saveDisplayName = _saveAgentEntry ? _saveAgentEntry.displayName : (entry.Agent || '');
+            const _saveFirstName = _saveDisplayName.split(' ')[0];
+            const _saveStation = (entry['Service Station'] || '').trim().toUpperCase();
+            const _saveAgentStr = [_saveFirstName, _saveStation].filter(Boolean).join(' - ');
+            processMissingAssets(_saveAgentStr);
             clearPPlusForFin(entry.FIN); // auto-reset P+ now that this FIN has been serviced
 
             // ── OB history: each real HHD currently onboard ─────────────────
@@ -4597,6 +4715,51 @@
                 } else {
                     showToast(`⚠️ DM History: ASST "${assetId}" not a valid asset ID — skipped`);
                     console.warn('[File Save] DM Asset History: invalid ASST field —', assetId);
+                }
+            })();
+
+            // ── RP history: Repaired In-House (File Save) ────────────────────
+            // Condition: FIN = "INV" AND SrvcIssCAT = "RT ( INV RTN Base )"
+            //            AND SrvcIss = "Repaired In-House"
+            // Asset identifier: ASST field. LOC: Service Station. NT: issue + details + agent first name.
+            (function() {
+                const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+                const issVal  = (entry.SrvcIss    || '').trim();
+
+                const isInvRtnRepaired = isInvMode
+                                         && catNorm.includes('rt') && catNorm.includes('inv rtn')
+                                         && issVal === 'Repaired In-House';
+
+                if (!isInvRtnRepaired) return;
+
+                const assetId = (entry.ASST || '').trim().toUpperCase();
+                if (!assetId || assetId === 'N/A' || assetId === '---') {
+                    console.warn('[File Save] RP history: no ASST value — skipped');
+                    return;
+                }
+
+                const stationCode = (
+                    entry['Service Station'] ||
+                    document.getElementById('station-field')?.value || ''
+                ).trim().toUpperCase();
+
+                // NT: Specific Issue | Issue Details | General Comments | Agent First Name
+                const _rpAgentEntry  = agentRef.find(a => a.value === entry.Agent);
+                const _rpDisplayName = _rpAgentEntry ? _rpAgentEntry.displayName : (entry.Agent || '');
+                const _rpFirstName   = _rpDisplayName.split(' ')[0];
+                const noteText = [
+                    issVal,
+                    (entry.IssueDetails    || '').trim(),
+                    (entry.GeneralComments || '').trim(),
+                    _rpFirstName
+                ].filter(Boolean).join(' | ');
+
+                if (isValidAssetId(assetId)) {
+                    writeRPHistoryEntry(assetId, now, stationCode, noteText, /*batchMode=*/false);
+                    console.log(`[File Save] RP history written — ${assetId} @ ${stationCode}`);
+                } else {
+                    showToast(`⚠️ RP History: ASST "${assetId}" not a valid asset ID — skipped`);
+                    console.warn('[File Save] RP Asset History: invalid ASST field —', assetId);
                 }
             })();
 
