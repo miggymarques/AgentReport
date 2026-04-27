@@ -1637,14 +1637,25 @@
         // nt       : free-text note
         // batchMode: if true, skip save+broadcast — caller must flush after the loop
         // Returns the written entry object, or null if the existing record is newer.
-        function writeRMHistoryEntry(assetId, dt, loc, nt, batchMode = false) {
+        // ─── Helper: append agent first name to an RM NT string ──────────────
+        // Produces e.g. "AC122 - Muqeet" or "Swp Wth GGC1234 - Muqeet".
+        // Skips if the first name is already present in the NT to avoid duplication.
+        function rmNtWithAgent(nt, agentStr) {
+            const firstName = (agentStr || '').split(',')[0].trim().split(/\s+/)[0] || '';
+            const ntTrim    = (nt || '').trim();
+            if (!firstName)                return ntTrim;
+            if (ntTrim.includes(firstName)) return ntTrim; // already there
+            return ntTrim ? `${ntTrim} - ${firstName}` : firstName;
+        }
+
+        function writeRMHistoryEntry(assetId, dt, loc, nt, batchMode = false, agentStr = '') {
             if (!assetId) return null;
             // Check whether the asset is registered in the database. If it isn't we still
             // write the record — the event happened and must be preserved. Unregistered
             // assets are flagged by appending "Asset not in database" to the NT field so
             // they are clearly identifiable without silently dropping the history entry.
             const inDb = isValidAssetId(assetId);
-            const ntRaw  = (nt  || '').trim();
+            const ntRaw  = rmNtWithAgent((nt || '').trim(), agentStr);
             const ntFull = [ntRaw, inDb ? '' : 'Asset not in database'].filter(Boolean).join(' | ');
             const dtStr = (dt instanceof Date ? dt : new Date(dt)).toISOString();
             const histEntry = {
@@ -3830,7 +3841,7 @@
                     const paddedDigits = digits.padStart(4, '0');
                     const raw = 'GGC' + paddedDigits;
                     if (!isValidAssetId(raw)) { rmAlerts.push(`${field}: "${rawInput}" (${raw}) — not a valid asset ID`); return; }
-                    const written = writeRMHistoryEntry(raw, rmDt, stationCode, entry.FIN, /*batchMode=*/true);
+                    const written = writeRMHistoryEntry(raw, rmDt, stationCode, entry.FIN, /*batchMode=*/true, entry.Agent);
                     if (written) batchedHistoryEntries.push(written);
                 });
                 if (rmAlerts.length) console.warn('[Sync Import] RM mapping failed —', rmAlerts.join(' | '));
@@ -4665,7 +4676,7 @@
                         return;
                     }
                     // LOC = FIN (the aircraft the asset was removed from)
-                    writeRMHistoryEntry(removedId, now, entry.FIN, `Swp Wth ${boardedId}`);
+                    writeRMHistoryEntry(removedId, now, entry.FIN, `Swp Wth ${boardedId}`, false, entry.Agent);
                 });
                 if (rmAlerts.length) {
                     // Surface mismatches to the user immediately
@@ -4689,7 +4700,7 @@
                     const stationCode = (entry['Service Station'] || document.getElementById('station-field')?.value || '').trim().toUpperCase();
                     const noteText   = (entry.IssueDetails || entry.GeneralComments || '').trim();
                     if (assetId && isValidAssetId(assetId)) {
-                        writeRMHistoryEntry(assetId, now, stationCode, noteText);
+                        writeRMHistoryEntry(assetId, now, stationCode, noteText, false, entry.Agent);
                     } else if (assetId) {
                         showToast(`⚠️ RM History: ASST "${assetId}" not a valid asset ID — skipped`);
                         console.warn('[File Save INV] RM Asset History: invalid ASST field —', assetId);
@@ -6160,7 +6171,7 @@
                         const stationCode = (inEntry['Service Station'] || '').trim().toUpperCase();
                         const noteText    = (inEntry.IssueDetails || inEntry.GeneralComments || '').trim();
                         if (assetId && isValidAssetId(assetId)) {
-                            writeRMHistoryEntry(assetId, new Date(inEntry.id), stationCode, noteText);
+                            writeRMHistoryEntry(assetId, new Date(inEntry.id), stationCode, noteText, false, inEntry.Agent);
                         } else if (assetId) {
                             console.warn('[All Data Sync] RM Asset History: invalid ASST —', assetId, 'from peer', fromPeer);
                         }
@@ -6172,7 +6183,7 @@
                         const raw = (inEntry[field] || '').trim().toUpperCase();
                         if (!raw || !isValidAssetId(raw)) return;
                         const noteText = (inEntry.IssueDetails || inEntry.GeneralComments || '').trim();
-                        writeRMHistoryEntry(raw, new Date(inEntry.id), stationCode, noteText);
+                        writeRMHistoryEntry(raw, new Date(inEntry.id), stationCode, noteText, false, inEntry.Agent);
                     });
                 }
                 // Bug fix: do NOT advance lastSyncTs by entry.id — entry IDs are not reliable
