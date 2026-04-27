@@ -2280,10 +2280,15 @@
         function renderSyncTable(container) {
             const numSort = (a, b) => parseInt(a.replace(/\D/g,'')) - parseInt(b.replace(/\D/g,''));
 
-            // Build a set of FINs that have any service call indication
+            // Build a set of FINs that have any service call indication.
+            // Check both local db AND sharedDb (peer records), and also IssueDetails
+            // (imported CSV rows map the Comments column → IssueDetails, not Comments).
+            const _isSvcCall = r =>
+                r.ServiceCall ||
+                (r.Comments    && r.Comments.includes('Service Call')) ||
+                (r.IssueDetails && r.IssueDetails.includes('Service Call'));
             const svcCallFins = new Set(
-                db.filter(r => r.ServiceCall || (r.Comments && r.Comments.includes('Service Call')))
-                  .map(r => r.FIN)
+                [...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN)
             );
 
             // Build a per-FIN NRO lookup: fin → [{assetId, lastSeen, ts}]
@@ -4192,10 +4197,15 @@
             const container = document.getElementById('priority-list');
             container.innerHTML = '';
 
-            // Build a set of FINs that have any service call indication
+            // Build a set of FINs that have any service call indication.
+            // Check both local db AND sharedDb (peer records), and also IssueDetails
+            // (imported CSV rows map the Comments column → IssueDetails, not Comments).
+            const _isSvcCallP = r =>
+                r.ServiceCall ||
+                (r.Comments    && r.Comments.includes('Service Call')) ||
+                (r.IssueDetails && r.IssueDetails.includes('Service Call'));
             const svcCallFins = new Set(
-                db.filter(r => r.ServiceCall || (r.Comments && r.Comments.includes('Service Call')))
-                  .map(r => r.FIN)
+                [...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN)
             );
 
             // ── New-Aircraft Notice ─────────────────────────────────────────────
@@ -4859,7 +4869,7 @@
                 const isInv  = r.FIN === 'INV';
                 const finCls = isInv ? 'text-amber-600' : 'text-blue-600';
                 const notSvc  = r.Serviced === 'No' ? '<span class="text-[9px] font-black text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full ml-1">NOT SVC</span>' : '';
-                const svcCall = (r.ServiceCall || (r.Comments && r.Comments.includes('Service Call'))) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
+                const svcCall = (r.ServiceCall || (r.Comments && r.Comments.includes('Service Call')) || (r.IssueDetails && r.IssueDetails.includes('Service Call'))) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
 
                 let equip = '';
                 if (!isInv) {
