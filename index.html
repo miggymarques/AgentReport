@@ -4192,6 +4192,12 @@
             const container = document.getElementById('priority-list');
             container.innerHTML = '';
 
+            // Build a set of FINs that have any service call indication
+            const svcCallFins = new Set(
+                db.filter(r => r.ServiceCall || (r.Comments && r.Comments.includes('Service Call')))
+                  .map(r => r.FIN)
+            );
+
             // ── New-Aircraft Notice ─────────────────────────────────────────────
             // Detect FINs present in the imported schedule (rotations) that are
             // not registered in the backend aircraft table (aircraftRef).
@@ -4465,7 +4471,7 @@
                     }
                     wrapper.innerHTML = `
                         <div class="grid gap-2 px-4 pt-2.5 ${(turnHtml || inProgressBadge) ? 'pb-1' : 'pb-2.5'} text-[11px] items-center" style="grid-template-columns:4rem 4rem 2rem 1fr 2rem">
-                            <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : isMyCard ? 'text-blue-700' : 'text-blue-600'}">${r.fin}${pPlusBadge}</span>
+                            <span class="font-mono font-black ${pPlusFlags[r.fin] ? 'text-violet-600' : isMyCard ? 'text-blue-700' : 'text-blue-600'}">${r.fin}${pPlusBadge}${svcCallFins.has(r.fin) ? ' <span title="Service Call" style="color:#3b82f6;font-size:8px;vertical-align:middle;">●</span>' : ''}</span>
                             <span class="font-bold text-slate-700">${r.type}</span>
                             <span class="font-black text-[10px] ${bodyColor}">${r.body}</span>
                             <span class="text-slate-500">${dateStr} <span class="text-slate-500 text-[9px]">(${daysLabel})</span>${timeStnStr ? `<span class="block text-[9px] font-bold text-slate-400 mt-0.5">${timeStnStr}</span>` : ''}</span>
