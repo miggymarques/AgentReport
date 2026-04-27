@@ -439,30 +439,42 @@
                 <button onclick="switchRefTab('alldata')" id="ref-tab-alldata" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">All Data</button>
             </div>
             <div id="synctable-export-bar" class="hidden border-b border-slate-200">
-                <div class="flex gap-2 px-3 pt-2 pb-1 items-center">
-                    <div class="relative flex-1">
-                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-black uppercase pointer-events-none select-none">FIN</span>
-                        <input id="st-filter-fin" type="text" placeholder="e.g. 101" maxlength="4"
-                            inputmode="numeric" class="!pl-8 !py-1.5 !text-xs !border-slate-200 font-mono w-full"
+                <div class="flex gap-1.5 px-2 py-1.5 items-center">
+                    <div class="relative" style="width:3.8rem">
+                        <span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] font-black uppercase pointer-events-none select-none">FIN</span>
+                        <input id="st-filter-fin" type="text" placeholder="101" maxlength="4"
+                            inputmode="numeric" class="!pl-7 !py-1 !text-[11px] !border-slate-200 font-mono w-full"
                             oninput="this.value=this.value.replace(/\D/g,'').slice(0,4); applySyncTableFilters()">
                     </div>
-                    <div class="relative flex-1">
-                        <span class="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-black uppercase pointer-events-none select-none">Asset</span>
-                        <input id="st-filter-asset" type="text" placeholder="e.g. 0123" maxlength="7"
-                            class="!pl-10 !py-1.5 !text-xs !border-slate-200 font-mono uppercase w-full"
+                    <div class="relative" style="width:4rem">
+                        <span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] font-black uppercase pointer-events-none select-none">AST</span>
+                        <input id="st-filter-asset" type="text" placeholder="0123" maxlength="7"
+                            class="!pl-7 !py-1 !text-[11px] !border-slate-200 font-mono uppercase w-full"
                             oninput="this.value=this.value.toUpperCase(); applySyncTableFilters()">
                     </div>
+                    <div class="relative flex-1">
+                        <span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] font-black uppercase pointer-events-none select-none">AG/ST</span>
+                        <input id="st-filter-agent" type="text" placeholder="name or YYZ"
+                            class="!pl-9 !py-1 !text-[11px] !border-slate-200 font-mono uppercase w-full"
+                            oninput="this.value=this.value.toUpperCase(); applySyncTableFilters()">
+                    </div>
+                    <div class="relative" style="width:4.2rem">
+                        <span class="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] font-black uppercase pointer-events-none select-none">Dt</span>
+                        <input id="st-filter-date" type="text" placeholder="Apr 13"
+                            class="!pl-6 !py-1 !text-[11px] !border-slate-200 font-mono w-full"
+                            oninput="applySyncTableFilters()">
+                    </div>
                     <button onclick="clearSyncTableFilters()" id="st-filter-clear" title="Clear filters"
-                        class="hidden text-slate-400 hover:text-red-500 transition-colors px-1 shrink-0">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
+                        class="hidden text-slate-400 hover:text-red-500 transition-colors px-0.5 shrink-0">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                     <button onclick="exportSyncTableCSV()" title="Export CSV"
-                        class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition-all text-white px-2.5 py-1.5 rounded-lg flex items-center gap-1 shrink-0">
+                        class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 transition-all text-white px-2 py-1 rounded-lg flex items-center gap-1 shrink-0">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                         <span class="text-[10px] font-black">CSV</span>
                     </button>
                 </div>
-                <div id="st-filter-hint" class="hidden px-3 pb-1.5 text-[9px] font-bold text-blue-500 uppercase tracking-widest"></div>
+                <div id="st-filter-hint" class="hidden px-3 pb-1 text-[9px] font-bold text-blue-500 uppercase tracking-widest"></div>
             </div>
 
             <!-- Asset History filter bar -->
@@ -475,6 +487,23 @@
                     <button onclick="clearAHFilters()" id="ah-f-clear" title="Clear" class="hidden text-slate-400 hover:text-red-500 transition-colors shrink-0">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
+                </div>
+            </div>
+
+            <!-- Schedule filter bar (shown when tab=schedule) -->
+            <div id="schedule-filter-bar" class="hidden border-b border-slate-200 bg-white">
+                <div class="flex gap-1 px-2 py-1.5 items-center overflow-x-auto">
+                    <input id="sf-fin"     type="text" placeholder="FIN"    oninput="renderRefList()" class="!text-[10px] !py-1 !px-1.5 uppercase font-mono shrink-0" style="width:2.7rem">
+                    <label class="flex items-center gap-0.5 cursor-pointer select-none shrink-0" title="Show only P+ aircraft">
+                        <input type="checkbox" id="sf-pplus" onchange="renderRefList()" class="pplus-checkbox">
+                        <span class="text-[10px] font-black text-violet-600 uppercase">P+</span>
+                    </label>
+                    <input id="sf-airline" type="text" placeholder="Airl"   oninput="renderRefList()" class="!text-[10px] !py-1 !px-1.5 uppercase font-mono shrink-0" style="width:2.8rem">
+                    <input id="sf-istn"   type="text" placeholder="ISTN"   oninput="renderRefList()" class="!text-[10px] !py-1 !px-1.5 uppercase font-mono shrink-0" style="width:2.8rem">
+                    <input id="sf-stn"    type="text" placeholder="STN"    oninput="renderRefList()" class="!text-[10px] !py-1 !px-1.5 uppercase font-mono shrink-0" style="width:2.5rem">
+                    <input id="sf-ostn"   type="text" placeholder="OSTN"   oninput="renderRefList()" class="!text-[10px] !py-1 !px-1.5 uppercase font-mono shrink-0" style="width:2.8rem">
+                    <input id="sf-ingt"   type="text" placeholder="MTC"    oninput="renderRefList()" class="!text-[10px] !py-1 !px-1.5 uppercase font-mono shrink-0" style="width:2.5rem" title="Filter by IGT or OGT">
+                    <button onclick="clearScheduleFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1 shrink-0">✕</button>
                 </div>
             </div>
 
@@ -546,16 +575,8 @@
             </div>
 
             <div class="p-3 bg-slate-50 border-t hidden" id="add-schedule-ui">
-                <!-- Filter bar -->
-                <div class="flex flex-wrap gap-1.5 mb-2">
-                    <input id="sf-fin"    type="text" placeholder="FIN"    oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-airline" type="text" placeholder="Airline" oninput="renderRefList()" class="!w-16 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-istn"   type="text" placeholder="ISTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-stn"    type="text" placeholder="STN"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-ostn"   type="text" placeholder="OSTN"   oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono">
-                    <input id="sf-ingt"   type="text" placeholder="MTC"    oninput="renderRefList()" class="!w-14 !text-[10px] !py-1 !px-2 uppercase font-mono" title="Filter by IGT or OGT">
-                    <button onclick="clearScheduleFilters()" class="text-[9px] font-black text-slate-400 hover:text-slate-600 px-1">✕ Clear</button>
-                </div>
+                <!-- Count bar (populated by renderScheduleList) -->
+                <div id="schedule-count-bar" class="text-[10px] font-black text-slate-500 mb-2 min-h-[1rem]"></div>
                 <!-- Drop zone -->
                 <label id="schedule-drop-zone" for="schedule-file-input"
                     class="flex items-center justify-center gap-3 border border-dashed border-blue-200 rounded-lg px-3 py-2 cursor-pointer hover:bg-blue-50 transition-colors"
@@ -1476,9 +1497,10 @@
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('assethistory-filter-bar').classList.toggle('hidden', tab !== 'assethistory');
+            document.getElementById('schedule-filter-bar').classList.toggle('hidden', tab !== 'schedule');
             const _colHdr = document.getElementById('synctable-col-header'); if (tab !== 'synctable') { _colHdr.classList.add('hidden'); _colHdr.innerHTML = ''; }
             const _ahHdr  = document.getElementById('assethistory-col-header'); if (tab !== 'assethistory') { _ahHdr.classList.add('hidden'); _ahHdr.innerHTML = ''; }
-            if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; }
+            if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; stFilterAgent = ''; stFilterDate = ''; }
             if (tab !== 'assethistory') { ahFilterAsset = ''; ahFilterTr = ''; ahFilterLoc = ''; ahFilterDate = ''; }
             if (tab === 'assethistory') {
                 const el = document.getElementById('assethistory-count-label');
@@ -1975,6 +1997,17 @@
                 });
             }
 
+            // ── Update count label ───────────────────────────────────────────
+            const _ahCountEl = document.getElementById('assethistory-count-label');
+            if (_ahCountEl) {
+                const total    = assetHistory.length;
+                const filtered = sorted.length;
+                const hasFilter = ahFilterAsset || ahFilterTr || ahFilterLoc || ahFilterDate;
+                _ahCountEl.textContent = hasFilter
+                    ? `${filtered} of ${total} records selected`
+                    : `${total} records`;
+            }
+
             if (!sorted.length) {
                 container.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">No matching entries.</p>';
                 return;
@@ -1988,19 +2021,18 @@
                 DM: 'background:#ffedd5;color:#c2410c;',   // orange — Reported Damaged
             };
 
-            const now = new Date();
-            const thisYear = now.getFullYear();
-
             sorted.forEach(row => {
-                // Compact date: omit year if current year → "Apr 13 14:35" or "Apr 13 2025 14:35"
+                // Compact date: always show 2-digit year → "Apr 13 '25 14:35"
                 let dtDisplay = '—';
                 if (row.dt) {
                     try {
                         const d = new Date(row.dt);
-                        const yr = d.getFullYear();
-                        const opts = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false };
-                        if (yr !== thisYear) opts.year = 'numeric';
-                        dtDisplay = d.toLocaleString('en-CA', opts);
+                        const month = d.toLocaleString('en-CA', { month: 'short' });
+                        const day   = d.getDate();
+                        const yr2   = String(d.getFullYear()).slice(-2);
+                        const hh    = String(d.getHours()).padStart(2, '0');
+                        const mm    = String(d.getMinutes()).padStart(2, '0');
+                        dtDisplay   = `${month} ${day} '${yr2} ${hh}:${mm}`;
                     } catch(e) {}
                 }
 
@@ -2224,10 +2256,22 @@
         function exportAssetHistoryCSV() {
             if (!assetHistory.length) return showToast('No history to export');
             const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+            const fmtDtCSV = dt => {
+                if (!dt) return '';
+                try {
+                    const d = new Date(dt);
+                    const month = d.toLocaleString('en-CA', { month: 'short' });
+                    const day   = d.getDate();
+                    const yr    = d.getFullYear();
+                    const hh    = String(d.getHours()).padStart(2, '0');
+                    const mm    = String(d.getMinutes()).padStart(2, '0');
+                    return `${month} ${day} ${yr} ${hh}:${mm}`;
+                } catch(e) { return dt; }
+            };
             const headers = ['Asst#', 'TR Date', 'TR', 'LOC', 'NT'];
             const rows = [headers.map(esc).join(',')];
             assetHistory.slice().sort((a, b) => b.id - a.id).forEach(r => {
-                rows.push([r.assetId, r.dt, r.tr, r.loc, r.nt].map(esc).join(','));
+                rows.push([r.assetId, fmtDtCSV(r.dt), r.tr, r.loc, r.nt].map(esc).join(','));
             });
             const csv  = rows.join('\r\n');
             const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -2242,22 +2286,25 @@
         // ─── Sync Table filter state ─────────────────────────────────────────
         let stFilterFin   = '';
         let stFilterAsset = '';
+        let stFilterAgent = '';
+        let stFilterDate  = '';
 
         function applySyncTableFilters() {
             stFilterFin   = (document.getElementById('st-filter-fin')?.value   || '').trim().toUpperCase();
             stFilterAsset = (document.getElementById('st-filter-asset')?.value || '').trim().toUpperCase();
-            const active  = stFilterFin || stFilterAsset;
+            stFilterAgent = (document.getElementById('st-filter-agent')?.value || '').trim().toUpperCase();
+            stFilterDate  = (document.getElementById('st-filter-date')?.value  || '').trim().toLowerCase();
+            const active  = stFilterFin || stFilterAsset || stFilterAgent || stFilterDate;
             const clearBtn = document.getElementById('st-filter-clear');
             if (clearBtn) clearBtn.classList.toggle('hidden', !active);
             if (activeRefTab === 'synctable') renderRefList();
         }
 
         function clearSyncTableFilters() {
-            stFilterFin = ''; stFilterAsset = '';
-            const finEl   = document.getElementById('st-filter-fin');
-            const assetEl = document.getElementById('st-filter-asset');
-            if (finEl)   finEl.value   = '';
-            if (assetEl) assetEl.value = '';
+            stFilterFin = ''; stFilterAsset = ''; stFilterAgent = ''; stFilterDate = '';
+            ['st-filter-fin','st-filter-asset','st-filter-agent','st-filter-date'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
             document.getElementById('st-filter-clear')?.classList.add('hidden');
             document.getElementById('st-filter-hint')?.classList.add('hidden');
             if (activeRefTab === 'synctable') renderRefList();
@@ -2285,6 +2332,8 @@
                 const el = document.getElementById(id); if (el) el.value = '';
             });
             document.getElementById('ah-f-clear')?.classList.add('hidden');
+            const _ahCountEl = document.getElementById('assethistory-count-label');
+            if (_ahCountEl) _ahCountEl.textContent = `${assetHistory.length} records`;
             if (activeRefTab === 'assethistory') renderRefList();
         }
 
@@ -2344,11 +2393,29 @@
                 });
             }
 
+            // Apply agent / station filter — loose match against lastAgent name OR lastStation code
+            if (stFilterAgent) {
+                fins = fins.filter(fin => {
+                    const entry = finTable[fin];
+                    const agent   = (entry.lastAgent   || '').toUpperCase();
+                    const station = (entry.lastStation || '').toUpperCase();
+                    return agent.includes(stFilterAgent) || station.includes(stFilterAgent);
+                });
+            }
+
+            // Apply date filter — loose match against lastSeen display string
+            if (stFilterDate) {
+                fins = fins.filter(fin => {
+                    const entry = finTable[fin];
+                    return (entry.lastSeen || '').toLowerCase().includes(stFilterDate);
+                });
+            }
+
             // Update hint bar
             const hintEl = document.getElementById('st-filter-hint');
             if (hintEl) {
                 const total = Object.keys(finTable).length;
-                if (stFilterFin || stFilterAsset) {
+                if (stFilterFin || stFilterAsset || stFilterAgent || stFilterDate) {
                     hintEl.textContent = `${fins.length} of ${total} FIN${total !== 1 ? 's' : ''} shown`;
                     hintEl.classList.remove('hidden');
                 } else {
@@ -3629,6 +3696,8 @@
                 const el = document.getElementById(id);
                 if (el) el.value = '';
             });
+            const pp = document.getElementById('sf-pplus');
+            if (pp) pp.checked = false;
             renderRefList();
         }
 
@@ -3980,12 +4049,14 @@
             const fIStn   = (document.getElementById('sf-istn')?.value    || '').trim().toUpperCase();
             const fOStn   = (document.getElementById('sf-ostn')?.value    || '').trim().toUpperCase();
             const fInGt   = (document.getElementById('sf-ingt')?.value    || '').trim().toUpperCase();
+            const fPPlus  = document.getElementById('sf-pplus')?.checked || false;
 
             // Build filtered list: { fin, rotations[] }
             const filtered = [];
             Object.keys(scheduleData).sort().forEach(fin => {
                 if (fFin     && !fin.includes(fFin))           return;
                 if (fAirline && !fin.startsWith(fAirline))     return;
+                if (fPPlus   && !pPlusFlags[fin])              return;
                 const rots = scheduleData[fin].filter(rot => {
                     if (fStn  && (rot.stn  || '').toUpperCase()  !== fStn)  return false;
                     if (fIStn && (rot.iStn || '').toUpperCase()  !== fIStn) return false;
@@ -3997,15 +4068,16 @@
             });
 
             const shownRots = filtered.reduce((s, r) => s + r.rots.length, 0);
+            const isFiltered = fFin || fAirline || fStn || fIStn || fOStn || fInGt || fPPlus;
 
-            // Summary bar
-            const summary = document.createElement('div');
-            summary.className = "text-center py-2 border-b border-slate-100 mb-1";
-            const isFiltered = fFin || fAirline || fStn || fIStn || fOStn || fInGt;
-            summary.innerHTML = isFiltered
-                ? `<span class="text-[10px] font-black text-violet-600">${filtered.length} aircraft · ${shownRots} rotations</span> <span class="text-[9px] text-slate-300">(filtered from ${finCount} / ${rotCount})</span>`
-                : `<span class="text-[10px] font-black text-slate-500">${finCount} aircraft · ${rotCount} rotations</span>${ts ? `<span class="text-[9px] text-slate-300 ml-2">· ${new Date(ts).toLocaleString()}</span>` : ''}`;
-            container.appendChild(summary);
+            // Push count to footer bar
+            const countBar = document.getElementById('schedule-count-bar');
+            if (countBar) {
+                const tsStr = ts ? `<span class="text-[9px] font-bold text-slate-500 ml-2">· imported ${new Date(ts).toLocaleString()}</span>` : '';
+                countBar.innerHTML = isFiltered
+                    ? `<span class="text-violet-600">${filtered.length} aircraft · ${shownRots} rotations</span> <span class="text-slate-400">(of ${finCount} / ${rotCount})</span>${tsStr}`
+                    : `${finCount} aircraft · ${rotCount} rotations${tsStr}`;
+            }
 
             if (filtered.length === 0) {
                 const empty = document.createElement('div');
