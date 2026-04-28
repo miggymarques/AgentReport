@@ -1225,6 +1225,14 @@
                 finTable[fin].lastTime    = entry.displayTime || '';
                 finTable[fin]._ts         = entryTs;
 
+                // Persist the service-call flag so that file-imported entries (which never
+                // enter db or sharedDb) are still detectable by renderSyncTable /
+                // renderPriorityList when they build svcCallFins from finTable.
+                finTable[fin].hasServiceCall =
+                    !!(entry.ServiceCall ||
+                       (entry.Comments    && entry.Comments.includes('Service Call')) ||
+                       (entry.IssueDetails && entry.IssueDetails.includes('Service Call')));
+
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
 
                 // Snapshot of HHDs actually onboard this visit — replaces previous
@@ -2343,13 +2351,18 @@
             // Build a set of FINs that have any service call indication.
             // Check both local db AND sharedDb (peer records), and also IssueDetails
             // (imported CSV rows map the Comments column → IssueDetails, not Comments).
+            // ALSO check finTable.hasServiceCall — file-imported entries never enter db
+            // or sharedDb, so without the finTable check they would always be missed.
             const _isSvcCall = r =>
                 r.ServiceCall ||
                 (r.Comments    && r.Comments.includes('Service Call')) ||
                 (r.IssueDetails && r.IssueDetails.includes('Service Call'));
-            const svcCallFins = new Set(
-                [...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN)
-            );
+            const svcCallFins = new Set([
+                ...[...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN),
+                ...Object.entries(finTable)
+                    .filter(([, ft]) => ft.hasServiceCall)
+                    .map(([fin]) => fin)
+            ]);
 
             // Build a per-FIN NRO lookup: fin → [{assetId, lastSeen, ts}]
             const finNro = {};
@@ -4291,13 +4304,18 @@
             // Build a set of FINs that have any service call indication.
             // Check both local db AND sharedDb (peer records), and also IssueDetails
             // (imported CSV rows map the Comments column → IssueDetails, not Comments).
+            // ALSO check finTable.hasServiceCall — file-imported entries never enter db
+            // or sharedDb, so without the finTable check they would always be missed.
             const _isSvcCallP = r =>
                 r.ServiceCall ||
                 (r.Comments    && r.Comments.includes('Service Call')) ||
                 (r.IssueDetails && r.IssueDetails.includes('Service Call'));
-            const svcCallFins = new Set(
-                [...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN)
-            );
+            const svcCallFins = new Set([
+                ...[...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN),
+                ...Object.entries(finTable)
+                    .filter(([, ft]) => ft.hasServiceCall)
+                    .map(([fin]) => fin)
+            ]);
 
             // ── New-Aircraft Notice ─────────────────────────────────────────────
             // Detect FINs present in the imported schedule (rotations) that are
