@@ -3173,14 +3173,26 @@
                 return Math.round((today - d) / 86400000);
             };
 
-            const minService = new Date(now.getTime() + 20 * 60000); // must have 20min remaining
+            const minService     = new Date(now.getTime() + 20 * 60000); // ODT must be ≥20 min away
+            const arrivalCutoff  = new Date(now.getTime() + 15 * 60000); // IDT must be ≤15 min from now (already on ground, or arriving within 15 min)
 
-            // Helper: check if a FIN is currently serviceable at this station
+            // Helper: check if a FIN is currently serviceable at this station.
+            // Requirements:
+            //   1. Rotation is at the agent's station and not a MTC rotation.
+            //   2. Aircraft has already arrived OR arrives within the next 15 min (IDT ≤ arrivalCutoff).
+            //   3. Departure is at least 20 min away (ODT ≥ minService).
             const getServiceable = (fin) => {
                 const rotations = scheduleData[fin];
                 if (!rotations || rotations.length === 0) return null;
                 const upcoming = rotations
-                    .filter(r => { const d = parseT(r.odt); return d && d >= minService && (r.stn || '').toUpperCase() === agentStation && !isMtcRotation(r); })
+                    .filter(r => {
+                        const odt = parseT(r.odt);
+                        const idt = parseT(r.idt);
+                        return odt && odt >= minService &&          // departs ≥20 min from now
+                               idt && idt <= arrivalCutoff &&       // on ground or arriving within 15 min
+                               (r.stn || '').toUpperCase() === agentStation &&
+                               !isMtcRotation(r);
+                    })
                     .sort((a, b) => parseT(a.odt) - parseT(b.odt));
                 if (upcoming.length === 0) return null;
                 if (isFinClaimed(fin)) return null;
@@ -3190,17 +3202,13 @@
             const allFins = new Set([...Object.keys(finTable), ...Object.keys(aircraftRef)]);
 
             // ── P+ override: suggest any P+ flagged FIN first ─────────────────
-            // Sort P+ candidates by most overdue → airline rank → earliest ODT
-            // P+ is only surfaced when the aircraft is already on the ground at the
-            // agent's station (IDT in the past), not merely scheduled to arrive later.
+            // Sort P+ candidates by most overdue → airline rank → earliest ODT.
+            // getServiceable() already enforces: IDT ≤ now+15 min AND ODT ≥ now+20 min.
             const pPlusCandidates = [];
             Object.keys(pPlusFlags).forEach(fin => {
                 if (!pPlusFlags[fin]) return;
                 const rot = getServiceable(fin);
                 if (!rot) return;
-                // Guard: aircraft must have already arrived (IDT ≤ now)
-                const idt = parseT(rot.idt);
-                if (!idt || idt > now) return;
                 const airline = fin.substring(0, 2).toUpperCase();
                 pPlusCandidates.push({
                     fin,
