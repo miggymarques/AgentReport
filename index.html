@@ -1259,10 +1259,16 @@
                 // Persist the service-call flag so that file-imported entries (which never
                 // enter db or sharedDb) are still detectable by renderSyncTable /
                 // renderPriorityList when they build svcCallFins from finTable.
-                finTable[fin].hasServiceCall =
-                    !!(entry.ServiceCall ||
-                       (entry.Comments    && entry.Comments.includes('Service Call')) ||
-                       (entry.IssueDetails && entry.IssueDetails.includes('Service Call')));
+                // Checks are case-insensitive and cover Comments, IssueDetails, AND SrvcIss.
+                // Once set to true the flag is never cleared — it's append-only.
+                const _scStr = s => s && String(s).toLowerCase().includes('service call');
+                if (!finTable[fin].hasServiceCall) {
+                    finTable[fin].hasServiceCall =
+                        !!(entry.ServiceCall  ||
+                           _scStr(entry.Comments)     ||
+                           _scStr(entry.IssueDetails) ||
+                           _scStr(entry.SrvcIss));
+                }
 
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
 
@@ -2384,10 +2390,13 @@
             // (imported CSV rows map the Comments column → IssueDetails, not Comments).
             // ALSO check finTable.hasServiceCall — file-imported entries never enter db
             // or sharedDb, so without the finTable check they would always be missed.
+            // All string checks are case-insensitive and include SrvcIss.
+            const _scLoose = s => s && String(s).toLowerCase().includes('service call');
             const _isSvcCall = r =>
                 r.ServiceCall ||
-                (r.Comments    && r.Comments.includes('Service Call')) ||
-                (r.IssueDetails && r.IssueDetails.includes('Service Call'));
+                _scLoose(r.Comments)     ||
+                _scLoose(r.IssueDetails) ||
+                _scLoose(r.SrvcIss);
             const svcCallFins = new Set([
                 ...[...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN),
                 ...Object.entries(finTable)
@@ -4337,10 +4346,13 @@
             // (imported CSV rows map the Comments column → IssueDetails, not Comments).
             // ALSO check finTable.hasServiceCall — file-imported entries never enter db
             // or sharedDb, so without the finTable check they would always be missed.
+            // All string checks are case-insensitive and include SrvcIss.
+            const _scLooseP = s => s && String(s).toLowerCase().includes('service call');
             const _isSvcCallP = r =>
                 r.ServiceCall ||
-                (r.Comments    && r.Comments.includes('Service Call')) ||
-                (r.IssueDetails && r.IssueDetails.includes('Service Call'));
+                _scLooseP(r.Comments)     ||
+                _scLooseP(r.IssueDetails) ||
+                _scLooseP(r.SrvcIss);
             const svcCallFins = new Set([
                 ...[...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN),
                 ...Object.entries(finTable)
@@ -5009,7 +5021,8 @@
                 const isInv  = r.FIN === 'INV';
                 const finCls = isInv ? 'text-amber-600' : 'text-blue-600';
                 const notSvc  = r.Serviced === 'No' ? '<span class="text-[9px] font-black text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full ml-1">NOT SVC</span>' : '';
-                const svcCall = (r.ServiceCall || (r.Comments && r.Comments.includes('Service Call')) || (r.IssueDetails && r.IssueDetails.includes('Service Call'))) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
+                const _scRec = s => s && String(s).toLowerCase().includes('service call');
+                const svcCall = (r.ServiceCall || _scRec(r.Comments) || _scRec(r.IssueDetails) || _scRec(r.SrvcIss)) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
 
                 let equip = '';
                 if (!isInv) {
@@ -5851,17 +5864,17 @@
                         finTable[fin].lastRemoved   = incoming.lastRemoved;
                         finTable[fin].type          = incoming.type || finTable[fin].type;
                         finTable[fin].body          = incoming.body || finTable[fin].body;
-                        // svcCall is append-only — once true it must never be lost during a merge.
+                        // hasServiceCall is append-only — once true it must never be lost during a merge.
                         // Previously this field was omitted here, causing the blue ● dot to vanish
                         // on peers after a reconnect/full-sync.
-                        if (incoming.svcCall) finTable[fin].svcCall = true;
+                        if (incoming.hasServiceCall) finTable[fin].hasServiceCall = true;
                         finTable[fin]._ts           = incoming._ts;
                         changed = true;
                     }
                     // Equal _ts: keep local copy to avoid flip-flopping — but still promote
-                    // svcCall since it is append-only and must never be lost.
-                    else if (incoming.svcCall && !finTable[fin].svcCall) {
-                        finTable[fin].svcCall = true;
+                    // hasServiceCall since it is append-only and must never be lost.
+                    else if (incoming.hasServiceCall && !finTable[fin].hasServiceCall) {
+                        finTable[fin].hasServiceCall = true;
                         changed = true;
                     }
                 });
