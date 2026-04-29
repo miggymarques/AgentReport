@@ -2750,6 +2750,21 @@
         // four known stations (YYZ/YUL/YVR/YYC) and that station's tz differs from the STN tz.
         // This lets team members on different bases quickly see what the time means for them,
         // without relying on the device clock (so any station can be simulated by selection).
+        // Returns a 2-letter weekday prefix (e.g. "We ") when the date falls on a
+        // different calendar day than today in the given timezone, or '' if it is today.
+        const DAY_2 = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+        function dayTag(date, tz) {
+            if (!date) return '';
+            const ymd  = (d) => d.toLocaleDateString('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+            if (ymd(date) === ymd(new Date())) return '';
+            // Derive day-of-week by formatting with 'en-u-ca-iso8601' narrow weekday index trick:
+            // Use numeric day offset from a known Sunday reference instead.
+            const parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz, weekday: 'short' }).formatToParts(date);
+            const short = parts.find(p => p.type === 'weekday')?.value || '';
+            const idx = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(short);
+            return (idx >= 0 ? DAY_2[idx] : '') + ' ';
+        }
+
         function getNextRotationLine(fin) {
             const rot = getNextRotation(fin);
             if (!rot) return '';
@@ -2776,19 +2791,19 @@
             const atStation = agentStation && rotStn === agentStation;
 
             // ── ODT: primary in STN tz (anchor), unchanged from stored value ──────
-            const odtAnchor = fmtInTz(odtDate, rotTz);
+            const odtAnchor = dayTag(odtDate, rotTz) + fmtInTz(odtDate, rotTz);
             // Agent-local () only when a known station is selected AND it differs from the anchor STN.
             const odtLocal  = (agentKnownTz && agentKnownTz !== rotTz)
-                ? ' (' + fmtInTz(odtDate, agentKnownTz) + ' ' + agentStation + ')' : '';
+                ? ' (' + dayTag(odtDate, agentKnownTz) + fmtInTz(odtDate, agentKnownTz) + ' ' + agentStation + ')' : '';
 
             // ── IDT: primary in STN tz (anchor), unchanged from stored value ──────
             // Suppressed entirely when the time is midnight UTC (no meaningful arrival time).
             let idtStr = '';
             if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
-                idtStr = fmtInTz(idtDate, rotTz);   // anchor STN tz as primary
+                idtStr = dayTag(idtDate, rotTz) + fmtInTz(idtDate, rotTz);   // anchor STN tz as primary
                 // Agent-local () only when a known station is selected AND differs from STN tz.
                 if (agentKnownTz && agentKnownTz !== rotTz)
-                    idtStr += ' (' + fmtInTz(idtDate, agentKnownTz) + ' ' + agentStation + ')';
+                    idtStr += ' (' + dayTag(idtDate, agentKnownTz) + fmtInTz(idtDate, agentKnownTz) + ' ' + agentStation + ')';
             }
 
             const iflt = (rot.iflt || '');
@@ -2844,17 +2859,17 @@
             // ITM: IDT in STN tz (anchor/primary). Agent-local () when selected station ≠ STN.
             let itmStr = '—';
             if (idtDate && (idtDate.getUTCHours() > 0 || idtDate.getUTCMinutes() > 0)) {
-                itmStr = fmtInTz(idtDate, rotTz);
+                itmStr = dayTag(idtDate, rotTz) + fmtInTz(idtDate, rotTz);
                 if (agentKnownTz && agentKnownTz !== rotTz)
-                    itmStr += '(' + fmtInTz(idtDate, agentKnownTz) + ')';
+                    itmStr += '(' + dayTag(idtDate, agentKnownTz) + fmtInTz(idtDate, agentKnownTz) + ')';
             }
 
             // OTM: ODT in STN tz (anchor/primary). Agent-local () when selected station ≠ STN.
             let otmStr = '—';
             if (odtDate) {
-                otmStr = fmtInTz(odtDate, rotTz);
+                otmStr = dayTag(odtDate, rotTz) + fmtInTz(odtDate, rotTz);
                 if (agentKnownTz && agentKnownTz !== rotTz)
-                    otmStr += '(' + fmtInTz(odtDate, agentKnownTz) + ')';
+                    otmStr += '(' + dayTag(odtDate, agentKnownTz) + fmtInTz(odtDate, agentKnownTz) + ')';
             }
 
             return [itmStr, iStn || '—', rotStn || '—', oStn || '—', otmStr].join('|');
@@ -4565,7 +4580,7 @@
                         const hasTimes = itm && itm !== '—';
                         turnHtml = `
                             <div class="px-4 pb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono border-b border-slate-50">
-                                <span class="text-slate-300 text-[8px] font-black uppercase tracking-widest mr-1">Turn</span>
+                                <span class="text-emerald-600 text-[8px] font-black uppercase tracking-widest mr-1">Turn</span>
                                 ${hasTimes ? `<span class="text-slate-500">✈in <span class="font-black text-slate-600">${itm}</span></span>` : ''}
                                 <span class="text-slate-500 font-black">${iStn || '—'} → ${stn || '—'} → ${oStn || '—'}</span>
                                 <span class="text-slate-500">✈out <span class="font-black text-blue-600">${otm}</span></span>
