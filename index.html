@@ -666,6 +666,37 @@
                     <div id="diag-ice-results" class="space-y-1"></div>
                 </div>
 
+                <!-- ExpressTURN credentials -->
+                <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                    <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">ExpressTURN Relay Server</div>
+                    <div class="text-[10px] text-slate-400 mb-2 font-mono">relay1.expressturn.com:3480</div>
+                    <div class="space-y-2">
+                        <div>
+                            <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Username</div>
+                            <input id="et-username-input" type="text" autocomplete="off" spellcheck="false"
+                                placeholder="efXXXXXXXXXXXXXX"
+                                class="w-full text-[11px] font-mono px-2 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400">
+                        </div>
+                        <div>
+                            <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Password</div>
+                            <input id="et-credential-input" type="password" autocomplete="off"
+                                placeholder="••••••••"
+                                class="w-full text-[11px] font-mono px-2 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400">
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="saveExpressTurnCreds()"
+                                class="flex-1 text-[10px] font-black bg-blue-600 text-white px-3 py-1.5 rounded-lg active:scale-95 transition-transform">
+                                SAVE
+                            </button>
+                            <button onclick="clearExpressTurnCreds()"
+                                class="text-[10px] font-black text-slate-400 px-3 py-1.5 rounded-lg border border-slate-200 active:scale-95 transition-transform hover:text-red-500 hover:border-red-200">
+                                CLEAR
+                            </button>
+                        </div>
+                        <div id="et-creds-status" class="text-[10px] text-slate-400"></div>
+                    </div>
+                </div>
+
                 <!-- Legend -->
                 <div class="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1">
                     <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">What the results mean</div>
@@ -1212,20 +1243,6 @@
             if (!finTable[fin]) {
                 finTable[fin] = { type: '', body: '', lastSeen: '', lastFlight: '', lastAgent: '', lastStation: '', lastTime: '', _ts: 0 };
             }
-
-            // ── Service Call flag — persist on finTable so sync-imported entries ──
-            // are visible to renderSyncTable/renderPriorityList even though imported
-            // records are never pushed into db/sharedDb.
-            // Check ServiceCall checkbox value, Comments, IssueDetails, SrvcIssCAT,
-            // and SrvcIss — all case-insensitive.  Once set to true it is never
-            // cleared (a service call visit is always historical).
-            if (!finTable[fin].svcCall) {
-                const _sc = v => v && String(v).toLowerCase().includes('service call');
-                if (entry.ServiceCall || _sc(entry.Comments) || _sc(entry.IssueDetails) ||
-                    _sc(entry.SrvcIssCAT) || _sc(entry.SrvcIss)) {
-                    finTable[fin].svcCall = true;
-                }
-            }
             // Resolve aircraft type
             const match = aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
             if (match) { finTable[fin].type = match.type; finTable[fin].body = match.body; }
@@ -1238,6 +1255,14 @@
                 finTable[fin].lastStation = entry['Service Station'] || '';
                 finTable[fin].lastTime    = entry.displayTime || '';
                 finTable[fin]._ts         = entryTs;
+
+                // Persist the service-call flag so that file-imported entries (which never
+                // enter db or sharedDb) are still detectable by renderSyncTable /
+                // renderPriorityList when they build svcCallFins from finTable.
+                finTable[fin].hasServiceCall =
+                    !!(entry.ServiceCall ||
+                       (entry.Comments    && entry.Comments.includes('Service Call')) ||
+                       (entry.IssueDetails && entry.IssueDetails.includes('Service Call')));
 
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
 
@@ -2355,17 +2380,20 @@
             const numSort = (a, b) => parseInt(a.replace(/\D/g,'')) - parseInt(b.replace(/\D/g,''));
 
             // Build a set of FINs that have any service call indication.
-            // Checks db, sharedDb, AND finTable (populated by sync imports which never
-            // push into db/sharedDb).  All string comparisons are case-insensitive.
-            const _sc = v => v && String(v).toLowerCase().includes('service call');
+            // Check both local db AND sharedDb (peer records), and also IssueDetails
+            // (imported CSV rows map the Comments column → IssueDetails, not Comments).
+            // ALSO check finTable.hasServiceCall — file-imported entries never enter db
+            // or sharedDb, so without the finTable check they would always be missed.
             const _isSvcCall = r =>
-                r.ServiceCall || _sc(r.Comments) || _sc(r.IssueDetails) ||
-                _sc(r.SrvcIssCAT) || _sc(r.SrvcIss);
-            const svcCallFins = new Set(
-                [...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN)
-            );
-            // Also pick up the flag written by updateFinTable during CSV import
-            Object.entries(finTable).forEach(([fin, ft]) => { if (ft.svcCall) svcCallFins.add(fin); });
+                r.ServiceCall ||
+                (r.Comments    && r.Comments.includes('Service Call')) ||
+                (r.IssueDetails && r.IssueDetails.includes('Service Call'));
+            const svcCallFins = new Set([
+                ...[...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN),
+                ...Object.entries(finTable)
+                    .filter(([, ft]) => ft.hasServiceCall)
+                    .map(([fin]) => fin)
+            ]);
 
             // Build a per-FIN NRO lookup: fin → [{assetId, lastSeen, ts}]
             const finNro = {};
@@ -4305,17 +4333,20 @@
             container.innerHTML = '';
 
             // Build a set of FINs that have any service call indication.
-            // Checks db, sharedDb, AND finTable (populated by sync imports which never
-            // push into db/sharedDb).  All string comparisons are case-insensitive.
-            const _scP = v => v && String(v).toLowerCase().includes('service call');
+            // Check both local db AND sharedDb (peer records), and also IssueDetails
+            // (imported CSV rows map the Comments column → IssueDetails, not Comments).
+            // ALSO check finTable.hasServiceCall — file-imported entries never enter db
+            // or sharedDb, so without the finTable check they would always be missed.
             const _isSvcCallP = r =>
-                r.ServiceCall || _scP(r.Comments) || _scP(r.IssueDetails) ||
-                _scP(r.SrvcIssCAT) || _scP(r.SrvcIss);
-            const svcCallFins = new Set(
-                [...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN)
-            );
-            // Also pick up the flag written by updateFinTable during CSV import
-            Object.entries(finTable).forEach(([fin, ft]) => { if (ft.svcCall) svcCallFins.add(fin); });
+                r.ServiceCall ||
+                (r.Comments    && r.Comments.includes('Service Call')) ||
+                (r.IssueDetails && r.IssueDetails.includes('Service Call'));
+            const svcCallFins = new Set([
+                ...[...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN),
+                ...Object.entries(finTable)
+                    .filter(([, ft]) => ft.hasServiceCall)
+                    .map(([fin]) => fin)
+            ]);
 
             // ── New-Aircraft Notice ─────────────────────────────────────────────
             // Detect FINs present in the imported schedule (rotations) that are
@@ -4978,9 +5009,7 @@
                 const isInv  = r.FIN === 'INV';
                 const finCls = isInv ? 'text-amber-600' : 'text-blue-600';
                 const notSvc  = r.Serviced === 'No' ? '<span class="text-[9px] font-black text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full ml-1">NOT SVC</span>' : '';
-                const _scR = v => v && String(v).toLowerCase().includes('service call');
-                const svcCall = (r.ServiceCall || _scR(r.Comments) || _scR(r.IssueDetails) ||
-                    _scR(r.SrvcIssCAT) || _scR(r.SrvcIss)) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
+                const svcCall = (r.ServiceCall || (r.Comments && r.Comments.includes('Service Call')) || (r.IssueDetails && r.IssueDetails.includes('Service Call'))) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
 
                 let equip = '';
                 if (!isInv) {
@@ -5462,6 +5491,20 @@
         _prefetchIceServers();
 
         function _buildPeerConfig() {
+            // Start from Metered servers (if fetched) or the static fallback list
+            const baseServers = [...(_cachedIceServers || _ICE_FALLBACK)];
+
+            // Append ExpressTURN entries if the user has saved credentials
+            const etUser = localStorage.getItem('et-username');
+            const etCred = localStorage.getItem('et-credential');
+            if (etUser && etCred) {
+                baseServers.push(
+                    { urls: 'turn:relay1.expressturn.com:3480',               username: etUser, credential: etCred },
+                    { urls: 'turn:relay1.expressturn.com:3480?transport=tcp', username: etUser, credential: etCred },
+                    { urls: 'turns:relay1.expressturn.com:5350',             username: etUser, credential: etCred }
+                );
+            }
+
             return {
                 debug: 0,
                 host: '0.peerjs.com',
@@ -5472,11 +5515,10 @@
                 config: {
                     iceTransportPolicy: 'all',
                     iceCandidatePoolSize: 2,
-                    iceServers: _cachedIceServers || _ICE_FALLBACK
+                    iceServers: baseServers
                 }
             };
         }
-
         // ─── P2P: Per-peer outbound send buffer ───────────────────────────────
         // Messages queued here while a peer is temporarily disconnected are
         // flushed automatically when the connection re-opens.
@@ -5809,14 +5851,15 @@
                         finTable[fin].lastRemoved   = incoming.lastRemoved;
                         finTable[fin].type          = incoming.type || finTable[fin].type;
                         finTable[fin].body          = incoming.body || finTable[fin].body;
-                        // Preserve svcCall flag — once set it is never cleared.
-                        // This field was previously omitted from the merge, so the blue ● dot
-                        // would disappear on peers after a reconnect/full-sync.
+                        // svcCall is append-only — once true it must never be lost during a merge.
+                        // Previously this field was omitted here, causing the blue ● dot to vanish
+                        // on peers after a reconnect/full-sync.
                         if (incoming.svcCall) finTable[fin].svcCall = true;
                         finTable[fin]._ts           = incoming._ts;
                         changed = true;
                     }
-                    // Equal _ts: keep local copy — but still promote svcCall since it's append-only
+                    // Equal _ts: keep local copy to avoid flip-flopping — but still promote
+                    // svcCall since it is append-only and must never be lost.
                     else if (incoming.svcCall && !finTable[fin].svcCall) {
                         finTable[fin].svcCall = true;
                         changed = true;
@@ -6300,8 +6343,8 @@
                 setSyncStatus('synced', Object.keys(p2pConnections).length);
                 // Re-render live tables if currently open
                 if (activeRefTab === 'alldata') renderSharedTable();
-                // Also refresh synctable so the blue ● svcCall dot appears immediately
-                // on peers without waiting for the next DELTA_SYNC round-trip.
+                // Refresh synctable so the blue ● dot appears immediately on peers
+                // without waiting for the next DELTA_SYNC heartbeat.
                 if (activeRefTab === 'synctable') renderRefList();
                 // Bug fix: forward derived table updates to all OTHER connected peers so that
                 // peers which weren't the original sender also get the finTable/assetIndex changes.
@@ -6610,6 +6653,69 @@
         }
 
         // ─── P2P Diagnostic Modal ─────────────────────────────────────────────
+
+        // ─── ExpressTURN credential helpers ──────────────────────────────────
+        function _refreshExpressTurnStatus() {
+            const u   = localStorage.getItem('et-username')   || '';
+            const c   = localStorage.getItem('et-credential') || '';
+            const uEl = document.getElementById('et-username-input');
+            const cEl = document.getElementById('et-credential-input');
+            const sEl = document.getElementById('et-creds-status');
+            if (uEl) uEl.value = u;
+            if (cEl) cEl.value = c;
+            if (sEl) {
+                if (u && c) {
+                    sEl.textContent = '✓ Credentials saved — ExpressTURN is active';
+                    sEl.className   = 'text-[10px] text-emerald-600 font-bold';
+                } else {
+                    sEl.textContent = 'No credentials saved — server not active';
+                    sEl.className   = 'text-[10px] text-slate-400';
+                }
+            }
+        }
+
+        function saveExpressTurnCreds() {
+            const u = (document.getElementById('et-username-input')?.value   || '').trim();
+            const c = (document.getElementById('et-credential-input')?.value || '').trim();
+            if (!u || !c) { showToast('Enter both username and password'); return; }
+            localStorage.setItem('et-username',   u);
+            localStorage.setItem('et-credential', c);
+            _refreshExpressTurnStatus();
+            _renderDiagServers();
+            showToast('ExpressTURN credentials saved');
+        }
+
+        function clearExpressTurnCreds() {
+            localStorage.removeItem('et-username');
+            localStorage.removeItem('et-credential');
+            const uEl = document.getElementById('et-username-input');
+            const cEl = document.getElementById('et-credential-input');
+            if (uEl) uEl.value = '';
+            if (cEl) cEl.value = '';
+            _refreshExpressTurnStatus();
+            _renderDiagServers();
+            showToast('ExpressTURN credentials cleared');
+        }
+
+        function _renderDiagServers() {
+            const cfg = _buildPeerConfig().config;
+            const serversEl = document.getElementById('diag-servers');
+            if (!serversEl) return;
+            serversEl.innerHTML = '';
+            (cfg.iceServers || []).forEach(s => {
+                const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+                urls.forEach(url => {
+                    const row    = document.createElement('div');
+                    const isStun = url.startsWith('stun:');
+                    const isTurn = url.startsWith('turn:') || url.startsWith('turns:');
+                    const badge  = isStun ? '<span class="text-blue-500">[STUN]</span>'
+                                 : isTurn ? '<span class="text-amber-500">[TURN]</span>' : '';
+                    row.innerHTML = badge + ' ' + url;
+                    serversEl.appendChild(row);
+                });
+            });
+        }
+
         function openP2PDiag() {
             const modal = document.getElementById('p2p-diag-modal');
             modal.classList.add('open');
@@ -6624,22 +6730,11 @@
             peersEl.textContent = connected.length > 0 ? connected.join('\n') : 'None connected';
             peersEl.style.whiteSpace = 'pre-line';
 
-            // Render configured ICE servers
-            const cfg = _buildPeerConfig().config;
-            const serversEl = document.getElementById('diag-servers');
-            serversEl.innerHTML = '';
-            (cfg.iceServers || []).forEach(s => {
-                const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-                urls.forEach(url => {
-                    const row = document.createElement('div');
-                    const isStun = url.startsWith('stun:');
-                    const isTurn = url.startsWith('turn:') || url.startsWith('turns:');
-                    const badge = isStun ? '<span class="text-blue-500">[STUN]</span>'
-                                : isTurn ? '<span class="text-amber-500">[TURN]</span>' : '';
-                    row.innerHTML = badge + ' ' + url;
-                    serversEl.appendChild(row);
-                });
-            });
+            // Populate ExpressTURN inputs and status from saved creds
+            _refreshExpressTurnStatus();
+
+            // Render configured ICE servers (shared helper — also used by Save/Clear)
+            _renderDiagServers();
 
             // Reset ICE results
             document.getElementById('diag-ice-status').textContent = 'Tap RUN TEST to check ICE servers.';
