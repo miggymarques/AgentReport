@@ -5809,10 +5809,18 @@
                         finTable[fin].lastRemoved   = incoming.lastRemoved;
                         finTable[fin].type          = incoming.type || finTable[fin].type;
                         finTable[fin].body          = incoming.body || finTable[fin].body;
+                        // Preserve svcCall flag — once set it is never cleared.
+                        // This field was previously omitted from the merge, so the blue ● dot
+                        // would disappear on peers after a reconnect/full-sync.
+                        if (incoming.svcCall) finTable[fin].svcCall = true;
                         finTable[fin]._ts           = incoming._ts;
                         changed = true;
                     }
-                    // Equal _ts: keep local copy (no-op) — avoids flip-flopping between two peers
+                    // Equal _ts: keep local copy — but still promote svcCall since it's append-only
+                    else if (incoming.svcCall && !finTable[fin].svcCall) {
+                        finTable[fin].svcCall = true;
+                        changed = true;
+                    }
                 });
                 // After merging finTable, scrub any asset from lastOnboard/lastRemoved that
                 // our assetIndex places on a DIFFERENT FIN with a newer or equal timestamp.
@@ -6290,8 +6298,11 @@
                 // sync cursors and clobber the finTable/assetIndex delta window. Leave lastSyncTs
                 // as-is so the next delta correctly covers any table records updated right now.
                 setSyncStatus('synced', Object.keys(p2pConnections).length);
-                // Re-render All Data table live if it's currently open
+                // Re-render live tables if currently open
                 if (activeRefTab === 'alldata') renderSharedTable();
+                // Also refresh synctable so the blue ● svcCall dot appears immediately
+                // on peers without waiting for the next DELTA_SYNC round-trip.
+                if (activeRefTab === 'synctable') renderRefList();
                 // Bug fix: forward derived table updates to all OTHER connected peers so that
                 // peers which weren't the original sender also get the finTable/assetIndex changes.
                 Object.keys(p2pConnections).forEach(pid => {
