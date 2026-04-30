@@ -1994,6 +1994,82 @@
             return histEntry;
         }
 
+        // ─── Write a single FN (Found) entry into Asset History ──────────────
+        //
+        // Trigger Condition 1 — Sync Table Import (File Import):
+        //   FIN = "INV"  AND  SrvcIssCAT contains "Found" (e.g. "Found")
+        //
+        // Trigger Condition 2 — File Save (Inventory Only):
+        //   isInvMode = true  AND  SrvcIssCAT contains "Found"
+        //
+        // Field Mapping:
+        //   ASST# → assetId  |  TR → "FN"  |  LOC → Agent Service Station
+        //   Date/Time → dt (now on live save, entry.id timestamp on import)
+        //   NT → "Missing From [MS_LOC] - [AgentFirstName]"  (when a prior MS record exists)
+        //        where MS_LOC is the LOC field of the most recent TR='MS' record for
+        //        the same assetId in assetHistory (typically the FIN number).
+        //        If no MS record exists, NT is just "[AgentFirstName]".
+        //
+        // Upsert rule: one record per assetId, latest dt always wins.
+        // batchMode: if true, skip save+broadcast — caller must flush after the loop.
+        // Returns the written entry object, or null if skipped (newer/tombstoned).
+        function writeFNHistoryEntry(assetId, dt, loc, agentStr, batchMode = false) {
+            if (!assetId) return null;
+
+            // ── Build NT: look up the MS record for this asset ────────────────
+            // Find the most recent TR='MS' record for this assetId so we can extract
+            // its LOC (the FIN the asset was last expected on) for the "Missing From" note.
+            const msRecord = assetHistory
+                .filter(h => h.assetId === assetId && (h.tr || '').toUpperCase() === 'MS')
+                .sort((a, b) => (b.dt || '') > (a.dt || '') ? 1 : -1)[0] || null;
+
+            const msLoc       = msRecord ? (msRecord.loc || '').trim().toUpperCase() : '';
+            const firstName   = (agentStr || '').split(',')[0].trim().split(/\s+/)[0] || '';
+
+            let ntParts = [];
+            if (msLoc) ntParts.push(`Missing From ${msLoc}`);
+            if (firstName) ntParts.push(firstName);
+            const ntFull = ntParts.join(' - ');
+
+            const inDb  = isValidAssetId(assetId);
+            const ntOut = [ntFull, inDb ? '' : "Asset Doesn't Exist"].filter(Boolean).join(' | ');
+
+            const dtStr = (dt instanceof Date ? dt : new Date(dt)).toISOString();
+
+            const histEntry = {
+                id:      Date.now() + Math.floor(Math.random() * 1000),
+                assetId,
+                dt:      dtStr,
+                tr:      'FN',
+                loc:     (loc || '').trim().toUpperCase(),
+                nt:      ntOut
+            };
+
+            // MAX(DateTime) guard — one record per assetId, latest dt wins
+            const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+            if (assetTombTs && histEntry.id <= assetTombTs) return null; // tombstoned — skip
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // entry tombstoned — never resurrect
+                if (dtStr <= assetHistory[existingIdx].dt) return null;           // existing is same age or newer
+                assetHistory.splice(existingIdx, 1);                              // evict stale record
+            }
+
+            assetHistory.push(histEntry);
+
+            if (!batchMode) {
+                saveAssetHistory();
+                broadcastAssetHistorySync([histEntry]);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                    renderRefList();
+                }
+            }
+
+            return histEntry;
+        }
+
         // ─── Asset History ────────────────────────────────────────────────────
         function renderAssetHistory(container) {
             if (!assetHistory.length) {
@@ -2064,6 +2140,7 @@
                 RM: 'background:#fee2e2;color:#b91c1c;',   // red
                 MS: 'background:#fef3c7;color:#92400e;',   // amber
                 DM: 'background:#ffedd5;color:#c2410c;',   // orange — Reported Damaged
+                FN: 'background:#dcfce7;color:#15803d;',   // green — Found
             };
 
             sorted.forEach(row => {
@@ -4077,6 +4154,35 @@
                     if (written) batchedHistoryEntries.push(written);
                 })();
 
+                // ── FN history: Found Asset (Sync Table Import) ───────────────
+                // Condition: FIN = "INV"  AND  SrvcIssCAT contains "Found"
+                // TR: "FN" | LOC: Service Station | NT: "Missing From [MS_LOC] - [FirstName]"
+                // MS_LOC is the LOC from the most recent TR='MS' record for this asset.
+                // Mirrors handleSave FN logic. Runs batchMode=true; flushed after loop.
+                (function() {
+                    const fin     = (entry.FIN        || '').trim().toUpperCase();
+                    const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+
+                    if (fin !== 'INV') return;                // only Inventory Only records
+                    if (!catNorm.includes('found')) return;   // only Found category
+
+                    const assetId = (entry.ASST || '').trim().toUpperCase();
+                    if (!assetId || assetId === 'N/A' || assetId === '---') {
+                        console.warn('[Sync Import] FN history: no ASST value on row —', entry);
+                        return;
+                    }
+
+                    if (!isValidAssetId(assetId)) {
+                        console.warn(`[Sync Import] FN history: ASST "${assetId}" is not a valid asset ID — will write with flag`);
+                    }
+
+                    const stationCode = (entry['Service Station'] || '').trim().toUpperCase();
+                    const fnDt        = new Date(entry.id);
+
+                    const written = writeFNHistoryEntry(assetId, fnDt, stationCode, entry.Agent, /*batchMode=*/true);
+                    if (written) batchedHistoryEntries.push(written);
+                })();
+
                 processed++;
             });
 
@@ -4952,6 +5058,37 @@
                     showToast(`⚠️ RP History: ASST "${assetId}" not a valid asset ID — skipped`);
                     console.warn('[File Save] RP Asset History: invalid ASST field —', assetId);
                 }
+            })();
+
+            // ── FN history: Found Asset (File Save, Inventory Only) ──────────
+            // Condition: isInvMode = true  AND  SrvcIssCAT contains "Found"
+            // Asset identifier: ASST field (Reported Asset#).
+            // LOC: Agent's Service Station. NT: "Missing From [MS_LOC] - [FirstName]"
+            // MS_LOC is the LOC from the most recent TR='MS' record for this asset.
+            // Upsert: same MAX(DateTime) guard as OB / RM / MS / DM / RP — latest dt wins.
+            (function() {
+                const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+
+                if (!isInvMode) return;            // only Inventory Only records
+                if (!catNorm.includes('found')) return; // only Found category
+
+                const assetId = (entry.ASST || '').trim().toUpperCase();
+                if (!assetId || assetId === 'N/A' || assetId === '---') {
+                    console.warn('[File Save] FN history: no ASST value — skipped');
+                    return;
+                }
+
+                if (!isValidAssetId(assetId)) {
+                    console.warn(`[File Save] FN history: ASST "${assetId}" is not a valid asset ID — will write with flag`);
+                }
+
+                const stationCode = (
+                    entry['Service Station'] ||
+                    document.getElementById('station-field')?.value || ''
+                ).trim().toUpperCase();
+
+                writeFNHistoryEntry(assetId, now, stationCode, entry.Agent, /*batchMode=*/false);
+                console.log(`[File Save] FN history written — ${assetId} @ ${stationCode}`);
             })();
 
             try {
