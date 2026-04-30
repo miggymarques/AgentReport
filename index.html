@@ -3975,10 +3975,24 @@
             // and the single-location eviction logic works correctly regardless of
             // the order rows appear in the imported file.
             const entries = [];
+            // INV+Found rows are intercepted here and processed separately into FN
+            // history after the main entry loop — they must never touch updateFinTable
+            // or writeOBHistoryForHHDs, but they do need the same timestamp parsing.
+            const invFoundRows = [];
 
             rows.forEach((row, idx) => {
                 const fin = (row['FIN'] || '').trim().toUpperCase();
-                if (!fin || fin === 'INV' || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
+
+                // ── Intercept INV rows with SrvcIssCAT = Found ───────────────
+                // Stash for FN history processing below; skip all other INV rows.
+                if (fin === 'INV') {
+                    const catNorm = (row['SrvcIssCAT'] || '').toLowerCase();
+                    if (catNorm.includes('found')) invFoundRows.push({ row, idx });
+                    skipped++;
+                    return;
+                }
+
+                if (!fin || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
 
                 // Bug fix: timestamp must reflect the actual service datetime (date + time), not
                 // just the date. Previously, time was stripped by normaliseDateStr so every
@@ -4154,36 +4168,43 @@
                     if (written) batchedHistoryEntries.push(written);
                 })();
 
-                // ── FN history: Found Asset (Sync Table Import) ───────────────
-                // Condition: FIN = "INV"  AND  SrvcIssCAT contains "Found"
-                // TR: "FN" | LOC: Service Station | NT: "Missing From [MS_LOC] - [FirstName]"
-                // MS_LOC is the LOC from the most recent TR='MS' record for this asset.
-                // Mirrors handleSave FN logic. Runs batchMode=true; flushed after loop.
-                (function() {
-                    const fin     = (entry.FIN        || '').trim().toUpperCase();
-                    const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
-
-                    if (fin !== 'INV') return;                // only Inventory Only records
-                    if (!catNorm.includes('found')) return;   // only Found category
-
-                    const assetId = (entry.ASST || '').trim().toUpperCase();
-                    if (!assetId || assetId === 'N/A' || assetId === '---') {
-                        console.warn('[Sync Import] FN history: no ASST value on row —', entry);
-                        return;
-                    }
-
-                    if (!isValidAssetId(assetId)) {
-                        console.warn(`[Sync Import] FN history: ASST "${assetId}" is not a valid asset ID — will write with flag`);
-                    }
-
-                    const stationCode = (entry['Service Station'] || '').trim().toUpperCase();
-                    const fnDt        = new Date(entry.id);
-
-                    const written = writeFNHistoryEntry(assetId, fnDt, stationCode, entry.Agent, /*batchMode=*/true);
-                    if (written) batchedHistoryEntries.push(written);
-                })();
-
                 processed++;
+            });
+
+            // ── FN history: drain stashed INV+Found rows ──────────────────────
+            // These were intercepted during rows.forEach (INV rejects the normal path).
+            // Timestamp is parsed the same way as regular entries for consistency.
+            // writeFNHistoryEntry handles the MS-lookup and NT assembly.
+            invFoundRows.forEach(({ row, idx }) => {
+                const assetId = (row['ASST'] || '').trim().toUpperCase();
+                if (!assetId || assetId === 'N/A' || assetId === '---') {
+                    console.warn('[Sync Import] FN history: no ASST on INV+Found row — skipped', row);
+                    return;
+                }
+
+                // Parse timestamp using the same logic as regular entries
+                const rawDateStr = row['Service Date'] || row['displayDate'] || '';
+                const rawTimeStr = (row['Arrival Time'] || row['Last Time'] || row['displayTime'] || '').trim();
+                const dateStr    = normaliseDateStr(rawDateStr);
+                let ts = 0;
+                if (dateStr) {
+                    const combined = rawTimeStr ? `${dateStr} ${rawTimeStr}` : dateStr;
+                    const d = new Date(combined);
+                    if (!isNaN(d)) {
+                        ts = d.getTime();
+                    } else {
+                        const dDate = new Date(dateStr);
+                        ts = isNaN(dDate) ? 0 : dDate.getTime();
+                    }
+                }
+                if (!ts) ts = idx + 1;
+
+                const stationCode = (row['Service Station'] || '').trim().toUpperCase();
+                const written = writeFNHistoryEntry(assetId, new Date(ts), stationCode, row['Agent'], /*batchMode=*/true);
+                if (written) {
+                    batchedHistoryEntries.push(written);
+                    console.log(`[Sync Import] FN history written — ${assetId} @ ${stationCode}`);
+                }
             });
 
             // Flush the batch after all rows are processed
