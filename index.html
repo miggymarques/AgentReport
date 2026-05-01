@@ -1261,13 +1261,14 @@
                 // renderPriorityList when they build svcCallFins from finTable.
                 // Checks are case-insensitive and cover Comments, IssueDetails, AND SrvcIss.
                 // Once set to true the flag is never cleared — it's append-only.
-                const _scStr = s => s && String(s).toLowerCase().includes('service call');
+                const _scStr = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
                 if (!finTable[fin].hasServiceCall) {
                     finTable[fin].hasServiceCall =
-                        !!(entry.ServiceCall  ||
+                        !!(entry.ServiceCall    ||
                            _scStr(entry.Comments)     ||
                            _scStr(entry.IssueDetails) ||
-                           _scStr(entry.SrvcIss));
+                           _scStr(entry.SrvcIss)      ||
+                           _scStr(entry.SrvcIssCAT));
                 }
 
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
@@ -2468,12 +2469,13 @@
             // ALSO check finTable.hasServiceCall — file-imported entries never enter db
             // or sharedDb, so without the finTable check they would always be missed.
             // All string checks are case-insensitive and include SrvcIss.
-            const _scLoose = s => s && String(s).toLowerCase().includes('service call');
+            const _scLoose = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
             const _isSvcCall = r =>
                 r.ServiceCall ||
                 _scLoose(r.Comments)     ||
                 _scLoose(r.IssueDetails) ||
-                _scLoose(r.SrvcIss);
+                _scLoose(r.SrvcIss)      ||
+                _scLoose(r.SrvcIssCAT);
             const svcCallFins = new Set([
                 ...[...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN),
                 ...Object.entries(finTable)
@@ -4490,12 +4492,13 @@
             // ALSO check finTable.hasServiceCall — file-imported entries never enter db
             // or sharedDb, so without the finTable check they would always be missed.
             // All string checks are case-insensitive and include SrvcIss.
-            const _scLooseP = s => s && String(s).toLowerCase().includes('service call');
+            const _scLooseP = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
             const _isSvcCallP = r =>
                 r.ServiceCall ||
                 _scLooseP(r.Comments)     ||
                 _scLooseP(r.IssueDetails) ||
-                _scLooseP(r.SrvcIss);
+                _scLooseP(r.SrvcIss)      ||
+                _scLooseP(r.SrvcIssCAT);
             const svcCallFins = new Set([
                 ...[...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN),
                 ...Object.entries(finTable)
@@ -5195,8 +5198,8 @@
                 const isInv  = r.FIN === 'INV';
                 const finCls = isInv ? 'text-amber-600' : 'text-blue-600';
                 const notSvc  = r.Serviced === 'No' ? '<span class="text-[9px] font-black text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full ml-1">NOT SVC</span>' : '';
-                const _scRec = s => s && String(s).toLowerCase().includes('service call');
-                const svcCall = (r.ServiceCall || _scRec(r.Comments) || _scRec(r.IssueDetails) || _scRec(r.SrvcIss)) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
+                const _scRec = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
+                const svcCall = (r.ServiceCall || _scRec(r.Comments) || _scRec(r.IssueDetails) || _scRec(r.SrvcIss) || _scRec(r.SrvcIssCAT)) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
 
                 let equip = '';
                 if (!isInv) {
