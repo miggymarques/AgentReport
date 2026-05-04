@@ -913,8 +913,6 @@
         }
 
         function isCurrentUserAdmin() {
-            // Superuser always has admin rights
-            if (isSuperUser()) return true;
             const sel = document.getElementById('agent-field');
             if (!sel || !sel.value) return false;
             const agent = agentRef.find(a => a.value === sel.value);
@@ -1121,15 +1119,14 @@
                 const phone  = suffix.replace(/^[A-Z]{3}\s*/, '').trim();
 
                 const isSU         = agent.displayName === SUPERUSER_NAME;
-                const adminChecked = isSU || agent.isAdmin === true;
+                const adminChecked = agent.isAdmin === true;
 
                 // Checkbox is silent — no label, no colour hint, only visible to superuser
                 const adminCheckHtml = superActive ? `
                     <input type="checkbox"
                         ${adminChecked ? 'checked' : ''}
-                        ${isSU ? 'disabled' : ''}
                         onchange="toggleAdminFlag(${idx}, this.checked)"
-                        style="-webkit-appearance:checkbox;appearance:checkbox;width:13px;height:13px;cursor:${isSU ? 'default' : 'pointer'};margin-right:6px;flex-shrink:0;"
+                        style="-webkit-appearance:checkbox;appearance:checkbox;width:13px;height:13px;cursor:pointer;margin-right:6px;flex-shrink:0;"
                         title="">` : '';
 
                 // Delete button only visible to admins
