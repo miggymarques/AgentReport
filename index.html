@@ -900,6 +900,48 @@
         const AGENT_REF_KEY    = 'yul_agent_ref_v1';
         const AGENT_BLOCK_KEY  = 'yul_agent_block_v1'; // value strings of deliberately removed defaults
 
+        // ─── Admin / Superuser Access Control ─────────────────────────────────
+        // Only the superuser can grant administrator rights to other agents.
+        // Administrator agents can add/delete records in all backend tables.
+        const SUPERUSER_NAME = 'Michael Marques';
+
+        function isSuperUser() {
+            const sel = document.getElementById('agent-field');
+            if (!sel || !sel.value) return false;
+            const agent = agentRef.find(a => a.value === sel.value);
+            return agent ? agent.displayName === SUPERUSER_NAME : false;
+        }
+
+        function isCurrentUserAdmin() {
+            // Superuser always has admin rights
+            if (isSuperUser()) return true;
+            const sel = document.getElementById('agent-field');
+            if (!sel || !sel.value) return false;
+            const agent = agentRef.find(a => a.value === sel.value);
+            return agent ? (agent.isAdmin === true) : false;
+        }
+
+        function requireAdmin(action) {
+            if (isCurrentUserAdmin()) return true;
+            showToast(`Admin access required — contact ${SUPERUSER_NAME}`);
+            return false;
+        }
+
+        function toggleAdminFlag(idx, checked) {
+            if (!isSuperUser()) { showToast('Only ' + SUPERUSER_NAME + ' can change admin status'); return; }
+            if (!agentRef[idx]) return;
+            // Prevent removing superuser's own implied admin (no-op — they're always superuser)
+            agentRef[idx].isAdmin = checked;
+            agentRef[idx]._ts = Date.now();
+            saveAgentRef();
+            // Sync to peers
+            const _ts = Date.now();
+            Object.keys(p2pConnections).forEach(pid =>
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock, _ts }));
+            renderRefList();
+            showToast(checked ? 'Administrator access granted' : 'Administrator access removed');
+        }
+
         // Default agents — exact value strings matching the original hardcoded options.
         // These are always merged into agentRef on load so they can never be lost.
         const DEFAULT_AGENTS = [
@@ -1000,6 +1042,7 @@
         }
 
         function addNewAgent() {
+            if (!requireAdmin('add agent')) return;
             const displayName = document.getElementById('new-agent-name').value.trim();
             const station     = document.getElementById('new-agent-station').value;
             const phone       = document.getElementById('new-agent-phone').value.trim();
@@ -1037,6 +1080,7 @@
         }
 
         function removeAgent(idx) {
+            if (!requireAdmin('remove agent')) return;
             const removed = agentRef.splice(idx, 1)[0];
             // If this is a default agent, add to blocklist so initAgentRef won't re-add it
             // Tombstone this agent with the current timestamp
@@ -1072,6 +1116,7 @@
             }
 
             const stationColors = { YYZ:'text-blue-600', YUL:'text-violet-600', YYC:'text-amber-600', YVR:'text-emerald-600' };
+            const superActive   = isSuperUser(); // admin checkboxes only visible to superuser
 
             agentRef.forEach((agent, idx) => {
                 // Parse phone from the value string: everything after ",STATION "
@@ -1079,24 +1124,58 @@
                 const suffix = parts[1] ? parts[1].trim() : '';          // e.g. "YYZ 905 405 4198"
                 const phone  = suffix.replace(/^[A-Z]{3}\s*/, '').trim(); // strip station code
 
+                const isSU       = agent.displayName === SUPERUSER_NAME;
+                const adminChecked = isSU || agent.isAdmin === true;
+
                 const div = document.createElement('div');
-                div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs mb-1";
+                div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs mb-1" + (adminChecked && !isSU ? ' border-amber-300 bg-amber-50' : '');
+
+                // Admin badge shown on the row for non-superuser admins (visible to all)
+                const adminBadge = (!isSU && agent.isAdmin) ? `<span class="ml-1 text-[8px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-300 px-1 rounded">Admin</span>` : '';
+                const suBadge    = isSU ? `<span class="ml-1 text-[8px] font-black uppercase tracking-widest bg-violet-100 text-violet-700 border border-violet-300 px-1 rounded">Superuser</span>` : '';
+
+                // Admin checkbox — only rendered when the superuser is the active agent in the main form
+                const adminCheckHtml = superActive ? `
+                    <label class="flex items-center gap-1.5 cursor-pointer select-none mr-2 shrink-0" title="${isSU ? 'Superuser always has admin rights' : 'Grant administrator access'}">
+                        <input type="checkbox"
+                            ${adminChecked ? 'checked' : ''}
+                            ${isSU ? 'disabled' : ''}
+                            onchange="toggleAdminFlag(${idx}, this.checked)"
+                            style="-webkit-appearance:checkbox;appearance:checkbox;width:14px;height:14px;accent-color:#d97706;cursor:${isSU ? 'not-allowed' : 'pointer'};">
+                        <span class="text-[9px] font-black uppercase tracking-widest ${isSU ? 'text-violet-500' : 'text-amber-600'}">Admin</span>
+                    </label>` : '';
+
                 div.innerHTML = `
                     <div class="flex-1 min-w-0">
                         <span class="font-bold text-slate-800">${agent.displayName}</span>
+                        ${suBadge}${adminBadge}
                         <span class="mx-2 text-slate-300">|</span>
                         <span class="font-black text-[10px] ${stationColors[agent.station] || 'text-slate-500'}">${agent.station}</span>
                         ${phone ? `<span class="ml-2 text-slate-400 font-mono text-[10px]">${phone}</span>` : ''}
                         <div class="text-[8px] text-slate-300 font-mono mt-0.5 truncate" title="${agent.value}">${agent.value}</div>
                     </div>
-                    <button onclick="removeAgent(${idx})" class="text-red-400 hover:text-red-600 ml-2 shrink-0">
+                    ${adminCheckHtml}
+                    <button onclick="removeAgent(${idx})" class="text-red-400 hover:text-red-600 ml-1 shrink-0" title="Remove agent">
                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>`;
                 container.appendChild(div);
             });
 
+            // Superuser hint
+            if (superActive) {
+                const hint = document.createElement('div');
+                hint.className = "mt-2 px-2 py-1.5 bg-violet-50 border border-violet-200 rounded text-[9px] font-bold text-violet-600 uppercase tracking-widest text-center";
+                hint.textContent = '🔑 Superuser mode — you can grant or revoke administrator access';
+                container.appendChild(hint);
+            } else {
+                const hint = document.createElement('div');
+                hint.className = "mt-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center";
+                hint.textContent = `Admin settings visible only to ${SUPERUSER_NAME}`;
+                container.appendChild(hint);
+            }
+
             const footer = document.createElement('div');
-            footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
+            footer.className = "mt-2 pt-2 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
             footer.textContent = `${agentRef.length} agent${agentRef.length !== 1 ? 's' : ''} · synced across peers`;
             container.appendChild(footer);
         }
@@ -2298,6 +2377,7 @@
 
         // ─── Delete a single Asset History record by its id ───────────────────
         function deleteAssetHistoryEntry(entryId) {
+            if (!requireAdmin('delete asset history')) return;
             const idx = assetHistory.findIndex(h => h.id === entryId);
             if (idx === -1) return;
             const deletedAssetId  = assetHistory[idx].assetId; // capture before splice
@@ -2327,6 +2407,7 @@
         }
 
         function addAssetHistoryEntry() {
+            if (!requireAdmin('add asset history')) return;
             const assetId = (document.getElementById('ah-asset-id')?.value || '').trim().toUpperCase();
             const dtRaw   = (document.getElementById('ah-dt')?.value      || '').trim();
             const tr      = (document.getElementById('ah-tr')?.value      || '').trim().toUpperCase();
@@ -2709,6 +2790,7 @@
         }
 
         function addNewRef() {
+            if (!requireAdmin('add aircraft')) return;
             const prefix = document.getElementById('new-ref-prefix').value.trim().toUpperCase();
             const type = document.getElementById('new-ref-type').value.trim();
             const body = document.getElementById('new-ref-body').value;
@@ -2726,6 +2808,7 @@
         }
 
         function removeRef(prefix) {
+            if (!requireAdmin('remove aircraft')) return;
             aircraftRefBlock[prefix] = Date.now(); // tombstone strictly newer than any _ts
             delete aircraftRef[prefix];
             saveAircraftRef();
@@ -2736,6 +2819,7 @@
         }
 
         function addNewAsset() {
+            if (!requireAdmin('add asset')) return;
             const id  = document.getElementById('new-asset-id').value.trim();
             const name = document.getElementById('new-asset-name').value.trim();
             if (!id || !name) return showToast("Enter ID & Asset Type");
@@ -2762,6 +2846,7 @@
         }
 
         function removeAsset(id) {
+            if (!requireAdmin('remove asset')) return;
             assetRefBlock[id] = Date.now();
             delete assetRef[id];
             delete assetRefTs[id];
@@ -3486,6 +3571,11 @@
             storageSet(STATION_KEY, stationField.value);
             // Kick off P2P whenever agent is selected
             if (agentField.value) initP2P(agentField.value);
+            // If the backend editor is open on the Agents tab, re-render so admin checkboxes
+            // appear (superuser) or disappear (other agents) immediately.
+            if (document.getElementById('editor-modal')?.classList.contains('open') && activeRefTab === 'agents') {
+                renderRefList();
+            }
             // Defer FIN suggestion until P2P is open so the claim broadcast actually reaches peers.
             // 3s fallback fires if P2P is slow or offline — the form never sits empty.
             if (p2pReady) {
@@ -5395,6 +5485,7 @@
         }
 
         function clearSharedDb() {
+            if (!requireAdmin('clear all data')) return;
             if (!confirm(`Clear all ${sharedDb.length} shared records? This will also clear them on all connected peers and cannot be undone.`)) return;
             // Timestamp the clear so any entry created before this moment is permanently excluded —
             // even if a peer hasn't synced yet and sends old entries later, they will be rejected.
