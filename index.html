@@ -922,24 +922,20 @@
         }
 
         function requireAdmin(action) {
-            if (isCurrentUserAdmin()) return true;
-            showToast(`Admin access required — contact ${SUPERUSER_NAME}`);
-            return false;
+            return isCurrentUserAdmin();
         }
 
         function toggleAdminFlag(idx, checked) {
-            if (!isSuperUser()) { showToast('Only ' + SUPERUSER_NAME + ' can change admin status'); return; }
+            if (!isSuperUser()) return;
             if (!agentRef[idx]) return;
-            // Prevent removing superuser's own implied admin (no-op — they're always superuser)
             agentRef[idx].isAdmin = checked;
             agentRef[idx]._ts = Date.now();
             saveAgentRef();
-            // Sync to peers
             const _ts = Date.now();
             Object.keys(p2pConnections).forEach(pid =>
                 conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock, _ts }));
             renderRefList();
-            showToast(checked ? 'Administrator access granted' : 'Administrator access removed');
+            switchRefTab(activeRefTab);
         }
 
         // Default agents — exact value strings matching the original hardcoded options.
@@ -1116,63 +1112,45 @@
             }
 
             const stationColors = { YYZ:'text-blue-600', YUL:'text-violet-600', YYC:'text-amber-600', YVR:'text-emerald-600' };
-            const superActive   = isSuperUser(); // admin checkboxes only visible to superuser
+            const superActive   = isSuperUser();
+            const canEdit       = isCurrentUserAdmin();
 
             agentRef.forEach((agent, idx) => {
-                // Parse phone from the value string: everything after ",STATION "
                 const parts  = agent.value.split(',');
-                const suffix = parts[1] ? parts[1].trim() : '';          // e.g. "YYZ 905 405 4198"
-                const phone  = suffix.replace(/^[A-Z]{3}\s*/, '').trim(); // strip station code
+                const suffix = parts[1] ? parts[1].trim() : '';
+                const phone  = suffix.replace(/^[A-Z]{3}\s*/, '').trim();
 
-                const isSU       = agent.displayName === SUPERUSER_NAME;
+                const isSU         = agent.displayName === SUPERUSER_NAME;
                 const adminChecked = isSU || agent.isAdmin === true;
 
-                const div = document.createElement('div');
-                div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs mb-1" + (adminChecked && !isSU ? ' border-amber-300 bg-amber-50' : '');
-
-                // Admin badge shown on the row for non-superuser admins (visible to all)
-                const adminBadge = (!isSU && agent.isAdmin) ? `<span class="ml-1 text-[8px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-300 px-1 rounded">Admin</span>` : '';
-                const suBadge    = isSU ? `<span class="ml-1 text-[8px] font-black uppercase tracking-widest bg-violet-100 text-violet-700 border border-violet-300 px-1 rounded">Superuser</span>` : '';
-
-                // Admin checkbox — only rendered when the superuser is the active agent in the main form
+                // Checkbox is silent — no label, no colour hint, only visible to superuser
                 const adminCheckHtml = superActive ? `
-                    <label class="flex items-center gap-1.5 cursor-pointer select-none mr-2 shrink-0" title="${isSU ? 'Superuser always has admin rights' : 'Grant administrator access'}">
-                        <input type="checkbox"
-                            ${adminChecked ? 'checked' : ''}
-                            ${isSU ? 'disabled' : ''}
-                            onchange="toggleAdminFlag(${idx}, this.checked)"
-                            style="-webkit-appearance:checkbox;appearance:checkbox;width:14px;height:14px;accent-color:#d97706;cursor:${isSU ? 'not-allowed' : 'pointer'};">
-                        <span class="text-[9px] font-black uppercase tracking-widest ${isSU ? 'text-violet-500' : 'text-amber-600'}">Admin</span>
-                    </label>` : '';
+                    <input type="checkbox"
+                        ${adminChecked ? 'checked' : ''}
+                        ${isSU ? 'disabled' : ''}
+                        onchange="toggleAdminFlag(${idx}, this.checked)"
+                        style="-webkit-appearance:checkbox;appearance:checkbox;width:13px;height:13px;cursor:${isSU ? 'default' : 'pointer'};margin-right:6px;flex-shrink:0;"
+                        title="">` : '';
 
+                // Delete button only visible to admins
+                const deleteBtn = canEdit ? `
+                    <button onclick="removeAgent(${idx})" class="text-red-400 hover:text-red-600 ml-1 shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>` : '';
+
+                const div = document.createElement('div');
+                div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs mb-1";
                 div.innerHTML = `
                     <div class="flex-1 min-w-0">
                         <span class="font-bold text-slate-800">${agent.displayName}</span>
-                        ${suBadge}${adminBadge}
                         <span class="mx-2 text-slate-300">|</span>
                         <span class="font-black text-[10px] ${stationColors[agent.station] || 'text-slate-500'}">${agent.station}</span>
                         ${phone ? `<span class="ml-2 text-slate-400 font-mono text-[10px]">${phone}</span>` : ''}
                         <div class="text-[8px] text-slate-300 font-mono mt-0.5 truncate" title="${agent.value}">${agent.value}</div>
                     </div>
-                    ${adminCheckHtml}
-                    <button onclick="removeAgent(${idx})" class="text-red-400 hover:text-red-600 ml-1 shrink-0" title="Remove agent">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>`;
+                    ${adminCheckHtml}${deleteBtn}`;
                 container.appendChild(div);
             });
-
-            // Superuser hint
-            if (superActive) {
-                const hint = document.createElement('div');
-                hint.className = "mt-2 px-2 py-1.5 bg-violet-50 border border-violet-200 rounded text-[9px] font-bold text-violet-600 uppercase tracking-widest text-center";
-                hint.textContent = '🔑 Superuser mode — you can grant or revoke administrator access';
-                container.appendChild(hint);
-            } else {
-                const hint = document.createElement('div');
-                hint.className = "mt-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-[9px] font-bold text-slate-400 uppercase tracking-widest text-center";
-                hint.textContent = `Admin settings visible only to ${SUPERUSER_NAME}`;
-                container.appendChild(hint);
-            }
 
             const footer = document.createElement('div');
             footer.className = "mt-2 pt-2 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
@@ -1613,12 +1591,12 @@
             document.getElementById('ref-tab-schedule').className     = `flex-1 py-3 border-b-2 ${tab === 'schedule'     ? 'border-violet-500 text-violet-600'   : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-agents').className       = `flex-1 py-3 border-b-2 ${tab === 'agents'       ? 'border-rose-500 text-rose-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-alldata').className      = `flex-1 py-3 border-b-2 ${tab === 'alldata'      ? 'border-teal-500 text-teal-600'       : 'border-transparent text-slate-400'}`;
-            document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
-            document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
-            document.getElementById('add-assethistory-ui').classList.toggle('hidden', tab !== 'assethistory');
-            document.getElementById('add-schedule-ui').classList.toggle('hidden', tab !== 'schedule');
-            document.getElementById('add-agent-ui').classList.toggle('hidden', tab !== 'agents');
-            document.getElementById('add-alldata-ui').classList.toggle('hidden', tab !== 'alldata');
+            document.getElementById('add-aircraft-ui').classList.toggle('hidden',   tab !== 'aircraft'    || !isCurrentUserAdmin());
+            document.getElementById('add-asset-ui').classList.toggle('hidden',      tab !== 'assets'      || !isCurrentUserAdmin());
+            document.getElementById('add-assethistory-ui').classList.toggle('hidden', tab !== 'assethistory' || !isCurrentUserAdmin());
+            document.getElementById('add-schedule-ui').classList.toggle('hidden',   tab !== 'schedule');
+            document.getElementById('add-agent-ui').classList.toggle('hidden',      tab !== 'agents'      || !isCurrentUserAdmin());
+            document.getElementById('add-alldata-ui').classList.toggle('hidden',    tab !== 'alldata'     || !isCurrentUserAdmin());
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('assethistory-filter-bar').classList.toggle('hidden', tab !== 'assethistory');
@@ -1660,9 +1638,9 @@
                             <span class="font-bold text-slate-700">${item.type}</span>
                             <span class="ml-1 text-[9px] px-1 bg-slate-200 rounded text-slate-500">${item.body}</span>
                         </div>
-                        <button onclick="removeRef('${prefix}')" class="text-red-400 hover:text-red-600 ml-2">
+                        ${isCurrentUserAdmin() ? `<button onclick="removeRef('${prefix}')" class="text-red-400 hover:text-red-600 ml-2">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>`;
+                        </button>` : ''}`;
                     container.appendChild(div);
                 });
             } else if (activeRefTab === 'assets') {
@@ -1686,7 +1664,7 @@
                                 ${locVal ? `<span class="text-[9px] px-1 bg-violet-100 text-violet-700 rounded font-bold uppercase">LOC: ${locVal}</span>` : ''}
                                 ${ntVal  ? `<span class="text-[9px] px-1 bg-amber-100 text-amber-700 rounded font-bold">NT: ${ntVal}</span>`  : ''}
                             </div>
-                            <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2 shrink-0">
+                            <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2 shrink-0" ${isCurrentUserAdmin() ? '' : 'style="display:none"'}>
                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                             </button>
                         </div>`;
@@ -2254,7 +2232,7 @@
                         <span class="block font-mono text-[10px] text-slate-500">${dtDisplay}</span>
                         ${ntText ? `<span class="block text-[10px] text-slate-400 leading-snug">${ntText}</span>` : ''}
                     </span>
-                    <button class="text-red-400 hover:text-red-600 transition-all p-1 flex-shrink-0" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>`;
+                    <button class="text-red-400 hover:text-red-600 transition-all p-1 flex-shrink-0" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})" ${isCurrentUserAdmin() ? '' : 'style="display:none"'}><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>`;
                 container.appendChild(div);
             });
         }
