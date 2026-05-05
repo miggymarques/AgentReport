@@ -900,6 +900,69 @@
         const AGENT_REF_KEY    = 'yul_agent_ref_v1';
         const AGENT_BLOCK_KEY  = 'yul_agent_block_v1'; // value strings of deliberately removed defaults
 
+        // ─── Admin / Superuser Access Control ─────────────────────────────────
+        // Only the superuser can grant administrator rights to other agents.
+        // Administrator agents can add/delete records in all backend tables.
+        const SUPERUSER_NAME = 'Michael Marques';
+
+        function isSuperUser() {
+            const sel = document.getElementById('agent-field');
+            if (!sel || !sel.value) return false;
+            const agent = agentRef.find(a => a.value === sel.value);
+            return agent ? agent.displayName === SUPERUSER_NAME : false;
+        }
+
+        function isCurrentUserAdmin() {
+            const sel = document.getElementById('agent-field');
+            if (!sel || !sel.value) return false;
+            const agent = agentRef.find(a => a.value === sel.value);
+            return agent ? (agent.isAdmin === true) : false;
+        }
+
+        function requireAdmin(action) {
+            return isCurrentUserAdmin();
+        }
+
+        // Re-evaluates admin visibility for add panels AND re-renders the list
+        // (delete buttons). Call this any time the agent selection or agentRef changes.
+        function applyAdminVisibility() {
+            const admin  = isCurrentUserAdmin();
+            const tab    = activeRefTab || 'aircraft';
+            const panels = {
+                'aircraft':     'add-aircraft-ui',
+                'assets':       'add-asset-ui',
+                'assethistory': 'add-assethistory-ui',
+                'agents':       'add-agent-ui',
+                'alldata':      'add-alldata-ui',
+            };
+            // Show the add panel only for the active tab AND only if admin
+            Object.entries(panels).forEach(([t, id]) => {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('hidden', tab !== t || !admin);
+            });
+            // Schedule tab is not admin-gated
+            const sched = document.getElementById('add-schedule-ui');
+            if (sched) sched.classList.toggle('hidden', tab !== 'schedule');
+            // Re-render the list so delete buttons reflect current admin state
+            if (document.getElementById('editor-modal')?.classList.contains('open')) {
+                renderRefList();
+            }
+        }
+
+        function toggleAdminFlag(idx, checked) {
+            if (!isSuperUser()) return;
+            if (!agentRef[idx]) return;
+            agentRef[idx].isAdmin = checked;
+            agentRef[idx]._ts = Date.now();
+            saveAgentRef();
+            const _ts = Date.now();
+            Object.keys(p2pConnections).forEach(pid =>
+                conn_p2p_send(pid, { type: 'AGENT_REF_SYNC', agentRef, agentBlock, _ts }));
+            // Re-evaluate all admin-gated UI for the CURRENTLY selected agent
+            // (not the agent whose checkbox just changed — MM is currently selected)
+            applyAdminVisibility();
+        }
+
         // Default agents — exact value strings matching the original hardcoded options.
         // These are always merged into agentRef on load so they can never be lost.
         const DEFAULT_AGENTS = [
@@ -1000,6 +1063,7 @@
         }
 
         function addNewAgent() {
+            if (!requireAdmin('add agent')) return;
             const displayName = document.getElementById('new-agent-name').value.trim();
             const station     = document.getElementById('new-agent-station').value;
             const phone       = document.getElementById('new-agent-phone').value.trim();
@@ -1037,6 +1101,7 @@
         }
 
         function removeAgent(idx) {
+            if (!requireAdmin('remove agent')) return;
             const removed = agentRef.splice(idx, 1)[0];
             // If this is a default agent, add to blocklist so initAgentRef won't re-add it
             // Tombstone this agent with the current timestamp
@@ -1072,12 +1137,30 @@
             }
 
             const stationColors = { YYZ:'text-blue-600', YUL:'text-violet-600', YYC:'text-amber-600', YVR:'text-emerald-600' };
+            const superActive   = isSuperUser();
+            const canEdit       = isCurrentUserAdmin();
 
             agentRef.forEach((agent, idx) => {
-                // Parse phone from the value string: everything after ",STATION "
                 const parts  = agent.value.split(',');
-                const suffix = parts[1] ? parts[1].trim() : '';          // e.g. "YYZ 905 405 4198"
-                const phone  = suffix.replace(/^[A-Z]{3}\s*/, '').trim(); // strip station code
+                const suffix = parts[1] ? parts[1].trim() : '';
+                const phone  = suffix.replace(/^[A-Z]{3}\s*/, '').trim();
+
+                const isSU         = agent.displayName === SUPERUSER_NAME;
+                const adminChecked = agent.isAdmin === true;
+
+                // Checkbox is silent — no label, no colour hint, only visible to superuser
+                const adminCheckHtml = superActive ? `
+                    <input type="checkbox"
+                        ${adminChecked ? 'checked' : ''}
+                        onchange="toggleAdminFlag(${idx}, this.checked)"
+                        style="-webkit-appearance:checkbox;appearance:checkbox;width:13px;height:13px;cursor:pointer;margin-right:6px;flex-shrink:0;"
+                        title="">` : '';
+
+                // Delete button only visible to admins
+                const deleteBtn = canEdit ? `
+                    <button onclick="removeAgent(${idx})" class="text-red-400 hover:text-red-600 ml-1 shrink-0">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>` : '';
 
                 const div = document.createElement('div');
                 div.className = "flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200 text-xs mb-1";
@@ -1089,14 +1172,12 @@
                         ${phone ? `<span class="ml-2 text-slate-400 font-mono text-[10px]">${phone}</span>` : ''}
                         <div class="text-[8px] text-slate-300 font-mono mt-0.5 truncate" title="${agent.value}">${agent.value}</div>
                     </div>
-                    <button onclick="removeAgent(${idx})" class="text-red-400 hover:text-red-600 ml-2 shrink-0">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>`;
+                    ${adminCheckHtml}${deleteBtn}`;
                 container.appendChild(div);
             });
 
             const footer = document.createElement('div');
-            footer.className = "mt-3 pt-3 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
+            footer.className = "mt-2 pt-2 border-t border-slate-200 text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center";
             footer.textContent = `${agentRef.length} agent${agentRef.length !== 1 ? 's' : ''} · synced across peers`;
             container.appendChild(footer);
         }
@@ -1261,13 +1342,14 @@
                 // renderPriorityList when they build svcCallFins from finTable.
                 // Checks are case-insensitive and cover Comments, IssueDetails, AND SrvcIss.
                 // Once set to true the flag is never cleared — it's append-only.
-                const _scStr = s => s && String(s).toLowerCase().includes('service call');
+                const _scStr = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
                 if (!finTable[fin].hasServiceCall) {
                     finTable[fin].hasServiceCall =
-                        !!(entry.ServiceCall  ||
+                        !!(entry.ServiceCall    ||
                            _scStr(entry.Comments)     ||
                            _scStr(entry.IssueDetails) ||
-                           _scStr(entry.SrvcIss));
+                           _scStr(entry.SrvcIss)      ||
+                           _scStr(entry.SrvcIssCAT));
                 }
 
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
@@ -1533,12 +1615,17 @@
             document.getElementById('ref-tab-schedule').className     = `flex-1 py-3 border-b-2 ${tab === 'schedule'     ? 'border-violet-500 text-violet-600'   : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-agents').className       = `flex-1 py-3 border-b-2 ${tab === 'agents'       ? 'border-rose-500 text-rose-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-alldata').className      = `flex-1 py-3 border-b-2 ${tab === 'alldata'      ? 'border-teal-500 text-teal-600'       : 'border-transparent text-slate-400'}`;
-            document.getElementById('add-aircraft-ui').classList.toggle('hidden', tab !== 'aircraft');
-            document.getElementById('add-asset-ui').classList.toggle('hidden', tab !== 'assets');
-            document.getElementById('add-assethistory-ui').classList.toggle('hidden', tab !== 'assethistory');
-            document.getElementById('add-schedule-ui').classList.toggle('hidden', tab !== 'schedule');
-            document.getElementById('add-agent-ui').classList.toggle('hidden', tab !== 'agents');
-            document.getElementById('add-alldata-ui').classList.toggle('hidden', tab !== 'alldata');
+            // Add-panel and delete-button visibility is handled by applyAdminVisibility,
+            // called at the end of switchRefTab via renderRefList → but we also call it
+            // explicitly here so the panels update BEFORE renderRefList runs.
+            const _admin = isCurrentUserAdmin();
+            const _tab   = tab;
+            document.getElementById('add-aircraft-ui').classList.toggle('hidden',     _tab !== 'aircraft'     || !_admin);
+            document.getElementById('add-asset-ui').classList.toggle('hidden',        _tab !== 'assets'       || !_admin);
+            document.getElementById('add-assethistory-ui').classList.toggle('hidden', _tab !== 'assethistory' || !_admin);
+            document.getElementById('add-schedule-ui').classList.toggle('hidden',     _tab !== 'schedule');
+            document.getElementById('add-agent-ui').classList.toggle('hidden',        _tab !== 'agents'       || !_admin);
+            document.getElementById('add-alldata-ui').classList.toggle('hidden',      _tab !== 'alldata'      || !_admin);
             document.getElementById('add-synctable-ui').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('synctable-export-bar').classList.toggle('hidden', tab !== 'synctable');
             document.getElementById('assethistory-filter-bar').classList.toggle('hidden', tab !== 'assethistory');
@@ -1580,9 +1667,9 @@
                             <span class="font-bold text-slate-700">${item.type}</span>
                             <span class="ml-1 text-[9px] px-1 bg-slate-200 rounded text-slate-500">${item.body}</span>
                         </div>
-                        <button onclick="removeRef('${prefix}')" class="text-red-400 hover:text-red-600 ml-2">
+                        ${isCurrentUserAdmin() ? `<button onclick="removeRef('${prefix}')" class="text-red-400 hover:text-red-600 ml-2">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>`;
+                        </button>` : ''}`;
                     container.appendChild(div);
                 });
             } else if (activeRefTab === 'assets') {
@@ -1606,7 +1693,7 @@
                                 ${locVal ? `<span class="text-[9px] px-1 bg-violet-100 text-violet-700 rounded font-bold uppercase">LOC: ${locVal}</span>` : ''}
                                 ${ntVal  ? `<span class="text-[9px] px-1 bg-amber-100 text-amber-700 rounded font-bold">NT: ${ntVal}</span>`  : ''}
                             </div>
-                            <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2 shrink-0">
+                            <button onclick="removeAsset('${assetId}')" class="text-red-400 hover:text-red-600 ml-2 shrink-0" ${isCurrentUserAdmin() ? '' : 'style="display:none"'}>
                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                             </button>
                         </div>`;
@@ -1994,6 +2081,82 @@
             return histEntry;
         }
 
+        // ─── Write a single FN (Found) entry into Asset History ──────────────
+        //
+        // Trigger Condition 1 — Sync Table Import (File Import):
+        //   FIN = "INV"  AND  SrvcIssCAT contains "Found" (e.g. "Found")
+        //
+        // Trigger Condition 2 — File Save (Inventory Only):
+        //   isInvMode = true  AND  SrvcIssCAT contains "Found"
+        //
+        // Field Mapping:
+        //   ASST# → assetId  |  TR → "FN"  |  LOC → Agent Service Station
+        //   Date/Time → dt (now on live save, entry.id timestamp on import)
+        //   NT → "Missing From [MS_LOC] - [AgentFirstName]"  (when a prior MS record exists)
+        //        where MS_LOC is the LOC field of the most recent TR='MS' record for
+        //        the same assetId in assetHistory (typically the FIN number).
+        //        If no MS record exists, NT is just "[AgentFirstName]".
+        //
+        // Upsert rule: one record per assetId, latest dt always wins.
+        // batchMode: if true, skip save+broadcast — caller must flush after the loop.
+        // Returns the written entry object, or null if skipped (newer/tombstoned).
+        function writeFNHistoryEntry(assetId, dt, loc, agentStr, batchMode = false) {
+            if (!assetId) return null;
+
+            // ── Build NT: look up the MS record for this asset ────────────────
+            // Find the most recent TR='MS' record for this assetId so we can extract
+            // its LOC (the FIN the asset was last expected on) for the "Missing From" note.
+            const msRecord = assetHistory
+                .filter(h => h.assetId === assetId && (h.tr || '').toUpperCase() === 'MS')
+                .sort((a, b) => (b.dt || '') > (a.dt || '') ? 1 : -1)[0] || null;
+
+            const msLoc       = msRecord ? (msRecord.loc || '').trim().toUpperCase() : '';
+            const firstName   = (agentStr || '').split(',')[0].trim().split(/\s+/)[0] || '';
+
+            let ntParts = [];
+            if (msLoc) ntParts.push(`Missing From ${msLoc}`);
+            if (firstName) ntParts.push(firstName);
+            const ntFull = ntParts.join(' - ');
+
+            const inDb  = isValidAssetId(assetId);
+            const ntOut = [ntFull, inDb ? '' : "Asset Doesn't Exist"].filter(Boolean).join(' | ');
+
+            const dtStr = (dt instanceof Date ? dt : new Date(dt)).toISOString();
+
+            const histEntry = {
+                id:      Date.now() + Math.floor(Math.random() * 1000),
+                assetId,
+                dt:      dtStr,
+                tr:      'FN',
+                loc:     (loc || '').trim().toUpperCase(),
+                nt:      ntOut
+            };
+
+            // MAX(DateTime) guard — one record per assetId, latest dt wins
+            const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
+            if (assetTombTs && histEntry.id <= assetTombTs) return null; // tombstoned — skip
+            const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
+            if (existingIdx !== -1) {
+                if (assetHistoryBlock[assetHistory[existingIdx].id]) return null; // entry tombstoned — never resurrect
+                if (dtStr <= assetHistory[existingIdx].dt) return null;           // existing is same age or newer
+                assetHistory.splice(existingIdx, 1);                              // evict stale record
+            }
+
+            assetHistory.push(histEntry);
+
+            if (!batchMode) {
+                saveAssetHistory();
+                broadcastAssetHistorySync([histEntry]);
+                if (activeRefTab === 'assethistory') {
+                    const el = document.getElementById('assethistory-count-label');
+                    if (el) el.textContent = assetHistory.length + ' records';
+                    renderRefList();
+                }
+            }
+
+            return histEntry;
+        }
+
         // ─── Asset History ────────────────────────────────────────────────────
         function renderAssetHistory(container) {
             if (!assetHistory.length) {
@@ -2064,6 +2227,7 @@
                 RM: 'background:#fee2e2;color:#b91c1c;',   // red
                 MS: 'background:#fef3c7;color:#92400e;',   // amber
                 DM: 'background:#ffedd5;color:#c2410c;',   // orange — Reported Damaged
+                FN: 'background:#dcfce7;color:#15803d;',   // green — Found
             };
 
             sorted.forEach(row => {
@@ -2097,7 +2261,7 @@
                         <span class="block font-mono text-[10px] text-slate-500">${dtDisplay}</span>
                         ${ntText ? `<span class="block text-[10px] text-slate-400 leading-snug">${ntText}</span>` : ''}
                     </span>
-                    <button class="text-red-400 hover:text-red-600 transition-all p-1 flex-shrink-0" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})"><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>`;
+                    <button class="text-red-400 hover:text-red-600 transition-all p-1 flex-shrink-0" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})" ${isCurrentUserAdmin() ? '' : 'style="display:none"'}><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>`;
                 container.appendChild(div);
             });
         }
@@ -2159,40 +2323,6 @@
             // N/A = assets in the DB not covered by TRK or MS (TTL minus everything shown in TRK)
             const naCount  = Math.max(0, ttl - trkCount - msTot);
 
-            // ── Block 4: Missing Devices – ML (>7d <3mo) / LO (>3mo lost) ──
-            // For each unique assetId, find its most recent MS entry, then bucket
-            // by how long ago it was flagged.  Airline determined by LOC prefix.
-            const NOW        = Date.now();
-            const MS_7D      = 7  * 24 * 60 * 60 * 1000;   // 7 days in ms
-            const MS_90D     = 90 * 24 * 60 * 60 * 1000;   // ~3 months in ms
-
-            // Latest MS entry per assetId (assetHistory has at most one row per
-            // asset due to the upsert guard, but we future-proof with a max scan)
-            const latestMsMap = {};
-            ah.filter(e => (e.tr || '').toUpperCase() === 'MS').forEach(e => {
-                const ts = new Date(e.dt).getTime();
-                if (isNaN(ts)) return;
-                if (!latestMsMap[e.assetId] || ts > latestMsMap[e.assetId].ts) {
-                    latestMsMap[e.assetId] = { ts, loc: (e.loc || '').toUpperCase() };
-                }
-            });
-
-            let mlAC = 0, mlRV = 0, mlQK = 0;
-            let loAC = 0, loRV = 0, loQK = 0;
-
-            Object.values(latestMsMap).forEach(({ ts, loc }) => {
-                const age = NOW - ts;
-                if (age <= MS_7D) return;           // < 7 days — not yet ML
-                const isML = age < MS_90D;          // 7d–90d  → Missing Long-term
-                const isLO = age >= MS_90D;         // 90d+    → Lost
-                if      (loc.startsWith('AC')) { isML ? mlAC++ : loAC++; }
-                else if (loc.startsWith('RV')) { isML ? mlRV++ : loRV++; }
-                else if (loc.startsWith('QK')) { isML ? mlQK++ : loQK++; }
-            });
-
-            const mlTot4 = mlAC + mlRV + mlQK;
-            const loTot4 = loAC + loRV + loQK;
-
             // ── Shared style tokens ──
             const F   = 'font-family:ui-monospace,monospace;font-size:9px;';
             const thS = `${F}font-weight:900;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;text-align:center;padding:1px 4px;border-bottom:1px solid #e2e8f0;white-space:nowrap;`;
@@ -2249,25 +2379,12 @@
                     </tr>
                 </table>
 
-                <!-- Block 4: Missing Devices ML / LO -->
-                <table style="border-collapse:collapse;border:1px solid #e2e8f0;flex-shrink:0;">
-                    <tr>
-                        <th style="${thS}border-right:1px solid #e2e8f0;"></th>
-                        ${thead('AC')}${thead('RV')}${thead('QK')}${thead('TOT','color:#0ea5e9;')}
-                    </tr>
-                    <tr>
-                        ${rhead('ML')}${cell(mlAC)}${cell(mlRV)}${cell(mlQK)}${tot(mlTot4)}
-                    </tr>
-                    <tr>
-                        ${rhead('LO')}${cell(loAC)}${cell(loRV)}${cell(loQK)}${tot(loTot4)}
-                    </tr>
-                </table>
-
             </div>`;
         }
 
         // ─── Delete a single Asset History record by its id ───────────────────
         function deleteAssetHistoryEntry(entryId) {
+            if (!requireAdmin('delete asset history')) return;
             const idx = assetHistory.findIndex(h => h.id === entryId);
             if (idx === -1) return;
             const deletedAssetId  = assetHistory[idx].assetId; // capture before splice
@@ -2297,6 +2414,7 @@
         }
 
         function addAssetHistoryEntry() {
+            if (!requireAdmin('add asset history')) return;
             const assetId = (document.getElementById('ah-asset-id')?.value || '').trim().toUpperCase();
             const dtRaw   = (document.getElementById('ah-dt')?.value      || '').trim();
             const tr      = (document.getElementById('ah-tr')?.value      || '').trim().toUpperCase();
@@ -2439,12 +2557,13 @@
             // ALSO check finTable.hasServiceCall — file-imported entries never enter db
             // or sharedDb, so without the finTable check they would always be missed.
             // All string checks are case-insensitive and include SrvcIss.
-            const _scLoose = s => s && String(s).toLowerCase().includes('service call');
+            const _scLoose = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
             const _isSvcCall = r =>
                 r.ServiceCall ||
                 _scLoose(r.Comments)     ||
                 _scLoose(r.IssueDetails) ||
-                _scLoose(r.SrvcIss);
+                _scLoose(r.SrvcIss)      ||
+                _scLoose(r.SrvcIssCAT);
             const svcCallFins = new Set([
                 ...[...db, ...sharedDb].filter(_isSvcCall).map(r => r.FIN),
                 ...Object.entries(finTable)
@@ -2678,6 +2797,7 @@
         }
 
         function addNewRef() {
+            if (!requireAdmin('add aircraft')) return;
             const prefix = document.getElementById('new-ref-prefix').value.trim().toUpperCase();
             const type = document.getElementById('new-ref-type').value.trim();
             const body = document.getElementById('new-ref-body').value;
@@ -2695,6 +2815,7 @@
         }
 
         function removeRef(prefix) {
+            if (!requireAdmin('remove aircraft')) return;
             aircraftRefBlock[prefix] = Date.now(); // tombstone strictly newer than any _ts
             delete aircraftRef[prefix];
             saveAircraftRef();
@@ -2705,6 +2826,7 @@
         }
 
         function addNewAsset() {
+            if (!requireAdmin('add asset')) return;
             const id  = document.getElementById('new-asset-id').value.trim();
             const name = document.getElementById('new-asset-name').value.trim();
             if (!id || !name) return showToast("Enter ID & Asset Type");
@@ -2731,6 +2853,7 @@
         }
 
         function removeAsset(id) {
+            if (!requireAdmin('remove asset')) return;
             assetRefBlock[id] = Date.now();
             delete assetRef[id];
             delete assetRefTs[id];
@@ -3455,6 +3578,11 @@
             storageSet(STATION_KEY, stationField.value);
             // Kick off P2P whenever agent is selected
             if (agentField.value) initP2P(agentField.value);
+            // Re-evaluate all admin-gated UI whenever the agent changes — the modal
+            // must reflect the NEW user's permissions immediately regardless of which tab is open.
+            if (document.getElementById('editor-modal')?.classList.contains('open')) {
+                applyAdminVisibility();
+            }
             // Defer FIN suggestion until P2P is open so the claim broadcast actually reaches peers.
             // 3s fallback fires if P2P is slow or offline — the form never sits empty.
             if (p2pReady) {
@@ -3946,10 +4074,24 @@
             // and the single-location eviction logic works correctly regardless of
             // the order rows appear in the imported file.
             const entries = [];
+            // INV+Found rows are intercepted here and processed separately into FN
+            // history after the main entry loop — they must never touch updateFinTable
+            // or writeOBHistoryForHHDs, but they do need the same timestamp parsing.
+            const invFoundRows = [];
 
             rows.forEach((row, idx) => {
                 const fin = (row['FIN'] || '').trim().toUpperCase();
-                if (!fin || fin === 'INV' || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
+
+                // ── Intercept INV rows with SrvcIssCAT = Found ───────────────
+                // Stash for FN history processing below; skip all other INV rows.
+                if (fin === 'INV') {
+                    const catNorm = (row['SrvcIssCAT'] || '').toLowerCase();
+                    if (catNorm.includes('found')) invFoundRows.push({ row, idx });
+                    skipped++;
+                    return;
+                }
+
+                if (!fin || !/^(AC|RV|QK)\d{3,4}$/.test(fin)) { skipped++; return; }
 
                 // Bug fix: timestamp must reflect the actual service datetime (date + time), not
                 // just the date. Previously, time was stripped by normaliseDateStr so every
@@ -4126,6 +4268,42 @@
                 })();
 
                 processed++;
+            });
+
+            // ── FN history: drain stashed INV+Found rows ──────────────────────
+            // These were intercepted during rows.forEach (INV rejects the normal path).
+            // Timestamp is parsed the same way as regular entries for consistency.
+            // writeFNHistoryEntry handles the MS-lookup and NT assembly.
+            invFoundRows.forEach(({ row, idx }) => {
+                const assetId = (row['ASST'] || '').trim().toUpperCase();
+                if (!assetId || assetId === 'N/A' || assetId === '---') {
+                    console.warn('[Sync Import] FN history: no ASST on INV+Found row — skipped', row);
+                    return;
+                }
+
+                // Parse timestamp using the same logic as regular entries
+                const rawDateStr = row['Service Date'] || row['displayDate'] || '';
+                const rawTimeStr = (row['Arrival Time'] || row['Last Time'] || row['displayTime'] || '').trim();
+                const dateStr    = normaliseDateStr(rawDateStr);
+                let ts = 0;
+                if (dateStr) {
+                    const combined = rawTimeStr ? `${dateStr} ${rawTimeStr}` : dateStr;
+                    const d = new Date(combined);
+                    if (!isNaN(d)) {
+                        ts = d.getTime();
+                    } else {
+                        const dDate = new Date(dateStr);
+                        ts = isNaN(dDate) ? 0 : dDate.getTime();
+                    }
+                }
+                if (!ts) ts = idx + 1;
+
+                const stationCode = (row['Service Station'] || '').trim().toUpperCase();
+                const written = writeFNHistoryEntry(assetId, new Date(ts), stationCode, row['Agent'], /*batchMode=*/true);
+                if (written) {
+                    batchedHistoryEntries.push(written);
+                    console.log(`[Sync Import] FN history written — ${assetId} @ ${stationCode}`);
+                }
             });
 
             // Flush the batch after all rows are processed
@@ -4411,12 +4589,13 @@
             // ALSO check finTable.hasServiceCall — file-imported entries never enter db
             // or sharedDb, so without the finTable check they would always be missed.
             // All string checks are case-insensitive and include SrvcIss.
-            const _scLooseP = s => s && String(s).toLowerCase().includes('service call');
+            const _scLooseP = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
             const _isSvcCallP = r =>
                 r.ServiceCall ||
                 _scLooseP(r.Comments)     ||
                 _scLooseP(r.IssueDetails) ||
-                _scLooseP(r.SrvcIss);
+                _scLooseP(r.SrvcIss)      ||
+                _scLooseP(r.SrvcIssCAT);
             const svcCallFins = new Set([
                 ...[...db, ...sharedDb].filter(_isSvcCallP).map(r => r.FIN),
                 ...Object.entries(finTable)
@@ -5002,6 +5181,37 @@
                 }
             })();
 
+            // ── FN history: Found Asset (File Save, Inventory Only) ──────────
+            // Condition: isInvMode = true  AND  SrvcIssCAT contains "Found"
+            // Asset identifier: ASST field (Reported Asset#).
+            // LOC: Agent's Service Station. NT: "Missing From [MS_LOC] - [FirstName]"
+            // MS_LOC is the LOC from the most recent TR='MS' record for this asset.
+            // Upsert: same MAX(DateTime) guard as OB / RM / MS / DM / RP — latest dt wins.
+            (function() {
+                const catNorm = (entry.SrvcIssCAT || '').toLowerCase();
+
+                if (!isInvMode) return;            // only Inventory Only records
+                if (!catNorm.includes('found')) return; // only Found category
+
+                const assetId = (entry.ASST || '').trim().toUpperCase();
+                if (!assetId || assetId === 'N/A' || assetId === '---') {
+                    console.warn('[File Save] FN history: no ASST value — skipped');
+                    return;
+                }
+
+                if (!isValidAssetId(assetId)) {
+                    console.warn(`[File Save] FN history: ASST "${assetId}" is not a valid asset ID — will write with flag`);
+                }
+
+                const stationCode = (
+                    entry['Service Station'] ||
+                    document.getElementById('station-field')?.value || ''
+                ).trim().toUpperCase();
+
+                writeFNHistoryEntry(assetId, now, stationCode, entry.Agent, /*batchMode=*/false);
+                console.log(`[File Save] FN history written — ${assetId} @ ${stationCode}`);
+            })();
+
             try {
                 storageSet(APP_STORAGE_KEY, JSON.stringify(db));
             } catch (e) {
@@ -5085,8 +5295,8 @@
                 const isInv  = r.FIN === 'INV';
                 const finCls = isInv ? 'text-amber-600' : 'text-blue-600';
                 const notSvc  = r.Serviced === 'No' ? '<span class="text-[9px] font-black text-red-400 border border-red-200 px-1.5 py-0.5 rounded-full ml-1">NOT SVC</span>' : '';
-                const _scRec = s => s && String(s).toLowerCase().includes('service call');
-                const svcCall = (r.ServiceCall || _scRec(r.Comments) || _scRec(r.IssueDetails) || _scRec(r.SrvcIss)) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
+                const _scRec = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
+                const svcCall = (r.ServiceCall || _scRec(r.Comments) || _scRec(r.IssueDetails) || _scRec(r.SrvcIss) || _scRec(r.SrvcIssCAT)) ? '<span class="text-[9px] font-black text-blue-400 border border-blue-200 px-1.5 py-0.5 rounded-full ml-1">SVC CALL</span>' : '';
 
                 let equip = '';
                 if (!isInv) {
@@ -5282,6 +5492,7 @@
         }
 
         function clearSharedDb() {
+            if (!requireAdmin('clear all data')) return;
             if (!confirm(`Clear all ${sharedDb.length} shared records? This will also clear them on all connected peers and cannot be undone.`)) return;
             // Timestamp the clear so any entry created before this moment is permanently excluded —
             // even if a peer hasn't synced yet and sends old entries later, they will be rejected.
@@ -6461,7 +6672,8 @@
                         saveAgentRef();
                         rebuildAgentDropdown();
                         syncAllAgentsFromRef();
-                        if (activeRefTab === 'agents') renderRefList();
+                        // Re-evaluate admin-gated UI in case this user's isAdmin flag changed
+                        applyAdminVisibility();
                     }
                 }
                 return;
