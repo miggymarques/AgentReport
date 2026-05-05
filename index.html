@@ -538,8 +538,9 @@
             <!-- Summary tables always visible to all users -->
             <div id="asset-history-summary" class="px-3 pt-2 pb-1 bg-slate-50 border-t"></div>
 
-            <div class="p-3 bg-slate-50 border-t hidden" id="add-assethistory-ui">
-                <div class="flex items-center justify-between mb-2">
+            <!-- Info bar: record count + export — visible to ALL users on assethistory tab -->
+            <div class="p-3 bg-slate-50 border-t hidden" id="assethistory-info-bar">
+                <div class="flex items-center justify-between">
                     <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Asset Transaction Log · <span id="assethistory-count-label">0 records</span></span>
                     <div class="flex gap-2">
                         <button onclick="exportAssetHistoryCSV()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
@@ -548,6 +549,10 @@
                         </button>
                     </div>
                 </div>
+            </div>
+
+            <!-- Manual add row — admin only -->
+            <div class="p-3 bg-slate-50 border-t hidden" id="add-assethistory-ui">
                 <!-- Manual add row -->
                 <div class="flex gap-2 flex-wrap">
                     <input type="text"           id="ah-asset-id"  placeholder="Asst#"   class="w-20 uppercase font-mono !text-xs">
@@ -941,6 +946,9 @@
                 const el = document.getElementById(id);
                 if (el) el.classList.toggle('hidden', tab !== t || !admin);
             });
+            // Info bar (count + export) is visible to all users on the assethistory tab
+            const _infoBar = document.getElementById('assethistory-info-bar');
+            if (_infoBar) _infoBar.classList.toggle('hidden', tab !== 'assethistory');
             // Schedule tab is not admin-gated
             const sched = document.getElementById('add-schedule-ui');
             if (sched) sched.classList.toggle('hidden', tab !== 'schedule');
@@ -1624,6 +1632,7 @@
             document.getElementById('add-aircraft-ui').classList.toggle('hidden',     _tab !== 'aircraft'     || !_admin);
             document.getElementById('add-asset-ui').classList.toggle('hidden',        _tab !== 'assets'       || !_admin);
             document.getElementById('add-assethistory-ui').classList.toggle('hidden', _tab !== 'assethistory' || !_admin);
+            document.getElementById('assethistory-info-bar').classList.toggle('hidden', _tab !== 'assethistory');
             document.getElementById('add-schedule-ui').classList.toggle('hidden',     _tab !== 'schedule');
             document.getElementById('add-agent-ui').classList.toggle('hidden',        _tab !== 'agents'       || !_admin);
             document.getElementById('add-alldata-ui').classList.toggle('hidden',      _tab !== 'alldata'      || !_admin);
@@ -1633,6 +1642,7 @@
             document.getElementById('schedule-filter-bar').classList.toggle('hidden', tab !== 'schedule');
             const _colHdr = document.getElementById('synctable-col-header'); if (tab !== 'synctable') { _colHdr.classList.add('hidden'); _colHdr.innerHTML = ''; }
             const _ahHdr  = document.getElementById('assethistory-col-header'); if (tab !== 'assethistory') { _ahHdr.classList.add('hidden'); _ahHdr.innerHTML = ''; }
+            const _ahSum  = document.getElementById('asset-history-summary'); if (tab !== 'assethistory') { _ahSum.classList.add('hidden'); _ahSum.innerHTML = ''; } else { _ahSum.classList.remove('hidden'); }
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; stFilterAgent = ''; stFilterDate = ''; }
             if (tab !== 'assethistory') { ahFilterAsset = ''; ahFilterTr = ''; ahFilterLoc = ''; ahFilterDate = ''; }
             if (tab === 'assethistory') {
