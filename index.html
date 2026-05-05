@@ -2335,10 +2335,41 @@
             const rhead = (v)           => `<td style="${rhS}">${v}</td>`;
             const thead = (v, extra='') => `<th style="${thS}${extra}">${v}</th>`;
 
+            // ── Block 4: Missing Devices — ML (7–90 days) and LO (>90 days) ──
+            // assetHistory is one record per assetId (upsert); MS records whose dt is
+            // still the latest entry are devices that are currently missing.
+            const nowMs   = Date.now();
+            const DAY_MS  = 1000 * 60 * 60 * 24;
+
+            // For each current MS record compute how many days it has been missing
+            const msWithAge = ms.map(e => {
+                const msDate = e.dt ? new Date(e.dt) : null;
+                const days   = msDate && !isNaN(msDate) ? (nowMs - msDate.getTime()) / DAY_MS : 0;
+                const airline = (e.loc || '').toUpperCase().startsWith('AC') ? 'AC'
+                              : (e.loc || '').toUpperCase().startsWith('RV') ? 'RV'
+                              : (e.loc || '').toUpperCase().startsWith('QK') ? 'QK'
+                              : null;
+                return { days, airline };
+            });
+
+            // ML — missing longer than 7 days but less than 3 months (90 days)
+            const ml    = msWithAge.filter(e => e.days > 7 && e.days <= 90);
+            const mlAC  = ml.filter(e => e.airline === 'AC').length;
+            const mlRV  = ml.filter(e => e.airline === 'RV').length;
+            const mlQK  = ml.filter(e => e.airline === 'QK').length;
+            const mlTot = mlAC + mlRV + mlQK;
+
+            // LO — missing longer than 3 months (90 days), considered lost
+            const lo    = msWithAge.filter(e => e.days > 90);
+            const loAC  = lo.filter(e => e.airline === 'AC').length;
+            const loRV  = lo.filter(e => e.airline === 'RV').length;
+            const loQK  = lo.filter(e => e.airline === 'QK').length;
+            const loTot = loAC + loRV + loQK;
+
             el.innerHTML = `
             <div style="display:flex;gap:6px;align-items:flex-start;padding:3px 0 2px;border-top:1px solid #e2e8f0;overflow-x:auto;">
 
-                <!-- Block 1: Airline OB / DM -->
+                <!-- Block 1: Airline OB / MS -->
                 <table style="border-collapse:collapse;border:1px solid #e2e8f0;flex-shrink:0;">
                     <tr>
                         <th style="${thS}border-right:1px solid #e2e8f0;"></th>
@@ -2376,6 +2407,20 @@
                     </tr>
                     <tr>
                         ${rhead('N/A')}${cell(naCount)}
+                    </tr>
+                </table>
+
+                <!-- Block 4: Missing Devices ML / LO -->
+                <table style="border-collapse:collapse;border:1px solid #e2e8f0;flex-shrink:0;">
+                    <tr>
+                        <th style="${thS}border-right:1px solid #e2e8f0;"></th>
+                        ${thead('AC')}${thead('RV')}${thead('QK')}${thead('TOT','color:#0ea5e9;')}
+                    </tr>
+                    <tr title="Missing long-term: &gt;7 days and &lt;3 months">
+                        ${rhead('ML')}${cell(mlAC, mlAC ? 'color:#d97706;' : '')}${cell(mlRV, mlRV ? 'color:#d97706;' : '')}${cell(mlQK, mlQK ? 'color:#d97706;' : '')}${tot(mlTot)}
+                    </tr>
+                    <tr title="Lost: missing &gt;3 months">
+                        ${rhead('LO')}${cell(loAC, loAC ? 'color:#dc2626;font-weight:900;' : '')}${cell(loRV, loRV ? 'color:#dc2626;font-weight:900;' : '')}${cell(loQK, loQK ? 'color:#dc2626;font-weight:900;' : '')}${tot(loTot)}
                     </tr>
                 </table>
 
