@@ -2523,23 +2523,107 @@
         function exportAssetHistoryCSV() {
             if (!assetHistory.length) return showToast('No history to export');
             const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+            // Excel general date/time: M/D/YYYY H:MM AM/PM
             const fmtDtCSV = dt => {
                 if (!dt) return '';
                 try {
-                    const d = new Date(dt);
-                    const month = d.toLocaleString('en-CA', { month: 'short' });
-                    const day   = d.getDate();
-                    const yr    = d.getFullYear();
-                    const hh    = String(d.getHours()).padStart(2, '0');
-                    const mm    = String(d.getMinutes()).padStart(2, '0');
-                    return `${month} ${day} ${yr} ${hh}:${mm}`;
+                    const d    = new Date(dt);
+                    const mo   = d.getMonth() + 1;
+                    const dy   = d.getDate();
+                    const yr   = d.getFullYear();
+                    const hr   = d.getHours();
+                    const mn   = String(d.getMinutes()).padStart(2, '0');
+                    const ampm = hr >= 12 ? 'PM' : 'AM';
+                    const h12  = hr % 12 || 12;
+                    return `${mo}/${dy}/${yr} ${h12}:${mn} ${ampm}`;
                 } catch(e) { return dt; }
             };
-            const headers = ['Asst#', 'TR Date', 'TR', 'LOC', 'NT'];
-            const rows = [headers.map(esc).join(',')];
-            assetHistory.slice().sort((a, b) => b.id - a.id).forEach(r => {
-                rows.push([r.assetId, fmtDtCSV(r.dt), r.tr, r.loc, r.nt].map(esc).join(','));
+
+            // MS reclassification by age of TR date (export only)
+            // MS = missing short-term (<=7 days)
+            // ML = missing long-term  (7–90 days)
+            // LO = lost               (>90 days)
+            const classifyMS = dt => {
+                if (!dt) return 'MS';
+                const days = (Date.now() - new Date(dt).getTime()) / 86400000;
+                if (days <= 7)  return 'MS';
+                if (days <= 90) return 'ML';
+                return 'LO';
+            };
+            const effectiveTR = r => r.tr === 'MS' ? classifyMS(r.dt) : (r.tr || '');
+
+            const STATIONS     = new Set(['YYZ','YUL','YYC','YVR']);
+            const FIN_TR_ORDER = ['OB','RM','FN','DM','MS','ML','LO'];
+            const STN_TR_ORDER = ['RT','RM','RP','FN','DM','MS','ML','LO'];
+            const finTrSort    = t => { const i = FIN_TR_ORDER.indexOf((t||'').toUpperCase()); return i < 0 ? 99 : i; };
+            const stnTrSort    = t => { const i = STN_TR_ORDER.indexOf((t||'').toUpperCase()); return i < 0 ? 99 : i; };
+            const numOf        = id => parseInt((id||'').replace(/\D/g,'')) || 0;
+            const isFin        = loc => loc && !STATIONS.has((loc||'').toUpperCase());
+
+            // Collect all FIN identifiers from LOC field
+            const allFins = new Set(assetHistory.filter(r => isFin(r.loc)).map(r => r.loc.toUpperCase()));
+
+            // Build FIN groups — LOC match and NT-field match
+            const finMap = {};
+            assetHistory.forEach(r => {
+                if (isFin(r.loc)) {
+                    const key = r.loc.toUpperCase();
+                    if (!finMap[key]) finMap[key] = { loc: [], nt: [] };
+                    finMap[key].loc.push(r);
+                } else {
+                    const ntUp = (r.nt || '').toUpperCase();
+                    allFins.forEach(fin => {
+                        if (ntUp.includes(fin)) {
+                            if (!finMap[fin]) finMap[fin] = { loc: [], nt: [] };
+                            finMap[fin].nt.push(r);
+                        }
+                    });
+                }
             });
+
+            // Order FIN groups by lowest asset number in group
+            const finOrder = Object.keys(finMap).sort((a, b) =>
+                Math.min(...finMap[a].loc.map(x => numOf(x.assetId))) -
+                Math.min(...finMap[b].loc.map(x => numOf(x.assetId)))
+            );
+
+            // Station groups — exclude assets already pulled into FIN groups via NT
+            const ntSiblingIds = new Set();
+            Object.values(finMap).forEach(g => g.nt.forEach(r => ntSiblingIds.add(r.assetId)));
+
+            const stnMap = {};
+            assetHistory.filter(r => STATIONS.has((r.loc||'').toUpperCase()) && !ntSiblingIds.has(r.assetId)).forEach(r => {
+                const k = r.loc.toUpperCase();
+                if (!stnMap[k]) stnMap[k] = [];
+                stnMap[k].push(r);
+            });
+            const stnOrder = Object.keys(stnMap).sort();
+
+            const headers = ['Asst#', 'TR Date', 'TR', 'LOC', 'NT'];
+            const rows    = [headers.map(esc).join(',')];
+
+            // FIN groups: anchor first (lowest asset#), siblings indented by anchor length + 1 space
+            // Sorted by TR type (FIN order) then asset#; NT siblings follow LOC siblings
+            finOrder.forEach(fin => {
+                const { loc: locMembers, nt: ntMembers } = finMap[fin];
+                const anchor    = locMembers.slice().sort((a, b) => numOf(a.assetId) - numOf(b.assetId))[0];
+                const indent    = ' '.repeat(anchor.assetId.length + 1);
+                const sortedLoc = locMembers.slice().sort((a, b) => finTrSort(effectiveTR(a)) - finTrSort(effectiveTR(b)) || numOf(a.assetId) - numOf(b.assetId));
+                const sortedNt  = ntMembers.slice().sort((a, b)  => finTrSort(effectiveTR(a)) - finTrSort(effectiveTR(b)) || numOf(a.assetId) - numOf(b.assetId));
+                [...sortedLoc, ...sortedNt].forEach(r => {
+                    const displayId = r.assetId === anchor.assetId ? r.assetId : indent + r.assetId;
+                    rows.push([displayId, fmtDtCSV(r.dt), effectiveTR(r), r.loc, r.nt].map(esc).join(','));
+                });
+            });
+
+            // Station groups: RT, RM, RP, FN by asset# — then DM, MS/ML/LO by asset#
+            stnOrder.forEach(stn => {
+                stnMap[stn].slice()
+                    .sort((a, b) => stnTrSort(effectiveTR(a)) - stnTrSort(effectiveTR(b)) || numOf(a.assetId) - numOf(b.assetId))
+                    .forEach(r => rows.push([r.assetId, fmtDtCSV(r.dt), effectiveTR(r), r.loc, r.nt].map(esc).join(',')));
+            });
+
             const csv  = rows.join('\r\n');
             const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
             const url  = URL.createObjectURL(blob);
