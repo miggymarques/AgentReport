@@ -2553,7 +2553,7 @@
 
             const STATIONS    = new Set(['YYZ','YUL','YYC','YVR']);
             const REL_TR      = ['OB','RM','MS','ML','LO','DM'];           // Related rows order
-            const STN_TR      = ['RM','RT','RC','RP','DM','MS','ML','LO']; // Station section order
+            const STN_TR      = ['RM','RT','RC','RP','FN','MS','ML','LO','DM']; // Station section order
             const relTrSort   = t => { const i = REL_TR.indexOf((t||'').toUpperCase()); return i < 0 ? 99 : i; };
             const stnTrSort   = t => { const i = STN_TR.indexOf((t||'').toUpperCase()); return i < 0 ? 99 : i; };
             const numOf       = id => parseInt((id||'').replace(/\D/g,'')) || 0;
