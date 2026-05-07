@@ -2604,6 +2604,7 @@
 
             // Section 1: OB assets + MS assets on a FIN — sorted by asset# — with related FIN rows
             // MS/ML/LO classification applied via effectiveTR
+            rows.push(esc('ONBOARD') + ',,,,,');
             assetHistory
                 .filter(r => r.tr === 'OB' || (r.tr === 'MS' && isFin(r.loc)))
                 .sort((a, b) => numOf(a.assetId) - numOf(b.assetId))
@@ -2617,12 +2618,80 @@
             // Section 2: All non-OB assets — RM RT RC RP FN by asset#, then MS/ML/LO, then DM
             // Covers both station-located and FIN-located non-OB assets so nothing is missed
             // Related column is always blank in this section
+            rows.push('');
+            rows.push(esc('STATIONS') + ',,,,,');
             assetHistory
                 .filter(r => r.tr !== 'OB' && !(r.tr === 'MS' && isFin(r.loc)))
                 .sort((a, b) => stnTrSort(effectiveTR(a)) - stnTrSort(effectiveTR(b)) || numOf(a.assetId) - numOf(b.assetId))
                 .forEach(r => {
                     rows.push([r.assetId, '', effectiveTR(r), r.loc, fmtDtCSV(r.dt), r.nt].map(esc).join(','));
                 });
+
+            // ── Summary table appended at the bottom of the CSV ──────────────────
+            const AIRLINES_SUM   = ['AC', 'RV', 'QK'];
+            const STATIONS_SUM   = ['YUL', 'YVR', 'YYC', 'YYZ'];
+            const AV_TR_SET_SUM  = new Set(['RT', 'RC', 'FN', 'RP']);
+
+            // Pre-classify every entry once (effectiveTR already defined above)
+            const classified = assetHistory.map(r => ({ r, eTR: effectiveTR(r) }));
+
+            const countBy = (trVal, keyFn) => {
+                const map = {};
+                classified.forEach(({ r, eTR }) => {
+                    if (eTR !== trVal) return;
+                    const k = keyFn(r);
+                    if (k) map[k] = (map[k] || 0) + 1;
+                });
+                return map;
+            };
+
+            // Airline-keyed counts: key = first 2 chars of LOC
+            const airlineKey = r => {
+                const loc = (r.loc || '').toUpperCase();
+                return AIRLINES_SUM.find(al => loc.startsWith(al)) || null;
+            };
+
+            const obByAl  = countBy('OB', airlineKey);
+            const msByAl  = countBy('MS', airlineKey);
+            const mlByAl  = countBy('ML', airlineKey);
+            const loByAl  = countBy('LO', airlineKey);
+
+            const sumAl = (map) => AIRLINES_SUM.reduce((s, al) => s + (map[al] || 0), 0);
+            const msTtlByAl = {};
+            AIRLINES_SUM.forEach(al => { msTtlByAl[al] = (msByAl[al]||0) + (mlByAl[al]||0) + (loByAl[al]||0); });
+
+            // Station-keyed counts for AV (TR in RT/RC/FN/RP)
+            const avByStn = {};
+            STATIONS_SUM.forEach(st => {
+                avByStn[st] = assetHistory.filter(r => AV_TR_SET_SUM.has((r.tr||'').toUpperCase()) && (r.loc||'').toUpperCase() === st).length;
+            });
+            // Station-keyed counts for DM
+            const dmByStn = {};
+            STATIONS_SUM.forEach(st => {
+                dmByStn[st] = assetHistory.filter(r => (r.tr||'').toUpperCase() === 'DM' && (r.loc||'').toUpperCase() === st).length;
+            });
+            const sumStn = (map) => STATIONS_SUM.reduce((s, st) => s + (map[st] || 0), 0);
+
+            const srow = (...vals) => vals.map(v => esc(v)).join(',');
+
+            rows.push('');
+            rows.push('');
+            rows.push(srow('SUMMARY') + ',,,,,');
+            rows.push('');
+            // Airline breakdown table — ONBOARD
+            rows.push(srow('ONBOARD'));
+            rows.push(srow('', 'AC', 'RV', 'QK', 'TOT'));
+            rows.push(srow('OB',     obByAl.AC||0,   obByAl.RV||0,   obByAl.QK||0,   sumAl(obByAl)));
+            rows.push(srow('MS',     msByAl.AC||0,   msByAl.RV||0,   msByAl.QK||0,   sumAl(msByAl)));
+            rows.push(srow('ML',     mlByAl.AC||0,   mlByAl.RV||0,   mlByAl.QK||0,   sumAl(mlByAl)));
+            rows.push(srow('LO',     loByAl.AC||0,   loByAl.RV||0,   loByAl.QK||0,   sumAl(loByAl)));
+            rows.push(srow('MS TTL', msTtlByAl.AC||0, msTtlByAl.RV||0, msTtlByAl.QK||0, sumAl(msTtlByAl)));
+            rows.push('');
+            // Station breakdown table — STATIONS
+            rows.push(srow('STATIONS'));
+            rows.push(srow('', 'YUL', 'YVR', 'YYC', 'YYZ', 'TOT'));
+            rows.push(srow('AV', avByStn.YUL||0, avByStn.YVR||0, avByStn.YYC||0, avByStn.YYZ||0, sumStn(avByStn)));
+            rows.push(srow('DM', dmByStn.YUL||0, dmByStn.YVR||0, dmByStn.YYC||0, dmByStn.YYZ||0, sumStn(dmByStn)));
 
             const csv  = rows.join('\r\n');
             const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
