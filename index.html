@@ -2602,9 +2602,10 @@
             const headers = ['Asst#', 'Related', 'TR', 'LOC', 'TR Date', 'NT'];
             const rows    = [headers.map(esc).join(',')];
 
-            // Section 1: OB assets sorted by asset# — with related FIN rows
+            // Section 1: OB assets + MS assets on a FIN — sorted by asset# — with related FIN rows
+            // MS/ML/LO classification applied via effectiveTR
             assetHistory
-                .filter(r => r.tr === 'OB')
+                .filter(r => r.tr === 'OB' || (r.tr === 'MS' && isFin(r.loc)))
                 .sort((a, b) => numOf(a.assetId) - numOf(b.assetId))
                 .forEach(r => {
                     rows.push([r.assetId, '', effectiveTR(r), r.loc, fmtDtCSV(r.dt), r.nt].map(esc).join(','));
@@ -2613,10 +2614,11 @@
                     });
                 });
 
-            // Section 2: Station assets — RM RT RC RP by asset#, then DM, then MS/ML/LO
-            // Related column is always blank for station assets
+            // Section 2: All non-OB assets — RM RT RC RP FN by asset#, then MS/ML/LO, then DM
+            // Covers both station-located and FIN-located non-OB assets so nothing is missed
+            // Related column is always blank in this section
             assetHistory
-                .filter(r => r.tr !== 'OB' && STATIONS.has((r.loc||'').toUpperCase()))
+                .filter(r => r.tr !== 'OB' && !(r.tr === 'MS' && isFin(r.loc)))
                 .sort((a, b) => stnTrSort(effectiveTR(a)) - stnTrSort(effectiveTR(b)) || numOf(a.assetId) - numOf(b.assetId))
                 .forEach(r => {
                     rows.push([r.assetId, '', effectiveTR(r), r.loc, fmtDtCSV(r.dt), r.nt].map(esc).join(','));
