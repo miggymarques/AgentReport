@@ -433,6 +433,7 @@
                 <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">Aircraft</button>
                 <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
                 <button onclick="switchRefTab('assethistory')" id="ref-tab-assethistory" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset History</button>
+                <button onclick="switchRefTab('perf')" id="ref-tab-perf" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">PERF</button>
                 <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Sync Table</button>
                 <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Schedule</button>
                 <button onclick="switchRefTab('agents')" id="ref-tab-agents" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Agents</button>
@@ -548,6 +549,17 @@
                             Export CSV
                         </button>
                     </div>
+                </div>
+            </div>
+
+            <!-- Performance report info bar -->
+            <div class="p-3 bg-slate-50 border-t hidden" id="perf-info-bar">
+                <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">72-Hour Service Performance</span>
+                    <button onclick="exportPerfXLSX()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        Export XLSX
+                    </button>
                 </div>
             </div>
 
@@ -867,12 +879,16 @@
         const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
         const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
         const NRO_INDEX_KEY    = 'yul_nro_index_v1';
-        const SCHEDULE_KEY     = 'yul_schedule_v1';
-        const P_PLUS_KEY       = 'yul_p_plus_flags_v1'; // P+ escalated priority flags
+        const SCHEDULE_KEY         = 'yul_schedule_v1';
+        const SCHEDULE_HISTORY_KEY = 'yul_schedule_history_v1'; // archived rotations for 72-h perf window
+        const P_PLUS_KEY           = 'yul_p_plus_flags_v1'; // P+ escalated priority flags
         const P_PLUS_TS_KEY    = 'yul_p_plus_ts_v1';    // per-FIN timestamps for P+ last-write-wins
 
         // scheduleData: { "AC101": { flight: "AC0101", arrival: "14:35", departure: "16:20", gate: "D42", _ts: 123456 }, ... }
         let scheduleData = {};
+        // scheduleHistory: archived rotations from previous imports, keyed "YYYY-MM-DD:FIN"
+        // Allows the perf report to look back 72h even after a new schedule overwrites scheduleData.
+        let scheduleHistory = {};
 
         // assetHistory: append-only transaction log [ { id, assetId, dt, tr, loc, nt }, ... ]
         // id = Date.now() at creation — used as unique key and P2P delta cursor (same pattern as sharedDb)
@@ -1620,6 +1636,7 @@
             document.getElementById('ref-tab-aircraft').className    = `flex-1 py-3 border-b-2 ${tab === 'aircraft'     ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-assets').className       = `flex-1 py-3 border-b-2 ${tab === 'assets'       ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-assethistory').className = `flex-1 py-3 border-b-2 ${tab === 'assethistory' ? 'border-indigo-500 text-indigo-600'    : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-perf').className         = `flex-1 py-3 border-b-2 ${tab === 'perf'         ? 'border-cyan-500 text-cyan-600'        : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-synctable').className    = `flex-1 py-3 border-b-2 ${tab === 'synctable'    ? 'border-emerald-500 text-emerald-600'  : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-schedule').className     = `flex-1 py-3 border-b-2 ${tab === 'schedule'     ? 'border-violet-500 text-violet-600'   : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-agents').className       = `flex-1 py-3 border-b-2 ${tab === 'agents'       ? 'border-rose-500 text-rose-600'       : 'border-transparent text-slate-400'}`;
@@ -1633,6 +1650,7 @@
             document.getElementById('add-asset-ui').classList.toggle('hidden',        _tab !== 'assets'       || !_admin);
             document.getElementById('add-assethistory-ui').classList.toggle('hidden', _tab !== 'assethistory' || !_admin);
             document.getElementById('assethistory-info-bar').classList.toggle('hidden', _tab !== 'assethistory');
+            document.getElementById('perf-info-bar').classList.toggle('hidden',       _tab !== 'perf');
             document.getElementById('add-schedule-ui').classList.toggle('hidden',     _tab !== 'schedule');
             document.getElementById('add-agent-ui').classList.toggle('hidden',        _tab !== 'agents'       || !_admin);
             document.getElementById('add-alldata-ui').classList.toggle('hidden',      _tab !== 'alldata'      || !_admin);
@@ -1649,11 +1667,10 @@
                 const el = document.getElementById('assethistory-count-label');
                 if (el) el.textContent = assetHistory.length + ' records';
             }
-            // Schedule tab: let ref-editor-list own the horizontal scroll so the
-            // scrollbar is always visible at the bottom of the modal, not buried
-            // at the bottom of the content. Remove padding so table bleeds edge-to-edge.
+            // Schedule + perf tabs: let ref-editor-list own horizontal scroll so the
+            // scrollbar is always visible at the bottom of the modal.
             const _list = document.getElementById('ref-editor-list');
-            if (tab === 'schedule') {
+            if (tab === 'schedule' || tab === 'perf') {
                 _list.style.overflowX = 'auto';
                 _list.style.padding   = '0';
             } else {
@@ -1713,6 +1730,8 @@
             } else if (activeRefTab === 'assethistory') {
                 renderAssetHistorySummary();
                 renderAssetHistory(container);
+            } else if (activeRefTab === 'perf') {
+                renderPerfReport(container);
             } else if (activeRefTab === 'synctable') {
                 renderSyncTable(container);
             } else if (activeRefTab === 'schedule') {
@@ -3911,6 +3930,10 @@
                 if (savedSchedule) scheduleData = JSON.parse(savedSchedule);
             } catch(e) { console.warn("Could not load schedule:", e); }
             try {
+                const savedSchedHist = storageGet(SCHEDULE_HISTORY_KEY);
+                if (savedSchedHist) scheduleHistory = JSON.parse(savedSchedHist);
+            } catch(e) { console.warn("Could not load schedule history:", e); }
+            try {
                 const savedPPlus = storageGet(P_PLUS_KEY);
                 if (savedPPlus) pPlusFlags = JSON.parse(savedPPlus);
             } catch(e) { console.warn("Could not load P+ flags:", e); }
@@ -4130,6 +4153,25 @@
                             return ta - tb;
                         });
                     });
+
+                    // ── Archive current schedule into history before overwrite ──────────
+                    // This lets the 72-h perf report see turns that existed in the old
+                    // schedule even after today's import replaces them.
+                    const _PERF_STATIONS = new Set(['YYZ','YUL','YYC','YVR']);
+                    const archiveDateStr = new Date().toISOString().split('T')[0];
+                    Object.entries(scheduleData).forEach(([fin, rots]) => {
+                        if (!Array.isArray(rots)) return;
+                        const relevant = rots.filter(r => _PERF_STATIONS.has((r.stn || '').toUpperCase()));
+                        if (relevant.length === 0) return;
+                        scheduleHistory[archiveDateStr + ':' + fin] = relevant;
+                    });
+                    // Prune entries older than 4 days
+                    const pruneTs = Date.now() - 4 * 24 * 3600 * 1000;
+                    Object.keys(scheduleHistory).forEach(k => {
+                        const [dateStr] = k.split(':');
+                        if (new Date(dateStr).getTime() < pruneTs) delete scheduleHistory[k];
+                    });
+                    try { storageSet(SCHEDULE_HISTORY_KEY, JSON.stringify(scheduleHistory)); } catch(e) {}
 
                     scheduleData = newSchedule;
                     saveScheduleData();
@@ -4542,6 +4584,255 @@
             const msg = `✓ ${processed} entries processed` + (skipped > 0 ? ` · ${skipped} skipped` : '');
             if (statusEl) statusEl.textContent = msg;
             showToast(`Sync table rebuilt — ${processed} entries`);
+        }
+
+        // ─── 72-Hour Performance Report ───────────────────────────────────────
+        const PERF_STATIONS  = new Set(['YYZ','YUL','YYC','YVR']);
+        const PERF_WINDOW_MS = 72 * 3600 * 1000;
+
+        // Format an hour count as "38h / 1.6d"
+        function fmtHoursDays(h) {
+            if (h === null || h === undefined) return '—';
+            return `${h}h / ${(h / 24).toFixed(1)}d`;
+        }
+
+        // Format a single rotation compactly: "YYZ 13:20We" or "YYZ 13:20We[MTC]"
+        const _DAY2 = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+        function fmtRot(rot) {
+            const stn   = (rot.stn || '?').toUpperCase();
+            const isMtc = isMtcRotation(rot);
+            if (!rot.odt) return stn + (isMtc ? '[MTC]' : '');
+            const d   = new Date(rot.odt);
+            const hh  = String(d.getHours()).padStart(2,'0');
+            const mm  = String(d.getMinutes()).padStart(2,'0');
+            const day = _DAY2[d.getDay()];
+            return `${stn} ${hh}:${mm}${day}${isMtc ? '[MTC]' : ''}`;
+        }
+
+        // Returns all rotations for a FIN at our 4 stations within the last 72 hours,
+        // combining the live scheduleData and the archived scheduleHistory.
+        function getPerfRotationsForFin(fin) {
+            const now         = Date.now();
+            const windowStart = now - PERF_WINDOW_MS;
+            const rots        = [];
+
+            // Current schedule
+            const current = scheduleData[fin];
+            if (Array.isArray(current)) {
+                current.forEach(r => {
+                    if (!PERF_STATIONS.has((r.stn || '').toUpperCase())) return;
+                    const odt = r.odt ? new Date(r.odt).getTime() : 0;
+                    const idt = r.idt ? new Date(r.idt).getTime() : 0;
+                    if (odt >= windowStart || idt >= windowStart || odt >= now - 3600000) rots.push({ ...r, _src: 'current' });
+                });
+            }
+
+            // Archived history
+            Object.entries(scheduleHistory).forEach(([key, histRots]) => {
+                if (!key.endsWith(':' + fin)) return;
+                if (!Array.isArray(histRots)) return;
+                histRots.forEach(r => {
+                    if (!PERF_STATIONS.has((r.stn || '').toUpperCase())) return;
+                    const odt = r.odt ? new Date(r.odt).getTime() : 0;
+                    if (odt < windowStart) return;
+                    // Avoid duplicates
+                    const dup = rots.find(x => Math.abs((x.odt ? new Date(x.odt).getTime() : 0) - odt) < 60000 && (x.stn || '').toUpperCase() === (r.stn || '').toUpperCase());
+                    if (!dup) rots.push({ ...r, _src: 'history' });
+                });
+            });
+
+            return rots;
+        }
+
+        // Compute performance classification for every FIN.
+        // Returns { rows, eligible, serviced }
+        function computePerfData() {
+            const now         = Date.now();
+            const windowStart = now - PERF_WINDOW_MS;
+            const allFins     = new Set([...Object.keys(aircraftRef), ...Object.keys(finTable)]);
+            const rows        = [];
+
+            allFins.forEach(fin => {
+                if (!/^(AC|RV|QK)\d{3,4}$/.test(fin)) return;
+
+                const refMatch           = aircraftRef[fin] || aircraftRef[fin.substring(0,5)] || aircraftRef[fin.substring(0,4)];
+                const type               = (refMatch && refMatch.type)  || (finTable[fin] && finTable[fin].type)  || '—';
+                const body               = (refMatch && refMatch.body)  || (finTable[fin] && finTable[fin].body)  || '—';
+                const ft                 = finTable[fin];
+                const lastServiceTs      = ft ? (ft._ts        || 0)  : 0;
+                const lastServiceStation = ft ? (ft.lastStation || '') : '';
+                const lastServiceDate    = ft ? (ft.lastSeen    || '') : '';
+                const lastServiceAgent   = ft ? (ft.lastAgent   || '') : '';
+                const servicedInWindow   = lastServiceTs >= windowStart && PERF_STATIONS.has(lastServiceStation.toUpperCase());
+                const hoursSince         = lastServiceTs ? Math.round((now - lastServiceTs) / 3600000) : null;
+
+                const rots       = getPerfRotationsForFin(fin);
+                const nonMtcRots = rots.filter(r => !isMtcRotation(r));
+                const mtcRots    = rots.filter(r =>  isMtcRotation(r));
+
+                if (rots.length === 0) {
+                    rows.push({ fin, type, body, status: 'NO_TURNS', statusLabel: 'No Turns', rots: [], lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: false });
+                    return;
+                }
+
+                if (nonMtcRots.length === 0 && mtcRots.length > 0) {
+                    const mtcStn = (mtcRots[0].stn || '').toUpperCase();
+                    rows.push({ fin, type, body, status: 'MTC', statusLabel: 'In MTC', rots: mtcRots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: false, mtcStn });
+                    return;
+                }
+
+                if (servicedInWindow) {
+                    rows.push({ fin, type, body, status: 'SERVICED', statusLabel: 'Serviced', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true });
+                } else {
+                    let explanation = 'No service record in 72h window';
+                    if (lastServiceTs && !PERF_STATIONS.has(lastServiceStation.toUpperCase()) && lastServiceStation) {
+                        explanation = `Last serviced at ${lastServiceStation} (not our station)`;
+                    } else if (!lastServiceTs) {
+                        explanation = 'Never serviced';
+                    } else if (hoursSince !== null) {
+                        explanation = `Last service ${fmtHoursDays(hoursSince)} ago at ${lastServiceStation || '?'}`;
+                    }
+                    rows.push({ fin, type, body, status: 'MISSED', statusLabel: 'Missed', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, explanation });
+                }
+            });
+
+            rows.sort((a, b) => {
+                const order = { MISSED: 0, SERVICED: 1, MTC: 2, NO_TURNS: 3 };
+                if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+                return a.fin.localeCompare(b.fin);
+            });
+
+            const eligible = rows.filter(r => r.eligible);
+            const serviced = eligible.filter(r => r.status === 'SERVICED');
+            return { rows, eligible, serviced };
+        }
+
+        function renderPerfReport(container) {
+            const { rows, eligible, serviced } = computePerfData();
+            const rate    = eligible.length > 0 ? Math.round((serviced.length / eligible.length) * 100) : null;
+            const CELL    = 'padding:5px 8px;white-space:nowrap;border-right:1px solid #f1f5f9;font-size:10px;';
+            const statusStyle = {
+                SERVICED: 'background:#dcfce7;color:#166534;font-weight:900;',
+                MISSED:   'background:#fef9c3;color:#854d0e;font-weight:900;',
+                MTC:      'background:#f3e8ff;color:#6b21a8;font-weight:900;',
+                NO_TURNS: 'background:#f8fafc;color:#94a3b8;font-weight:700;',
+            };
+
+            // Summary bar
+            const summaryDiv = document.createElement('div');
+            summaryDiv.style.cssText = 'padding:10px 12px;background:#1e293b;color:white;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:10px;font-weight:900;letter-spacing:0.05em;text-transform:uppercase;';
+            const rateColor = rate === null ? '#94a3b8' : rate >= 90 ? '#34d399' : rate >= 70 ? '#fbbf24' : '#f87171';
+            summaryDiv.innerHTML = `
+                <span style="color:${rateColor};font-size:16px;font-weight:900;">${rate !== null ? rate + '%' : 'N/A'}</span>
+                <span style="color:#94a3b8;">72-Hour Rate</span>
+                <span style="color:#34d399;">✅ ${serviced.length} Serviced</span>
+                <span style="color:#fbbf24;">⚠️ ${rows.filter(r=>r.status==='MISSED').length} Missed</span>
+                <span style="color:#c084fc;">⛔ ${rows.filter(r=>r.status==='MTC').length} MTC</span>
+                <span style="color:#475569;">🚫 ${rows.filter(r=>r.status==='NO_TURNS').length} No Turns</span>
+                <span style="color:#64748b;margin-left:auto;">${eligible.length} eligible of ${rows.length} total</span>`;
+            container.appendChild(summaryDiv);
+
+            // Table
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'overflow-x:auto;';
+            const tbl = document.createElement('table');
+            tbl.style.cssText = 'width:100%;border-collapse:collapse;min-width:max-content;font-size:10px;';
+            tbl.innerHTML = `<thead><tr style="background:#334155;color:white;">
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">FIN</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Type</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Body</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Status</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Last Serviced</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Hours / Days</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Stn</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Agent</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Turns at Base (72h)</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Note</th>
+            </tr></thead>`;
+            const tbody = document.createElement('tbody');
+
+            rows.forEach((r, i) => {
+                const rowBg      = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+                const tr         = document.createElement('tr');
+                tr.style.background = rowBg;
+                tr.onmouseenter  = () => tr.style.background = '#f0f9ff';
+                tr.onmouseleave  = () => tr.style.background = rowBg;
+
+                const turnsSummary = r.rots.length > 0 ? r.rots.map(rot => fmtRot(rot)).join(' · ') : '—';
+                const note         = r.explanation || (r.status === 'MTC' ? `MTC @ ${r.mtcStn || '?'}` : '');
+                const hoursDisplay = fmtHoursDays(r.hoursSince);
+
+                tr.innerHTML = `
+                    <td style="${CELL}font-family:monospace;font-weight:900;color:#2563eb;">${r.fin}</td>
+                    <td style="${CELL}color:#475569;">${r.type}</td>
+                    <td style="${CELL}color:#475569;">${r.body}</td>
+                    <td style="${CELL}${statusStyle[r.status] || ''}">${r.statusLabel}</td>
+                    <td style="${CELL}font-family:monospace;color:#475569;">${r.lastServiceDate || '—'}</td>
+                    <td style="${CELL}color:${r.hoursSince !== null && r.hoursSince > 72 ? '#ef4444' : '#475569'};font-weight:${r.hoursSince !== null && r.hoursSince > 72 ? '900' : '400'};">${hoursDisplay}</td>
+                    <td style="${CELL}font-weight:700;color:#334155;">${r.lastServiceStation || '—'}</td>
+                    <td style="${CELL}color:#64748b;">${r.lastServiceAgent || '—'}</td>
+                    <td style="${CELL}color:#475569;max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="${turnsSummary}">${turnsSummary}</td>
+                    <td style="${CELL}color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;" title="${note}">${note || '—'}</td>`;
+                tbody.appendChild(tr);
+            });
+
+            tbl.appendChild(tbody);
+            wrap.appendChild(tbl);
+            container.appendChild(wrap);
+        }
+
+        // Export 2-sheet XLSX: Sheet 1 = service records, Sheet 2 = 72h perf report
+        function exportPerfXLSX() {
+            const { rows } = computePerfData();
+            const wb = XLSX.utils.book_new();
+
+            // Sheet 1 — service records (mirrors exportToCSV logic)
+            const svcHeaders = ["FIN","Flight#","Arrival Time","Priority","Serviced","Case1","HHD1","HHD2","Case2","HHD3","HHD4","Battery","Rolls","SrvcIssCAT","SrvcIss","Comments","Service Date","Service Station","Agent","Rv"];
+            const svcData = [svcHeaders];
+            const srcDb = sharedDb.length > 0 ? sharedDb : db;
+            srcDb.forEach(rec => {
+                svcData.push(svcHeaders.map(h => {
+                    if (h === 'Arrival Time') return rec.displayTime || '';
+                    if (h === 'Service Date') {
+                        const rawDate = rec.displayDate || '';
+                        const rawTime = rec.displayTime || '';
+                        const parts   = rawDate.split('/');
+                        if (parts.length === 3) {
+                            const m = parts[0].padStart(2,'0'), d = parts[1].padStart(2,'0');
+                            const y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+                            return `${d}/${m}/${y}${rawTime ? ' ' + rawTime : ''}`;
+                        }
+                        return rawDate + (rawTime ? ' ' + rawTime : '');
+                    }
+                    if (h === 'Rv') return rec.Rv || CURRENT_VERSION;
+                    return rec[h] !== undefined ? rec[h] : '';
+                }));
+            });
+            const ws1 = XLSX.utils.aoa_to_sheet(svcData);
+            XLSX.utils.book_append_sheet(wb, ws1, 'Service Records');
+
+            // Sheet 2 — 72-hour performance report
+            const perfHeaders = ['FIN','Type','Body','Status','Last Serviced','Hours / Days','Station','Agent','Turns at Base (72h)','Note'];
+            const perfData    = [perfHeaders];
+            rows.forEach(r => {
+                const turnsSummary = r.rots.length > 0 ? r.rots.map(rot => fmtRot(rot)).join(' | ') : '';
+                const note         = r.explanation || (r.status === 'MTC' ? `MTC @ ${r.mtcStn || '?'}` : '');
+                perfData.push([
+                    r.fin, r.type, r.body, r.statusLabel,
+                    r.lastServiceDate    || '',
+                    r.hoursSince !== null ? fmtHoursDays(r.hoursSince) : '',
+                    r.lastServiceStation || '',
+                    r.lastServiceAgent   || '',
+                    turnsSummary, note
+                ]);
+            });
+            const ws2 = XLSX.utils.aoa_to_sheet(perfData);
+            ws2['!cols'] = [12,10,6,12,14,14,8,16,32,32].map(w => ({ wch: w }));
+            XLSX.utils.book_append_sheet(wb, ws2, '72h Performance');
+
+            const dateStr = new Date().toISOString().split('T')[0];
+            XLSX.writeFile(wb, `PerformanceReport_${dateStr}.xlsx`);
+            showToast('Performance report exported!');
         }
 
         function renderScheduleList(container) {
