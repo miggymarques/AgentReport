@@ -510,6 +510,7 @@
 
             <div id="synctable-col-header" class="hidden border-b border-slate-200 bg-white"></div>
             <div id="assethistory-col-header" class="hidden border-b border-slate-200 bg-white"></div>
+            <div id="perf-sticky-header" class="hidden"></div>
             <div class="p-4 overflow-y-auto flex-1 space-y-4" id="ref-editor-list"></div>
             
             <div class="p-4 bg-slate-50 border-t flex gap-2" id="add-aircraft-ui">
@@ -715,13 +716,49 @@
                     </div>
                 </div>
 
+                <!-- Metered TURN credentials (optional paid relay) -->
+                <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                    <div class="flex items-center justify-between mb-0.5">
+                        <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Metered TURN <span class="text-slate-300 font-medium normal-case tracking-normal">(Optional)</span></div>
+                    </div>
+                    <div class="text-[10px] text-slate-400 mb-1 font-mono">global.relay.metered.ca</div>
+                    <div class="text-[10px] text-slate-400 mb-2 leading-tight">Inactive unless credentials are entered. Used only if free servers fail.</div>
+                    <div class="space-y-2">
+                        <div>
+                            <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Username</div>
+                            <input id="mt-username-input" type="text" autocomplete="off" spellcheck="false"
+                                placeholder="Your Metered username"
+                                class="w-full text-[11px] font-mono px-2 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400">
+                        </div>
+                        <div>
+                            <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Password</div>
+                            <input id="mt-credential-input" type="password" autocomplete="off"
+                                placeholder="••••••••"
+                                class="w-full text-[11px] font-mono px-2 py-1.5 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400">
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="saveMeteredCreds()"
+                                class="flex-1 text-[10px] font-black bg-indigo-600 text-white px-3 py-1.5 rounded-lg active:scale-95 transition-transform">
+                                SAVE
+                            </button>
+                            <button onclick="clearMeteredCreds()"
+                                class="text-[10px] font-black text-slate-400 px-3 py-1.5 rounded-lg border border-slate-200 active:scale-95 transition-transform hover:text-red-500 hover:border-red-200">
+                                RESET
+                            </button>
+                        </div>
+                        <div id="mt-creds-status" class="text-[10px] text-slate-400"></div>
+                    </div>
+                </div>
+
                 <!-- Legend -->
                 <div class="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-1">
                     <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">What the results mean</div>
                     <div><span class="text-emerald-600 font-black">relay</span> — TURN is working. Cross-network P2P will succeed.</div>
                     <div><span class="text-blue-500 font-black">srflx</span> — STUN is working. Handles most home/mobile networks.</div>
                     <div><span class="text-slate-500 font-black">host</span> — Local only. Same-network P2P only without the above.</div>
-                    <div class="pt-1 text-slate-400">If <span class="text-emerald-600 font-black">relay</span> is missing, cross-network connections will fail. Check your network — some corporate/VPN firewalls block TURN traffic.</div>
+                    <div class="pt-1 border-t border-slate-200 mt-1 text-slate-400">
+                        <span class="font-black text-slate-500">Data usage:</span> host &amp; srflx connections use <span class="font-black text-emerald-600">zero</span> relay quota — data travels directly. Only <span class="text-emerald-600 font-black">relay</span> candidates consume TURN server bandwidth. Free STUN + freestun.net handle most networks. ExpressTURN/Metered only activate as a last resort when direct routes fail.
+                    </div>
                 </div>
 
                 <!-- Configured servers -->
@@ -1660,6 +1697,7 @@
             document.getElementById('schedule-filter-bar').classList.toggle('hidden', tab !== 'schedule');
             const _colHdr = document.getElementById('synctable-col-header'); if (tab !== 'synctable') { _colHdr.classList.add('hidden'); _colHdr.innerHTML = ''; }
             const _ahHdr  = document.getElementById('assethistory-col-header'); if (tab !== 'assethistory') { _ahHdr.classList.add('hidden'); _ahHdr.innerHTML = ''; }
+            const _perfHdr = document.getElementById('perf-sticky-header'); if (tab !== 'perf') { _perfHdr.classList.add('hidden'); _perfHdr.innerHTML = ''; }
             const _ahSum  = document.getElementById('asset-history-summary'); if (tab !== 'assethistory') { _ahSum.classList.add('hidden'); _ahSum.innerHTML = ''; } else { _ahSum.classList.remove('hidden'); }
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; stFilterAgent = ''; stFilterDate = ''; }
             if (tab !== 'assethistory') { ahFilterAsset = ''; ahFilterTr = ''; ahFilterLoc = ''; ahFilterDate = ''; }
@@ -4718,26 +4756,31 @@
                 NO_TURNS: 'background:#f8fafc;color:#94a3b8;font-weight:700;',
             };
 
-            // Summary bar
-            const summaryDiv = document.createElement('div');
-            summaryDiv.style.cssText = 'padding:10px 12px;background:#1e293b;color:white;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:10px;font-weight:900;letter-spacing:0.05em;text-transform:uppercase;';
-            const rateColor = rate === null ? '#94a3b8' : rate >= 90 ? '#34d399' : rate >= 70 ? '#fbbf24' : '#f87171';
-            summaryDiv.innerHTML = `
-                <span style="color:${rateColor};font-size:16px;font-weight:900;">${rate !== null ? rate + '%' : 'N/A'}</span>
-                <span style="color:#94a3b8;">72-Hour Rate</span>
-                <span style="color:#34d399;">✅ ${serviced.length} Serviced</span>
-                <span style="color:#fbbf24;">⚠️ ${rows.filter(r=>r.status==='MISSED').length} Missed</span>
-                <span style="color:#c084fc;">⛔ ${rows.filter(r=>r.status==='MTC').length} MTC</span>
-                <span style="color:#475569;">🚫 ${rows.filter(r=>r.status==='NO_TURNS').length} No Turns</span>
-                <span style="color:#64748b;margin-left:auto;">${eligible.length} eligible of ${rows.length} total</span>`;
-            container.appendChild(summaryDiv);
+            // ── Summary bar — pinned above the scroll area ────────────────────
+            const perfHdr = document.getElementById('perf-sticky-header');
+            if (perfHdr) {
+                perfHdr.innerHTML = '';
+                perfHdr.classList.remove('hidden');
+                const summaryDiv = document.createElement('div');
+                summaryDiv.style.cssText = 'padding:10px 12px;background:#1e293b;color:white;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:10px;font-weight:900;letter-spacing:0.05em;text-transform:uppercase;';
+                const rateColor = rate === null ? '#94a3b8' : rate >= 90 ? '#34d399' : rate >= 70 ? '#fbbf24' : '#f87171';
+                summaryDiv.innerHTML = `
+                    <span style="color:${rateColor};font-size:16px;font-weight:900;">${rate !== null ? rate + '%' : 'N/A'}</span>
+                    <span style="color:#94a3b8;">72-Hour Rate</span>
+                    <span style="color:#34d399;">✅ ${serviced.length} Serviced</span>
+                    <span style="color:#fbbf24;">⚠️ ${rows.filter(r=>r.status==='MISSED').length} Missed</span>
+                    <span style="color:#c084fc;">⛔ ${rows.filter(r=>r.status==='MTC').length} MTC</span>
+                    <span style="color:#475569;">🚫 ${rows.filter(r=>r.status==='NO_TURNS').length} No Turns</span>
+                    <span style="color:#64748b;margin-left:auto;">${eligible.length} eligible of ${rows.length} total</span>`;
+                perfHdr.appendChild(summaryDiv);
+            }
 
-            // Table
+            // ── Table — thead is sticky so column labels pin while rows scroll ─
             const wrap = document.createElement('div');
             wrap.style.cssText = 'overflow-x:auto;';
             const tbl = document.createElement('table');
             tbl.style.cssText = 'width:100%;border-collapse:collapse;min-width:max-content;font-size:10px;';
-            tbl.innerHTML = `<thead><tr style="background:#334155;color:white;">
+            tbl.innerHTML = `<thead style="position:sticky;top:0;z-index:5;"><tr style="background:#334155;color:white;">
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">FIN</th>
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Type</th>
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Body</th>
@@ -6227,70 +6270,69 @@
         }
 
         // ─── P2P: Shared config builder ───────────────────────────────────────
-        // ICE server strategy:
         //
-        //   SIGNALING : 0.peerjs.com
-        //   STUN      : stun.l.google.com:19302
-        //   TURN      : metered.ca — credentials fetched fresh on load (rotating,
-        //               short-lived tokens). Falls back to freestun.net + OpenRelay
-        //               if the fetch fails (e.g. offline / quota exceeded).
-
-        // Fallback servers used if Metered fetch fails
-        const _ICE_FALLBACK = [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'turn:freestun.net:3478',               username: 'free', credential: 'free' },
-            { urls: 'turns:freestun.net:5349',              username: 'free', credential: 'free' },
-            { urls: 'turn:openrelay.metered.ca:80',                username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443',               username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-            { urls: 'turns:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
-        ];
-
-        // Cache so we only fetch once per page load
-        let _cachedIceServers = null;
-        // Single shared promise — all callers await the same fetch; never fires twice
-        let _iceServersFetchPromise = null;
-
-        function _prefetchIceServers() {
-            if (_iceServersFetchPromise) return _iceServersFetchPromise;
-            _iceServersFetchPromise = (async () => {
-                if (_cachedIceServers) return;
-                try {
-                    // Race the fetch against a 5-second timeout so startup is never stalled
-                    const res = await Promise.race([
-                        fetch('https://agentreport.metered.live/api/v1/turn/credentials?apiKey=496642bbdac2a80967b75da57cbf6f968e6c'),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-                    ]);
-                    if (!res.ok) throw new Error('HTTP ' + res.status);
-                    const servers = await res.json();
-                    if (Array.isArray(servers) && servers.length) {
-                        _cachedIceServers = servers;
-                        console.log('[P2P] Metered ICE servers loaded:', servers.length);
-                    }
-                } catch (e) {
-                    console.warn('[P2P] Metered fetch failed, using fallback ICE servers:', e.message);
-                }
-            })();
-            return _iceServersFetchPromise;
-        }
-
-        // Fire prefetch immediately so it runs in parallel with page init
-        _prefetchIceServers();
+        // ICE connection priority (browser tries in this order automatically):
+        //
+        //   host  → Direct LAN connection — no server involved at all
+        //   srflx → Google STUN discovers public IP for direct P2P — no relay, free
+        //   relay → TURN relay carries data only when direct routes fail
+        //
+        // TURN relay priority (listed first = tried first by the browser):
+        //   1. freestun.net          — free / community, no quota
+        //   2. ExpressTURN           — paid relay, only if user has saved credentials
+        //   3. Metered               — paid relay, only if user has saved credentials
+        //
+        // ExpressTURN / Metered are NEVER used unless creds are entered in the P2P
+        // monitor. Free Google STUN handles the vast majority of connections; TURN
+        // relay is only a fallback for symmetric NAT / strict corporate firewalls.
 
         function _buildPeerConfig() {
-            // Start from Metered servers (if fetched) or the static fallback list
-            const baseServers = [...(_cachedIceServers || _ICE_FALLBACK)];
+            const iceServers = [];
 
-            // Append ExpressTURN entries if the user has saved credentials
+            // ── Free Google STUN — multiple servers maximise direct-connect success ──
+            // No data ever passes through these; they only help peers discover each
+            // other's public IP/port for a direct connection.
+            iceServers.push(
+                { urls: 'stun:stun.l.google.com:19302'  },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            );
+
+            // ── Free community TURN — relay of last resort before paid servers ────
+            // freestun.net is an open, no-quota relay. Data only flows here when
+            // every direct route has failed.
+            iceServers.push(
+                { urls: 'turn:freestun.net:3478',  username: 'free', credential: 'free' },
+                { urls: 'turns:freestun.net:5349', username: 'free', credential: 'free' }
+            );
+
+            // ── ExpressTURN — active only when user has entered credentials ───────
             const etUser = localStorage.getItem('et-username');
             const etCred = localStorage.getItem('et-credential');
             if (etUser && etCred) {
-                baseServers.push(
+                iceServers.push(
                     { urls: 'turn:relay1.expressturn.com:3480',               username: etUser, credential: etCred },
                     { urls: 'turn:relay1.expressturn.com:3480?transport=tcp', username: etUser, credential: etCred },
-                    { urls: 'turns:relay1.expressturn.com:5350',             username: etUser, credential: etCred }
+                    { urls: 'turns:relay1.expressturn.com:5350',              username: etUser, credential: etCred }
                 );
+                console.log('[P2P] ExpressTURN active');
+            }
+
+            // ── Metered — active only when user has entered credentials ──────────
+            // No hardcoded defaults; Metered is completely inactive unless the user
+            // enters credentials in the P2P monitor.
+            const mtUser = localStorage.getItem('mt-username');
+            const mtCred = localStorage.getItem('mt-credential');
+            if (mtUser && mtCred) {
+                iceServers.push(
+                    { urls: 'turn:global.relay.metered.ca:80',                username: mtUser, credential: mtCred },
+                    { urls: 'turn:global.relay.metered.ca:80?transport=tcp',  username: mtUser, credential: mtCred },
+                    { urls: 'turn:global.relay.metered.ca:443',               username: mtUser, credential: mtCred },
+                    { urls: 'turns:global.relay.metered.ca:443?transport=tcp',username: mtUser, credential: mtCred }
+                );
+                console.log('[P2P] Metered TURN active');
             }
 
             return {
@@ -6303,7 +6345,7 @@
                 config: {
                     iceTransportPolicy: 'all',
                     iceCandidatePoolSize: 2,
-                    iceServers: baseServers
+                    iceServers
                 }
             };
         }
@@ -6451,12 +6493,6 @@
                     }, 2000);
                 });
             }
-
-            // ── CRITICAL: await ICE server fetch before building Peer config ──
-            // Without this await, _cachedIceServers is null when _buildPeerConfig()
-            // runs (the fetch hasn't resolved yet), causing fallback to unreliable
-            // public TURN servers and silent failure on cross-network connections.
-            await _prefetchIceServers();
 
             // On initial open, bypass backoff to immediately try all peers
             _attachPeerHandlers(new Peer(peerId, _buildPeerConfig()), agentValue, peerId, { initialConnect: true });
@@ -7486,6 +7522,49 @@
             showToast('ExpressTURN credentials cleared');
         }
 
+        // ─── Metered TURN credential helpers ─────────────────────────────────
+        function _refreshMeteredStatus() {
+            const savedU = localStorage.getItem('mt-username');
+            const savedC = localStorage.getItem('mt-credential');
+            const uEl = document.getElementById('mt-username-input');
+            const cEl = document.getElementById('mt-credential-input');
+            const sEl = document.getElementById('mt-creds-status');
+            if (uEl) uEl.value = savedU || '';
+            if (cEl) cEl.value = savedC || '';
+            if (sEl) {
+                if (savedU && savedC) {
+                    sEl.textContent = '✓ Credentials saved — Metered TURN active';
+                    sEl.className   = 'text-[10px] text-emerald-600 font-bold';
+                } else {
+                    sEl.textContent = 'No credentials — Metered TURN inactive';
+                    sEl.className   = 'text-[10px] text-slate-400';
+                }
+            }
+        }
+
+        function saveMeteredCreds() {
+            const u = (document.getElementById('mt-username-input')?.value   || '').trim();
+            const c = (document.getElementById('mt-credential-input')?.value || '').trim();
+            if (!u || !c) { showToast('Enter both username and password'); return; }
+            localStorage.setItem('mt-username',   u);
+            localStorage.setItem('mt-credential', c);
+            _refreshMeteredStatus();
+            _renderDiagServers();
+            showToast('Metered credentials saved');
+        }
+
+        function clearMeteredCreds() {
+            localStorage.removeItem('mt-username');
+            localStorage.removeItem('mt-credential');
+            const uEl = document.getElementById('mt-username-input');
+            const cEl = document.getElementById('mt-credential-input');
+            if (uEl) uEl.value = '';
+            if (cEl) cEl.value = '';
+            _refreshMeteredStatus();
+            _renderDiagServers();
+            showToast('Metered credentials cleared — Metered TURN inactive');
+        }
+
         function _renderDiagServers() {
             const cfg = _buildPeerConfig().config;
             const serversEl = document.getElementById('diag-servers');
@@ -7521,6 +7600,9 @@
 
             // Populate ExpressTURN inputs and status from saved creds
             _refreshExpressTurnStatus();
+
+            // Populate Metered inputs and status from saved creds (or show default-active notice)
+            _refreshMeteredStatus();
 
             // Render configured ICE servers (shared helper — also used by Save/Clear)
             _renderDiagServers();
