@@ -7181,12 +7181,22 @@
                     const existingIdx = assetHistory.findIndex(h => h.assetId === incoming.assetId);
                     if (existingIdx !== -1) {
                         const existingRec = assetHistory[existingIdx];
-                        // Determine winner using _v when available, dt otherwise
+                        // Conflict resolution — _v (version clock) takes priority over dt:
+                        //   both have _v  → higher _v wins
+                        //   only one has _v → that record wins (it was explicitly edited/versioned)
+                        //   neither has _v  → fall back to dt string comparison (legacy behaviour)
                         const inV = incoming._v;
                         const exV = existingRec._v;
-                        const incomingWins = (inV !== undefined && exV !== undefined)
-                            ? inV > exV
-                            : (incoming.dt || '') > (existingRec.dt || '');
+                        let incomingWins;
+                        if (inV !== undefined && exV !== undefined) {
+                            incomingWins = inV > exV;
+                        } else if (inV !== undefined) {
+                            incomingWins = true;  // only incoming is versioned — it wins
+                        } else if (exV !== undefined) {
+                            incomingWins = false; // only existing is versioned — keep it
+                        } else {
+                            incomingWins = (incoming.dt || '') > (existingRec.dt || '');
+                        }
                         if (!incomingWins) return; // existing is newer — skip
                         assetHistory.splice(existingIdx, 1);  // evict stale record
                     }
