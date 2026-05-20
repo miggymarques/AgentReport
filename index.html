@@ -1027,7 +1027,9 @@
         }
 
         function requireAdmin(action) {
-            return isCurrentUserAdmin();
+            if (isCurrentUserAdmin()) return true;
+            showToast('Admin access required' + (action ? ' to ' + action : ''));
+            return false;
         }
 
         // Re-evaluates admin visibility for add panels AND re-renders the list
@@ -2588,7 +2590,6 @@
         // guarantees this edit wins over any stale copy held by connected peers,
         // even when the corrected dt is older than the original typo's dt.
         function openEditAssetHistoryModal(entryId) {
-            if (!requireAdmin('edit asset history')) return;
             const entry = assetHistory.find(h => h.id === entryId);
             if (!entry) return showToast('Entry not found');
 
