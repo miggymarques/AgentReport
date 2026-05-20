@@ -541,12 +541,12 @@
             <div id="asset-history-summary" class="px-3 pt-2 pb-1 bg-slate-50 border-t"></div>
 
             <!-- Info bar: record count + export — visible to ALL users on assethistory tab -->
-            <div class="p-3 bg-slate-50 border-t hidden" id="assethistory-info-bar">
+            <div class="py-1.5 px-3 bg-slate-50 border-t hidden" id="assethistory-info-bar">
                 <div class="flex items-center justify-between">
                     <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Asset Transaction Log · <span id="assethistory-count-label">0 records</span></span>
                     <div class="flex gap-2">
-                        <button onclick="exportAssetHistoryCSV()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-black transition-all active:scale-95 flex items-center gap-1.5">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        <button onclick="exportAssetHistoryCSV()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-0.5 rounded-md text-[10px] font-black transition-all active:scale-95 flex items-center gap-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                             Export CSV
                         </button>
                     </div>
@@ -768,6 +768,54 @@
                 </div>
 
             </div>
+        </div>
+    </div>
+
+    <!-- ── Asset History Edit Modal ────────────────────────────────────────── -->
+    <div id="ah-edit-modal" style="display:none;" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                    <h3 class="text-sm font-black text-slate-800 uppercase tracking-wide">Edit History Entry</h3>
+                    <p id="ah-edit-assetid-label" class="text-xs font-mono text-indigo-600 font-black mt-0.5"></p>
+                </div>
+                <button onclick="closeEditAssetHistoryModal()" class="text-slate-400 hover:text-slate-700 transition-colors p-1">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <input type="hidden" id="ah-edit-entry-id">
+            <div class="space-y-3">
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Date / Time</label>
+                    <input type="datetime-local" id="ah-edit-dt" class="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">TR Type</label>
+                        <select id="ah-edit-tr" class="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono font-bold">
+                            <option value="OB">OB</option>
+                            <option value="RM">RM</option>
+                            <option value="MS">MS</option>
+                            <option value="DM">DM</option>
+                            <option value="FN">FN</option>
+                            <option value="RP">RP</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Location</label>
+                        <input type="text" id="ah-edit-loc" maxlength="12" class="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono uppercase" oninput="this.value=this.value.toUpperCase()">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">Notes (NT)</label>
+                    <textarea id="ah-edit-nt" rows="3" class="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 resize-none"></textarea>
+                </div>
+            </div>
+            <div class="flex gap-2 pt-1">
+                <button onclick="saveAssetHistoryEdit()" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-black text-sm py-2.5 rounded-xl transition-all active:scale-95 shadow-sm">Save &amp; Sync</button>
+                <button onclick="closeEditAssetHistoryModal()" class="px-5 text-slate-500 font-black text-sm py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition-all">Cancel</button>
+            </div>
+            <p class="text-[10px] text-slate-400 text-center leading-snug">Saves locally and broadcasts to all connected peers.<br>This edit will override any stale copies on other devices.</p>
         </div>
     </div>
 
@@ -1820,7 +1868,7 @@
                 const _obAgentTag = [_obFirstName, _obStation].filter(Boolean).join(' - ');
                 const obNt = [obNtBase, _obAgentTag].filter(Boolean).join(' | ');
 
-                const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc, ...(obNt ? { nt: obNt } : {}) };
+                const histEntry = { id: Date.now() + Math.floor(Math.random() * 1000), assetId, dt, tr: 'OB', loc, ...(obNt ? { nt: obNt } : {}), _v: Date.now() };
 
                 // Upsert: one record per assetId (canonical GGC#### key), latest wins
                 // Per-assetId tombstone guard: blocks entries whose creation ts predates the deletion.
@@ -1886,7 +1934,8 @@
                 dt:      dtStr,
                 tr:      'RM',
                 loc:     (loc || '').trim().toUpperCase(),
-                nt:      ntFull
+                nt:      ntFull,
+                _v:      Date.now()
             };
             // Upsert: one record per assetId, latest dt wins (regardless of TR type)
             const assetTombTs = assetHistoryAssetBlock[assetId] || 0;
@@ -1929,7 +1978,8 @@
                 dt:      dtStr,
                 tr:      'MS',
                 loc:     loc.trim().toUpperCase(),
-                nt:      msNt
+                nt:      msNt,
+                _v:      Date.now()
             };
             // MAX(DateTime) guard: only insert if this NRO timestamp is strictly newer
             // than any existing Asset_History record for this asset (OB, RM, or prior MS).
@@ -2062,7 +2112,8 @@
                 dt:      dtStr,
                 tr:      'DM',
                 loc:     (loc || '').trim().toUpperCase(),
-                nt:      ntFull
+                nt:      ntFull,
+                _v:      Date.now()
             };
 
             // MAX(DateTime) guard — one record per assetId, latest dt wins
@@ -2121,7 +2172,8 @@
                 dt:      dtStr,
                 tr:      'RP',
                 loc:     (loc || '').trim().toUpperCase(),
-                nt:      ntFull
+                nt:      ntFull,
+                _v:      Date.now()
             };
 
             // MAX(DateTime) guard — one record per assetId, latest dt wins
@@ -2197,7 +2249,8 @@
                 dt:      dtStr,
                 tr:      'FN',
                 loc:     (loc || '').trim().toUpperCase(),
-                nt:      ntOut
+                nt:      ntOut,
+                _v:      Date.now()
             };
 
             // MAX(DateTime) guard — one record per assetId, latest dt wins
@@ -2320,7 +2373,7 @@
 
                 const div = document.createElement('div');
                 div.className = 'grid items-center gap-x-2 py-0.5 border-b border-slate-100 hover:bg-slate-50 transition-colors px-1';
-                div.style.gridTemplateColumns = '4.5rem 2rem 3.5rem 1fr 1.5rem';
+                div.style.gridTemplateColumns = '4.5rem 2rem 3.5rem 1fr 3rem';
                 div.innerHTML = `
                     <span class="font-mono font-black text-[11px] text-indigo-600 truncate leading-tight">${row.assetId || '—'}</span>
                     <span style="${trBadgeStyle}border-radius:4px;padding:1px 4px;font-size:9px;font-weight:900;line-height:1.4;display:inline-block;text-align:center;letter-spacing:0.03em;">${row.tr || '—'}</span>
@@ -2329,7 +2382,10 @@
                         <span class="block font-mono text-[10px] text-slate-500">${dtDisplay}</span>
                         ${ntText ? `<span class="block text-[10px] text-slate-400 leading-snug">${ntText}</span>` : ''}
                     </span>
-                    <button class="text-red-400 hover:text-red-600 transition-all p-1 flex-shrink-0" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})" ${isCurrentUserAdmin() ? '' : 'style="display:none"'}><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>`;
+                    <span class="flex items-center gap-0.5 justify-end">
+                        <button class="text-blue-400 hover:text-blue-600 transition-all p-1 flex-shrink-0" title="Edit" onclick="openEditAssetHistoryModal(${row.id})" ${isCurrentUserAdmin() ? '' : 'style="display:none"'}><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>
+                        <button class="text-red-400 hover:text-red-600 transition-all p-1 flex-shrink-0" title="Delete" onclick="deleteAssetHistoryEntry(${row.id})" ${isCurrentUserAdmin() ? '' : 'style="display:none"'}><svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                    </span>`;
                 container.appendChild(div);
             });
         }
@@ -2526,6 +2582,72 @@
             }
         }
 
+        // ─── Edit an existing Asset History entry ─────────────────────────────
+        // Opens a modal pre-filled with the entry's current values. On save, the
+        // entry is updated in-place with a bumped _v (version) timestamp that
+        // guarantees this edit wins over any stale copy held by connected peers,
+        // even when the corrected dt is older than the original typo's dt.
+        function openEditAssetHistoryModal(entryId) {
+            if (!requireAdmin('edit asset history')) return;
+            const entry = assetHistory.find(h => h.id === entryId);
+            if (!entry) return showToast('Entry not found');
+
+            document.getElementById('ah-edit-entry-id').value     = entryId;
+            document.getElementById('ah-edit-assetid-label').textContent = entry.assetId || '';
+            document.getElementById('ah-edit-tr').value  = (entry.tr  || 'OB').toUpperCase();
+            document.getElementById('ah-edit-loc').value = (entry.loc || '').toUpperCase();
+            document.getElementById('ah-edit-nt').value  = entry.nt  || '';
+
+            // Convert ISO dt → datetime-local input value (strip seconds/ms and Z)
+            if (entry.dt) {
+                try {
+                    const d = new Date(entry.dt);
+                    const pad = n => String(n).padStart(2, '0');
+                    const localDt = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                    document.getElementById('ah-edit-dt').value = localDt;
+                } catch(_) { document.getElementById('ah-edit-dt').value = ''; }
+            } else {
+                document.getElementById('ah-edit-dt').value = '';
+            }
+
+            document.getElementById('ah-edit-modal').style.display = 'flex';
+        }
+
+        function closeEditAssetHistoryModal() {
+            document.getElementById('ah-edit-modal').style.display = 'none';
+        }
+
+        function saveAssetHistoryEdit() {
+            const entryId = Number(document.getElementById('ah-edit-entry-id').value);
+            const idx     = assetHistory.findIndex(h => h.id === entryId);
+            if (idx === -1) { closeEditAssetHistoryModal(); return showToast('Entry not found — may have been deleted'); }
+
+            const dtRaw = (document.getElementById('ah-edit-dt').value || '').trim();
+            const tr    = (document.getElementById('ah-edit-tr').value  || '').trim().toUpperCase();
+            const loc   = (document.getElementById('ah-edit-loc').value || '').trim().toUpperCase();
+            const nt    = (document.getElementById('ah-edit-nt').value  || '').trim();
+
+            // Normalise dt to full ISO — datetime-local has no seconds/Z so we must convert
+            const dtISO = dtRaw ? new Date(dtRaw).toISOString() : assetHistory[idx].dt;
+
+            // Bump _v to NOW so this edit beats any stale peer copy regardless of dt ordering
+            assetHistory[idx] = {
+                ...assetHistory[idx],
+                dt:  dtISO,
+                tr,
+                loc,
+                nt,
+                _v:  Date.now()
+            };
+
+            saveAssetHistory();
+            broadcastAssetHistorySync([assetHistory[idx]]);
+            closeEditAssetHistoryModal();
+
+            if (activeRefTab === 'assethistory') renderRefList();
+            showToast('Entry updated & synced to peers');
+        }
+
         function addAssetHistoryEntry() {
             if (!requireAdmin('add asset history')) return;
             const assetId = (document.getElementById('ah-asset-id')?.value || '').trim().toUpperCase();
@@ -2543,9 +2665,9 @@
             // silently overwrite newer manual entries with older synced ones.
             const dt = dtRaw ? new Date(dtRaw).toISOString() : '';
 
-            const entry = { id: Date.now(), assetId, dt, tr, loc, nt };
+            const entry = { id: Date.now(), assetId, dt, tr, loc, nt, _v: Date.now() };
 
-            // Upsert — one record per assetId, latest dt wins.
+            // Upsert — one record per assetId, latest _v (or dt for old records) wins.
             // Mirrors writeRMHistoryEntry so peers correctly reject this entry
             // if they already hold something newer, and prevents duplicate rows
             // for the same asset accumulating in the table.
@@ -2554,8 +2676,12 @@
             const existingIdx = assetHistory.findIndex(h => h.assetId === assetId);
             if (existingIdx !== -1) {
                 if (!assetHistoryBlock[assetHistory[existingIdx].id]) {
-                    // existing entry is live — only replace if our dt is strictly newer
-                    if (dt <= assetHistory[existingIdx].dt) return showToast('Existing record is same age or newer');
+                    // existing entry is live — only replace if our _v (or dt) is strictly newer
+                    const existingRec = assetHistory[existingIdx];
+                    const inV = entry._v;
+                    const exV = existingRec._v;
+                    const winsOnVersion = (inV !== undefined && exV !== undefined) ? inV > exV : (dt > (existingRec.dt || ''));
+                    if (!winsOnVersion) return showToast('Existing record is same age or newer');
                 }
                 assetHistory.splice(existingIdx, 1);
             }
@@ -7039,7 +7165,11 @@
             // ── Merge assetHistory ────────────────────────────────────────────
             if (msg.assetHistory && Array.isArray(msg.assetHistory) && msg.assetHistory.length) {
                 let ahChanged = false;
-                // Upsert: one record per assetId, latest dt wins — tombstoned entries are never re-inserted
+                // Upsert: one record per assetId.
+                // Conflict resolution: compare _v (version wall-clock) when both records have it,
+                // fall back to dt for old records that predate the _v field.
+                // This lets edits (which bump _v to Date.now()) always win over stale peers
+                // even when the corrected dt is older than the typo's dt.
                 msg.assetHistory.forEach(incoming => {
                     if (!incoming.id || !incoming.assetId) return;
                     // Per-entry tombstone guard
@@ -7049,7 +7179,14 @@
                     if (assetTombTs && incoming.id <= assetTombTs) return;
                     const existingIdx = assetHistory.findIndex(h => h.assetId === incoming.assetId);
                     if (existingIdx !== -1) {
-                        if ((incoming.dt || '') <= (assetHistory[existingIdx].dt || '')) return; // existing is newer — skip
+                        const existingRec = assetHistory[existingIdx];
+                        // Determine winner using _v when available, dt otherwise
+                        const inV = incoming._v;
+                        const exV = existingRec._v;
+                        const incomingWins = (inV !== undefined && exV !== undefined)
+                            ? inV > exV
+                            : (incoming.dt || '') > (existingRec.dt || '');
+                        if (!incomingWins) return; // existing is newer — skip
                         assetHistory.splice(existingIdx, 1);  // evict stale record
                     }
                     assetHistory.push(incoming);
