@@ -4344,7 +4344,7 @@
 
                     // Broadcast to all peers
                     const peers = Object.keys(p2pConnections);
-                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', finTable, assetIndex, nroIndex, scheduleData }));
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', _sentAt: Date.now(), finTable, assetIndex, nroIndex, scheduleData }));
 
                     const finCount = Object.keys(newSchedule).length;
                     statusEl.textContent = `✓ ${rowCount} rotations across ${finCount} aircraft imported.`;
@@ -4776,8 +4776,9 @@
 
         // Returns all rotations for a FIN at our 4 stations within the last 72 hours,
         // combining the live scheduleData and the archived scheduleHistory.
-        function getPerfRotationsForFin(fin) {
-            const now         = Date.now();
+        // `now` is passed in from computePerfData so the entire report uses one
+        // consistent timestamp rather than calling Date.now() at each function boundary.
+        function getPerfRotationsForFin(fin, now) {
             const windowStart = now - PERF_WINDOW_MS;
             const rots        = [];
 
@@ -4811,8 +4812,13 @@
 
         // Compute performance classification for every FIN.
         // Returns { rows, eligible, serviced }
-        function computePerfData() {
-            const now         = Date.now();
+        // `now` is captured once by renderPerfReport so every per-FIN calculation
+        // and every getPerfRotationsForFin call share the exact same reference time.
+        // This prevents the 72-hour boundary from shifting mid-computation and ensures
+        // all connected clients produce identical hoursSince / servicedInWindow values
+        // when they render at approximately the same moment.
+        function computePerfData(now) {
+            if (now === undefined) now = Date.now();
             const windowStart = now - PERF_WINDOW_MS;
             const allFins     = new Set([...Object.keys(aircraftRef), ...Object.keys(finTable)]);
             const rows        = [];
@@ -4831,7 +4837,7 @@
                 const servicedInWindow   = lastServiceTs >= windowStart && PERF_STATIONS.has(lastServiceStation.toUpperCase());
                 const hoursSince         = lastServiceTs ? Math.round((now - lastServiceTs) / 3600000) : null;
 
-                const rots       = getPerfRotationsForFin(fin);
+                const rots       = getPerfRotationsForFin(fin, now);
                 const nonMtcRots = rots.filter(r => !isMtcRotation(r));
                 const mtcRots    = rots.filter(r =>  isMtcRotation(r));
 
@@ -4873,7 +4879,11 @@
         }
 
         function renderPerfReport(container) {
-            const { rows, eligible, serviced } = computePerfData();
+            // Capture a single reference timestamp for this entire render pass.
+            // Both computePerfData and getPerfRotationsForFin receive this value so
+            // the 72-hour window boundary and hoursSince are consistent throughout.
+            const now = Date.now();
+            const { rows, eligible, serviced } = computePerfData(now);
             const rate    = eligible.length > 0 ? Math.round((serviced.length / eligible.length) * 100) : null;
             const CELL    = 'padding:5px 8px;white-space:nowrap;border-right:1px solid #f1f5f9;font-size:10px;';
             const statusStyle = {
@@ -4953,7 +4963,7 @@
 
         // Export 2-sheet XLSX: Sheet 1 = service records, Sheet 2 = 72h perf report
         function exportPerfXLSX() {
-            const { rows } = computePerfData();
+            const { rows } = computePerfData(Date.now());
             const wb = XLSX.utils.book_new();
 
             // Sheet 1 — service records (mirrors exportToCSV logic)
@@ -6344,10 +6354,21 @@
                 if ((v.ts || 0) > sinceTs) nro[k] = v;
             });
 
-            // Schedule: include only if imported after sinceTs
-            const firstLocal = Object.keys(scheduleData).length > 0 ? Object.values(scheduleData)[0] : null;
-            const schedTs = firstLocal ? (Array.isArray(firstLocal) ? (firstLocal[0]?._ts || 0) : (firstLocal?._ts || 0)) : 0;
-            const sched = schedTs > sinceTs ? scheduleData : {};
+            // Schedule: sync per-FIN so that FINs added after a peer last connected are
+            // included correctly. Previously this used the _ts of the very first FIN only,
+            // which caused any FIN added after sinceTs to be silently dropped on deltas.
+            const sched = {};
+            if (sinceTs === 0) {
+                // Full sync — send everything
+                Object.assign(sched, scheduleData);
+            } else {
+                Object.entries(scheduleData).forEach(([fin, rots]) => {
+                    const finTs = Array.isArray(rots)
+                        ? (rots[0]?._ts || 0)
+                        : (rots?._ts    || 0);
+                    if (finTs > sinceTs) sched[fin] = rots;
+                });
+            }
 
             // On full sync send everything; on delta send only agents changed since sinceTs
             const agents = sinceTs === 0
@@ -6765,7 +6786,7 @@
                     if (now - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
                 });
                 try {
-                    conn.send({ type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
+                    conn.send({ type: msgType, sinceTs, _sentAt: Date.now(), ...delta, finClaims: activeClaims, finClaimReleases });
                 } catch(e) {
                     console.warn('[P2P] send failed on open for', peerId, e);
                 }
@@ -6791,8 +6812,11 @@
                     if (!finTable[fin]) {
                         finTable[fin] = { ...incoming };
                         changed = true;
-                    } else if ((incoming._ts || 0) > (finTable[fin]._ts || 0)) {
-                        // Incoming is strictly newer — overwrite
+                    } else if ((incoming._ts || 0) >= (finTable[fin]._ts || 0)) {
+                        // Incoming is at least as new — overwrite.
+                        // Using >= (not >) matches the local updateFinTable path so that
+                        // tie-breaking is symmetric: the last writer wins regardless of
+                        // whether the record arrived locally or from a peer.
                         finTable[fin].lastSeen      = incoming.lastSeen;
                         finTable[fin].lastFlight    = incoming.lastFlight;
                         finTable[fin].lastAgent     = incoming.lastAgent   || finTable[fin].lastAgent   || '';
@@ -6809,8 +6833,8 @@
                         finTable[fin]._ts           = incoming._ts;
                         changed = true;
                     }
-                    // Equal _ts: keep local copy to avoid flip-flopping — but still promote
-                    // hasServiceCall since it is append-only and must never be lost.
+                    // Fallback: incoming is older — only propagate hasServiceCall since
+                    // it is append-only and must never be lost even from a stale record.
                     else if (incoming.hasServiceCall && !finTable[fin].hasServiceCall) {
                         finTable[fin].hasServiceCall = true;
                         changed = true;
@@ -7232,9 +7256,15 @@
                 const changed = applyIncomingSyncMsg(msg, fromPeer);
 
                 // Record when we last synced with this peer — only after successful apply
-                // so a future delta won't skip records if apply threw or was partial
+                // so a future delta won't skip records if apply threw or was partial.
+                // Use the sender's own _sentAt timestamp (their clock) rather than our
+                // local Date.now(). If the sender's clock is behind ours, using our clock
+                // would set lastSyncTs ahead of their _ts values, causing their next entries
+                // to be silently excluded from future deltas (cursor poisoning).
+                // We take Math.min(_sentAt, nowTs) as a safety bound so a far-future
+                // sender clock can never cause us to skip our own entries.
                 const nowTs = Date.now();
-                lastSyncTs[fromPeer] = nowTs;
+                lastSyncTs[fromPeer] = msg._sentAt ? Math.min(msg._sentAt, nowTs) : nowTs;
                 if (changed) _lastLocalChangeTs = nowTs; // our local state is now newer — relay to others
 
                 if (changed) {
@@ -7263,7 +7293,7 @@
                         Object.entries(finClaims).forEach(([fin, c]) => {
                             if (replyNow - c.ts <= CLAIM_TTL_MS) activeClaims[fin] = c;
                         });
-                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, ...replyDelta, finClaims: activeClaims, finClaimReleases });
+                        replyConn.send({ type: theirSinceTs === 0 ? 'FULL_SYNC' : 'DELTA_SYNC', sinceTs: theirSinceTs, _sentAt: Date.now(), ...replyDelta, finClaims: activeClaims, finClaimReleases });
                     }
                 }
                 return;
@@ -7324,7 +7354,7 @@
                     if (pid === fromPeer) return; // don't echo back to sender
                     const sinceTs = lastSyncTs[pid] || 0;
                     const delta = buildDelta(sinceTs);
-                    conn_p2p_send(pid, { type: 'DELTA_SYNC', sinceTs, ...delta });
+                    conn_p2p_send(pid, { type: 'DELTA_SYNC', sinceTs, _sentAt: Date.now(), ...delta });
                 });
             }
 
@@ -7555,7 +7585,7 @@
                         Object.keys(delta.assetHistoryBlock || {}).length > 0;
 
                     if (hasData) {
-                        conn_p2p_send(pid, { type: msgType, sinceTs, ...delta, finClaims: activeClaims, finClaimReleases });
+                        conn_p2p_send(pid, { type: msgType, sinceTs, _sentAt: Date.now(), ...delta, finClaims: activeClaims, finClaimReleases });
                     }
                 });
             }, DATA_SYNC_INTERVAL_MS);
