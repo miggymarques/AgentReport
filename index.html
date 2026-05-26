@@ -4755,11 +4755,14 @@
         const PERF_STATIONS  = new Set(['YYZ','YUL','YYC','YVR']);
         const PERF_WINDOW_MS = 72 * 3600 * 1000;
 
-        // Format an hour count as "38h / 1.6d"
-        function fmtHoursDays(h) {
+        // Format an hour count as full calendar days only (e.g. "3d")
+        function fmtDays(h) {
             if (h === null || h === undefined) return '—';
-            return `${h}h / ${(h / 24).toFixed(1)}d`;
+            const d = Math.floor(h / 24);
+            return d === 0 ? '<1d' : `${d}d`;
         }
+        // Legacy alias kept for any stray references
+        const fmtHoursDays = fmtDays;
 
         // Format a single rotation compactly: "YYZ 13:20We" or "YYZ 13:20We[MTC]"
         const _DAY2 = ['Su','Mo','Tu','We','Th','Fr','Sa'];
@@ -4855,27 +4858,49 @@
                 if (servicedInWindow) {
                     rows.push({ fin, type, body, status: 'SERVICED', statusLabel: 'Serviced', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true });
                 } else {
+                    // PENDING: aircraft just crossed the 72-hour mark (day 3) — it's due
+                    // for service today but hasn't been missed yet.  Once it passes 96 h
+                    // without service it moves to MISSED (the 3rd day has come and gone).
+                    const daysSince = hoursSince !== null ? Math.floor(hoursSince / 24) : null;
+                    const isPending  = daysSince !== null && daysSince === 3;   // exactly on day 3
+
                     let explanation = 'No service record in 72h window';
                     if (lastServiceTs && !PERF_STATIONS.has(lastServiceStation.toUpperCase()) && lastServiceStation) {
                         explanation = `Last serviced at ${lastServiceStation} (not our station)`;
                     } else if (!lastServiceTs) {
                         explanation = 'Never serviced';
                     } else if (hoursSince !== null) {
-                        explanation = `Last service ${fmtHoursDays(hoursSince)} ago at ${lastServiceStation || '?'}`;
+                        explanation = isPending
+                            ? `Due today — last service ${fmtDays(hoursSince)} ago at ${lastServiceStation || '?'}`
+                            : `Last service ${fmtDays(hoursSince)} ago at ${lastServiceStation || '?'}`;
                     }
-                    rows.push({ fin, type, body, status: 'MISSED', statusLabel: 'Missed', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, explanation });
+
+                    if (isPending) {
+                        rows.push({ fin, type, body, status: 'PENDING', statusLabel: 'Pending', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, explanation });
+                    } else {
+                        rows.push({ fin, type, body, status: 'MISSED', statusLabel: 'Missed', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, explanation });
+                    }
                 }
             });
 
+            // MISSED first (most urgent), then PENDING (due today), then SERVICED,
+            // then ineligible categories.
             rows.sort((a, b) => {
-                const order = { MISSED: 0, SERVICED: 1, MTC: 2, NO_TURNS: 3 };
+                const order = { PENDING: 0, MISSED: 1, SERVICED: 2, MTC: 3, NO_TURNS: 4 };
                 if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+                // Within MISSED: most overdue first
+                if (a.status === 'MISSED' && b.status === 'MISSED') {
+                    const ah = a.hoursSince ?? 0, bh = b.hoursSince ?? 0;
+                    if (bh !== ah) return bh - ah;
+                }
                 return a.fin.localeCompare(b.fin);
             });
 
             const eligible = rows.filter(r => r.eligible);
             const serviced = eligible.filter(r => r.status === 'SERVICED');
-            return { rows, eligible, serviced };
+            const pending  = eligible.filter(r => r.status === 'PENDING');
+            const missed   = eligible.filter(r => r.status === 'MISSED');
+            return { rows, eligible, serviced, pending, missed };
         }
 
         function renderPerfReport(container) {
@@ -4883,12 +4908,16 @@
             // Both computePerfData and getPerfRotationsForFin receive this value so
             // the 72-hour window boundary and hoursSince are consistent throughout.
             const now = Date.now();
-            const { rows, eligible, serviced } = computePerfData(now);
-            const rate    = eligible.length > 0 ? Math.round((serviced.length / eligible.length) * 100) : null;
+            const { rows, eligible, serviced, pending, missed } = computePerfData(now);
+            // Confirmed rate: only aircraft actually serviced
+            // On-Track rate: serviced + pending (still has time today)
+            const confirmedRate = eligible.length > 0 ? Math.round((serviced.length / eligible.length) * 100) : null;
+            const onTrackRate   = eligible.length > 0 ? Math.round(((serviced.length + pending.length) / eligible.length) * 100) : null;
             const CELL    = 'padding:5px 8px;white-space:nowrap;border-right:1px solid #f1f5f9;font-size:10px;';
             const statusStyle = {
                 SERVICED: 'background:#dcfce7;color:#166534;font-weight:900;',
-                MISSED:   'background:#fef9c3;color:#854d0e;font-weight:900;',
+                PENDING:  'background:#fff7ed;color:#c2410c;font-weight:900;',
+                MISSED:   'background:#fee2e2;color:#991b1b;font-weight:900;',
                 MTC:      'background:#f3e8ff;color:#6b21a8;font-weight:900;',
                 NO_TURNS: 'background:#f8fafc;color:#94a3b8;font-weight:700;',
             };
@@ -4900,12 +4929,21 @@
                 perfHdr.classList.remove('hidden');
                 const summaryDiv = document.createElement('div');
                 summaryDiv.style.cssText = 'padding:10px 12px;background:#1e293b;color:white;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:10px;font-weight:900;letter-spacing:0.05em;text-transform:uppercase;';
-                const rateColor = rate === null ? '#94a3b8' : rate >= 90 ? '#34d399' : rate >= 70 ? '#fbbf24' : '#f87171';
+                const rateColor        = confirmedRate === null ? '#94a3b8' : confirmedRate >= 90 ? '#34d399' : confirmedRate >= 70 ? '#fbbf24' : '#f87171';
+                const onTrackColor     = onTrackRate   === null ? '#94a3b8' : onTrackRate   >= 90 ? '#34d399' : onTrackRate   >= 70 ? '#fbbf24' : '#f87171';
                 summaryDiv.innerHTML = `
-                    <span style="color:${rateColor};font-size:16px;font-weight:900;">${rate !== null ? rate + '%' : 'N/A'}</span>
-                    <span style="color:#94a3b8;">72-Hour Rate</span>
+                    <div style="display:flex;flex-direction:column;gap:1px;min-width:56px;">
+                        <span style="color:${rateColor};font-size:18px;font-weight:900;line-height:1;">${confirmedRate !== null ? confirmedRate + '%' : 'N/A'}</span>
+                        <span style="color:#64748b;font-size:9px;letter-spacing:0.04em;">CONFIRMED</span>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:1px;min-width:56px;padding-left:10px;border-left:1px solid #334155;">
+                        <span style="color:${onTrackColor};font-size:18px;font-weight:900;line-height:1;">${onTrackRate !== null ? onTrackRate + '%' : 'N/A'}</span>
+                        <span style="color:#64748b;font-size:9px;letter-spacing:0.04em;">ON TRACK</span>
+                    </div>
+                    <div style="width:1px;background:#334155;align-self:stretch;"></div>
                     <span style="color:#34d399;">✅ ${serviced.length} Serviced</span>
-                    <span style="color:#fbbf24;">⚠️ ${rows.filter(r=>r.status==='MISSED').length} Missed</span>
+                    <span style="color:#fb923c;">⏳ ${pending.length} Pending</span>
+                    <span style="color:#f87171;">❌ ${missed.length} Missed</span>
                     <span style="color:#c084fc;">⛔ ${rows.filter(r=>r.status==='MTC').length} MTC</span>
                     <span style="color:#475569;">🚫 ${rows.filter(r=>r.status==='NO_TURNS').length} No Turns</span>
                     <span style="color:#64748b;margin-left:auto;">${eligible.length} eligible of ${rows.length} total</span>`;
@@ -4923,7 +4961,7 @@
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Body</th>
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Status</th>
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Last Serviced</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Hours / Days</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;">Days Since</th>
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Stn</th>
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Agent</th>
                 <th style="${CELL}font-weight:900;text-transform:uppercase;">Turns at Base (72h)</th>
@@ -4940,7 +4978,14 @@
 
                 const turnsSummary = r.rots.length > 0 ? r.rots.map(rot => fmtRot(rot)).join(' · ') : '—';
                 const note         = r.explanation || (r.status === 'MTC' ? `MTC @ ${r.mtcStn || '?'}` : '');
-                const hoursDisplay = fmtHoursDays(r.hoursSince);
+                const hoursDisplay = fmtDays(r.hoursSince);
+                const daysSince    = r.hoursSince !== null ? Math.floor(r.hoursSince / 24) : null;
+                // Colour the days cell: red if missed (4+ days), orange if pending (3 days), grey otherwise
+                const daysCellColor = daysSince === null ? '#94a3b8'
+                    : r.status === 'MISSED'  ? '#ef4444'
+                    : r.status === 'PENDING' ? '#ea580c'
+                    : '#475569';
+                const daysCellWeight = (r.status === 'MISSED' || r.status === 'PENDING') ? '900' : '400';
 
                 tr.innerHTML = `
                     <td style="${CELL}font-family:monospace;font-weight:900;color:#2563eb;">${r.fin}</td>
@@ -4948,7 +4993,7 @@
                     <td style="${CELL}color:#475569;">${r.body}</td>
                     <td style="${CELL}${statusStyle[r.status] || ''}">${r.statusLabel}</td>
                     <td style="${CELL}font-family:monospace;color:#475569;">${r.lastServiceDate || '—'}</td>
-                    <td style="${CELL}color:${r.hoursSince !== null && r.hoursSince > 72 ? '#ef4444' : '#475569'};font-weight:${r.hoursSince !== null && r.hoursSince > 72 ? '900' : '400'};">${hoursDisplay}</td>
+                    <td style="${CELL}color:${daysCellColor};font-weight:${daysCellWeight};">${hoursDisplay}</td>
                     <td style="${CELL}font-weight:700;color:#334155;">${r.lastServiceStation || '—'}</td>
                     <td style="${CELL}color:#64748b;">${r.lastServiceAgent || '—'}</td>
                     <td style="${CELL}color:#475569;max-width:220px;overflow:hidden;text-overflow:ellipsis;" title="${turnsSummary}">${turnsSummary}</td>
@@ -4992,7 +5037,7 @@
             XLSX.utils.book_append_sheet(wb, ws1, 'Service Records');
 
             // Sheet 2 — 72-hour performance report
-            const perfHeaders = ['FIN','Type','Body','Status','Last Serviced','Hours / Days','Station','Agent','Turns at Base (72h)','Note'];
+            const perfHeaders = ['FIN','Type','Body','Status','Last Serviced','Days Since','Station','Agent','Turns at Base (72h)','Note'];
             const perfData    = [perfHeaders];
             rows.forEach(r => {
                 const turnsSummary = r.rots.length > 0 ? r.rots.map(rot => fmtRot(rot)).join(' | ') : '';
@@ -5000,7 +5045,7 @@
                 perfData.push([
                     r.fin, r.type, r.body, r.statusLabel,
                     r.lastServiceDate    || '',
-                    r.hoursSince !== null ? fmtHoursDays(r.hoursSince) : '',
+                    r.hoursSince !== null ? fmtDays(r.hoursSince) : '',
                     r.lastServiceStation || '',
                     r.lastServiceAgent   || '',
                     turnsSummary, note
