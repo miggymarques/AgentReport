@@ -430,14 +430,14 @@
             </div>
             
             <div class="flex border-b text-[10px] font-black uppercase tracking-widest bg-slate-50">
-                <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">Aircraft</button>
-                <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset Database</button>
-                <button onclick="switchRefTab('assethistory')" id="ref-tab-assethistory" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Asset History</button>
+                <button onclick="switchRefTab('aircraft')" id="ref-tab-aircraft" class="flex-1 py-3 border-b-2 border-blue-600 text-blue-600">FIN</button>
+                <button onclick="switchRefTab('assets')" id="ref-tab-assets" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">AST#</button>
+                <button onclick="switchRefTab('assethistory')" id="ref-tab-assethistory" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">AST HST</button>
                 <button onclick="switchRefTab('perf')" id="ref-tab-perf" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">PERF</button>
-                <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Sync Table</button>
-                <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Schedule</button>
-                <button onclick="switchRefTab('agents')" id="ref-tab-agents" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">Agents</button>
-                <button onclick="switchRefTab('alldata')" id="ref-tab-alldata" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">All Data</button>
+                <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">SVC HST</button>
+                <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">SKD</button>
+                <button onclick="switchRefTab('agents')" id="ref-tab-agents" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">AGNT</button>
+                <button onclick="switchRefTab('alldata')" id="ref-tab-alldata" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">DATA</button>
             </div>
             <div id="synctable-export-bar" class="hidden border-b border-slate-200">
                 <div class="flex gap-1.5 px-2 py-1.5 items-center">
@@ -4342,9 +4342,11 @@
                     saveScheduleData();
                     _lastLocalChangeTs = Date.now(); // peers joining after this broadcast catch it on next delta
 
-                    // Broadcast to all peers
+                    // Broadcast to all peers — use buildDelta(0) so scheduleHistory and
+                    // all other shared tables are included, not just scheduleData alone.
                     const peers = Object.keys(p2pConnections);
-                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', _sentAt: Date.now(), finTable, assetIndex, nroIndex, scheduleData }));
+                    const _schedImportDelta = buildDelta(0);
+                    peers.forEach(pid => conn_p2p_send(pid, { type: 'FULL_SYNC', sinceTs: 0, _sentAt: Date.now(), ..._schedImportDelta }));
 
                     const finCount = Object.keys(newSchedule).length;
                     statusEl.textContent = `✓ ${rowCount} rotations across ${finCount} aircraft imported.`;
@@ -6415,6 +6417,20 @@
                 });
             }
 
+            // Schedule history: archived rotations used by the 72-h perf report.
+            // Rotations keep the same _ts they had in scheduleData when they were imported,
+            // so the same cursor-based filtering works here as for scheduleData above.
+            const schedHist = {};
+            if (sinceTs === 0) {
+                Object.assign(schedHist, scheduleHistory);
+            } else {
+                Object.entries(scheduleHistory).forEach(([key, rots]) => {
+                    if (!Array.isArray(rots) || rots.length === 0) return;
+                    const histTs = rots[0]._ts || 0;
+                    if (histTs > sinceTs) schedHist[key] = rots;
+                });
+            }
+
             // On full sync send everything; on delta send only agents changed since sinceTs
             const agents = sinceTs === 0
                 ? (agentRef.length > 0 ? agentRef : [])
@@ -6445,6 +6461,7 @@
 
             return {
                 finTable: fin, assetIndex: asset, nroIndex: nro, scheduleData: sched,
+                scheduleHistory: schedHist,
                 agentRef: agents, agentBlock, sharedDb: sharedEntries, sharedDbClearTs,
                 sharedDbBlock,
                 aircraftRef: acRef, aircraftRefBlock,
@@ -6992,6 +7009,25 @@
                 }
             }
 
+            // Merge scheduleHistory — archived rotations powering the 72-h perf report.
+            // Keys are unique per import-date+FIN; no conflict resolution needed — a newer
+            // import of the same FIN overwrites the old key in scheduleData and writes a
+            // fresh key in scheduleHistory, so two clients can never produce the same key
+            // with different content. Just union-merge any keys we don't already have.
+            if (msg.scheduleHistory && typeof msg.scheduleHistory === 'object' && Object.keys(msg.scheduleHistory).length > 0) {
+                let shChanged = false;
+                Object.entries(msg.scheduleHistory).forEach(([key, rots]) => {
+                    if (!scheduleHistory[key]) {
+                        scheduleHistory[key] = rots;
+                        shChanged = true;
+                    }
+                });
+                if (shChanged) {
+                    try { storageSet(SCHEDULE_HISTORY_KEY, JSON.stringify(scheduleHistory)); } catch(e) {}
+                    anyChanged = true;
+                }
+            }
+
             // Merge agentRef — per-agent last-write-wins with tombstone support
             if (msg.agentRef && Array.isArray(msg.agentRef)) {
                 // Merge incoming tombstones first — keep the newest deletion timestamp
@@ -7317,7 +7353,7 @@
                     // Re-render whichever ref tab is currently open so incoming peer data
                     // (assetRef, aircraftRef, finTable/assetIndex via synctable) appears
                     // immediately — mirrors what REF_SYNC already does for those tabs.
-                    if (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'assethistory' || activeRefTab === 'synctable') {
+                    if (activeRefTab === 'aircraft' || activeRefTab === 'assets' || activeRefTab === 'assethistory' || activeRefTab === 'synctable' || activeRefTab === 'perf') {
                         renderRefList();
                     }
                 }
