@@ -4274,6 +4274,19 @@
                         return;
                     }
 
+                    // ── File-type guard: reject history/sync files imported here ──
+                    const _schedCols = Object.keys(rows[0] || {});
+                    const _hasSchedCols  = _schedCols.some(c => ['IDT','IFLT','STN','ISTN','OSTN','ODT','OFLT'].includes(c));
+                    const _hasHistCols   = _schedCols.some(c => ['Service Date','SrvcIssCAT','Arrival Time','Agent'].includes(c));
+                    if (!_hasSchedCols || _hasHistCols) {
+                        statusEl.textContent = '✗ Wrong file — expected a Schedule (.xlsx) file.';
+                        statusEl.className = 'mt-2 text-[10px] text-center font-bold text-red-400';
+                        showToast('Wrong file — not a Schedule file', 'error');
+                        const _sinp = document.getElementById('schedule-file-input');
+                        if (_sinp) _sinp.value = '';
+                        return;
+                    }
+
                     const ts = Date.now();
                     const newSchedule = {};
                     let rowCount = 0;
@@ -4390,6 +4403,16 @@
                 reader.onload = e => {
                     try {
                         const rows = parseHistoryCSV(e.target.result);
+                        // ── File-type guard: reject schedule files imported here ──
+                        const _hCols = Object.keys(rows[0] || {});
+                        const _hasHistCols  = _hCols.some(c => ['Service Date','SrvcIssCAT','Arrival Time','FIN'].includes(c));
+                        const _hasSchedCols = _hCols.some(c => ['IDT','IFLT','ISTN','OSTN','ODT','OFLT'].includes(c));
+                        if (!_hasHistCols || _hasSchedCols) {
+                            statusEl.textContent = '✗ Wrong file — expected a Service History (.csv) file.';
+                            statusEl.className = 'mt-2 text-[10px] text-center font-bold text-red-400';
+                            showToast('Wrong file — not a Service History file', 'error');
+                            return;
+                        }
                         applyHistoryRows(rows, statusEl);
                     } catch(err) {
                         statusEl.textContent = '✗ Parse error: ' + err.message;
@@ -4403,6 +4426,16 @@
                         const wb = XLSX.read(e.target.result, { type: 'array', raw: false });
                         const ws = wb.Sheets[wb.SheetNames[0]];
                         const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+                        // ── File-type guard: reject schedule files imported here ──
+                        const _hCols = Object.keys(rows[0] || {});
+                        const _hasHistCols  = _hCols.some(c => ['Service Date','SrvcIssCAT','Arrival Time','FIN'].includes(c));
+                        const _hasSchedCols = _hCols.some(c => ['IDT','IFLT','ISTN','OSTN','ODT','OFLT'].includes(c));
+                        if (!_hasHistCols || _hasSchedCols) {
+                            statusEl.textContent = '✗ Wrong file — expected a Service History (.xlsx) file.';
+                            statusEl.className = 'mt-2 text-[10px] text-center font-bold text-red-400';
+                            showToast('Wrong file — not a Service History file', 'error');
+                            return;
+                        }
                         applyHistoryRows(rows, statusEl);
                     } catch(err) {
                         statusEl.textContent = '✗ Parse error: ' + err.message;
@@ -6235,7 +6268,13 @@
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, clearMsg));
             showToast("Shared data cleared & synced to peers");
         }
-        function showToast(m) { const t = document.getElementById('toast'); t.innerText = m; t.classList.add('opacity-100', '-translate-y-2'); setTimeout(() => t.classList.remove('opacity-100', '-translate-y-2'), 2000); }
+        function showToast(m, type) {
+            const t = document.getElementById('toast');
+            t.innerText = m;
+            if (type === 'error') { t.style.background = '#dc2626'; } else { t.style.background = ''; }
+            t.classList.add('opacity-100', '-translate-y-2');
+            setTimeout(() => { t.classList.remove('opacity-100', '-translate-y-2'); t.style.background = ''; }, 3000);
+        }
 
         function exportToCSV() {
             if (db.length === 0) return showToast("No records");
