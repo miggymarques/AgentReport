@@ -795,6 +795,7 @@
                         <select id="ah-edit-tr" class="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono font-bold">
                             <option value="OB">OB</option>
                             <option value="RM">RM</option>
+                            <option value="RT">RT</option>
                             <option value="MS">MS</option>
                             <option value="DM">DM</option>
                             <option value="FN">FN</option>
@@ -1760,10 +1761,16 @@
             const _list = document.getElementById('ref-editor-list');
             if (tab === 'schedule' || tab === 'perf') {
                 _list.style.overflowX = 'auto';
+                _list.style.overflowY = 'auto';
                 _list.style.padding   = '0';
+                _list.style.scrollbarWidth = 'thin';
+                _list.style.scrollbarColor = '#475569 #f1f5f9';
             } else {
                 _list.style.overflowX = '';
+                _list.style.overflowY = '';
                 _list.style.padding   = '';
+                _list.style.scrollbarWidth = '';
+                _list.style.scrollbarColor = '';
             }
             renderRefList();
         }
@@ -3969,6 +3976,17 @@
             sessionStorage.setItem(STATION_KEY, stationField.value);
             storageSet(AGENT_KEY, agentField.value);
             storageSet(STATION_KEY, stationField.value);
+
+            // Security: Reset the admin flag for the superuser (Michael Marques) every time
+            // the agent dropdown is changed. This prevents someone from gaining admin access
+            // simply by selecting his name — they must also explicitly re-check the admin box.
+            const superuserAgent = agentRef.find(a => a.displayName === SUPERUSER_NAME);
+            if (superuserAgent && superuserAgent.isAdmin) {
+                superuserAgent.isAdmin = false;
+                superuserAgent._ts = Date.now();
+                saveAgentRef();
+            }
+
             // Kick off P2P whenever agent is selected
             if (agentField.value) initP2P(agentField.value);
             // Re-evaluate all admin-gated UI whenever the agent changes — the modal
@@ -4985,22 +5003,24 @@
                 perfHdr.appendChild(summaryDiv);
             }
 
-            // ── Table — thead is sticky so column labels pin while rows scroll ─
+            // ── Table — single scroll container; thead is sticky-top so it pins
+            // vertically while the whole table (header included) scrolls horizontally.
+            // ref-editor-list owns both scroll axes for the perf tab.
             const wrap = document.createElement('div');
-            wrap.style.cssText = 'overflow-x:auto;';
+            wrap.id = 'perf-body-scroll';
             const tbl = document.createElement('table');
             tbl.style.cssText = 'width:100%;border-collapse:collapse;min-width:max-content;font-size:10px;';
-            tbl.innerHTML = `<thead style="position:sticky;top:0;z-index:5;"><tr style="background:#334155;color:white;">
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">FIN</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Type</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Body</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Status</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Last Serviced</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Days Since</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Stn</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Agent</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Turns at Base (72h)</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;">Note</th>
+            tbl.innerHTML = `<thead><tr style="background:#334155;color:white;position:sticky;top:0;z-index:5;">
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">FIN</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Type</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Body</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Status</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Last Serviced</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Days Since</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Stn</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Agent</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Turns at Base (72h)</th>
+                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Note</th>
             </tr></thead>`;
             const tbody = document.createElement('tbody');
 
