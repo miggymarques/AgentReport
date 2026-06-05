@@ -4980,26 +4980,37 @@
             if (perfHdr) {
                 perfHdr.innerHTML = '';
                 perfHdr.classList.remove('hidden');
+                const mtcCount    = rows.filter(r => r.status === 'MTC').length;
+                const noTurnCount = rows.filter(r => r.status === 'NO_TURNS').length;
+                const p1Due       = rows.filter(r => computeFinPriority(r.fin) === 1).length;
+                const p1Eligible  = eligible.filter(r => computeFinPriority(r.fin) === 1);
+                const p1Serviced  = p1Eligible.filter(r => r.status === 'SERVICED');
+                const p1Pending   = p1Eligible.filter(r => r.status === 'PENDING');
+                const p1Missed    = p1Eligible.filter(r => r.status === 'MISSED');
+                const p1SvcPct    = p1Eligible.length > 0 ? Math.round((p1Serviced.length / p1Eligible.length) * 100) : 0;
+                const svcPct      = confirmedRate !== null ? confirmedRate : 0;
+                const eligColor   = svcPct >= 90 ? '#34d399' : svcPct >= 70 ? '#fb923c' : '#f87171';
+                const p1Color     = p1SvcPct >= 90 ? '#34d399' : p1SvcPct >= 70 ? '#fb923c' : '#f87171';
+                const SEG = (lbl, val, lc, vc) =>
+                    `<span style="color:${lc};font-size:11px;font-family:monospace;font-weight:500;">${lbl}: </span><span style="color:${vc};font-size:11px;font-family:monospace;font-weight:900;">${val}</span>`;
+                const PIPE = `<span style="color:#334155;padding:0 8px;">|</span>`;
                 const summaryDiv = document.createElement('div');
-                summaryDiv.style.cssText = 'padding:10px 12px;background:#1e293b;color:white;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:10px;font-weight:900;letter-spacing:0.05em;text-transform:uppercase;';
-                const rateColor        = confirmedRate === null ? '#94a3b8' : confirmedRate >= 90 ? '#34d399' : confirmedRate >= 70 ? '#fbbf24' : '#f87171';
-                const onTrackColor     = onTrackRate   === null ? '#94a3b8' : onTrackRate   >= 90 ? '#34d399' : onTrackRate   >= 70 ? '#fbbf24' : '#f87171';
+                summaryDiv.style.cssText = 'background:#1e293b;padding:5px 12px;display:flex;flex-direction:column;gap:3px;';
                 summaryDiv.innerHTML = `
-                    <div style="display:flex;flex-direction:column;gap:1px;min-width:56px;">
-                        <span style="color:${rateColor};font-size:18px;font-weight:900;line-height:1;">${confirmedRate !== null ? confirmedRate + '%' : 'N/A'}</span>
-                        <span style="color:#64748b;font-size:9px;letter-spacing:0.04em;">CONFIRMED</span>
+                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:0;">
+                        ${SEG('Total', rows.length,    '#e2e8f0', '#e2e8f0')}${PIPE}
+                        ${SEG('MTC',   mtcCount,       '#c084fc', '#c084fc')}${PIPE}
+                        ${SEG('Not accessible', noTurnCount, '#64748b', '#64748b')}${PIPE}
+                        ${SEG('Svc/72hr', `${serviced.length} / ${svcPct}%`, eligColor, eligColor)}
                     </div>
-                    <div style="display:flex;flex-direction:column;gap:1px;min-width:56px;padding-left:10px;border-left:1px solid #334155;">
-                        <span style="color:${onTrackColor};font-size:18px;font-weight:900;line-height:1;">${onTrackRate !== null ? onTrackRate + '%' : 'N/A'}</span>
-                        <span style="color:#64748b;font-size:9px;letter-spacing:0.04em;">ON TRACK</span>
-                    </div>
-                    <div style="width:1px;background:#334155;align-self:stretch;"></div>
-                    <span style="color:#34d399;">✅ ${serviced.length} Serviced</span>
-                    <span style="color:#fb923c;">⏳ ${pending.length} Pending</span>
-                    <span style="color:#f87171;">❌ ${missed.length} Missed</span>
-                    <span style="color:#c084fc;">⛔ ${rows.filter(r=>r.status==='MTC').length} MTC</span>
-                    <span style="color:#475569;">🚫 ${rows.filter(r=>r.status==='NO_TURNS').length} No Turns</span>
-                    <span style="color:#64748b;margin-left:auto;">${eligible.length} eligible of ${rows.length} total</span>`;
+                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:0;">
+                        ${SEG('P1 Due',    p1Due,               '#e2e8f0', '#e2e8f0')}${PIPE}
+                        ${SEG('Eligible',  p1Eligible.length,   '#e2e8f0', '#e2e8f0')}${PIPE}
+                        ${SEG('Missed',    p1Missed.length,     '#f87171', '#f87171')}${PIPE}
+                        ${SEG('Svc\'d',    p1Serviced.length,   '#34d399', '#34d399')}${PIPE}
+                        ${SEG('Pending',   p1Pending.length,    '#fb923c', '#fb923c')}${PIPE}
+                        ${SEG('P1 Svc\'d', p1SvcPct + '%',      p1Color,   p1Color)}
+                    </div>`;
                 perfHdr.appendChild(summaryDiv);
             }
 
