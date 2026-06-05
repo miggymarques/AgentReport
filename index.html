@@ -1454,16 +1454,15 @@
                 // enter db or sharedDb) are still detectable by renderSyncTable /
                 // renderPriorityList when they build svcCallFins from finTable.
                 // Checks are case-insensitive and cover Comments, IssueDetails, AND SrvcIss.
-                // Once set to true the flag is never cleared — it's append-only.
+                // NOTE: always re-evaluate from the most-recent entry (not append-only) so
+                // that a new import without a service call correctly clears the dot.
                 const _scStr = s => /\b(service\s+calls?|service|stoc\s+calls?|stoc|call)\b/i.test(String(s || ''));
-                if (!finTable[fin].hasServiceCall) {
-                    finTable[fin].hasServiceCall =
-                        !!(entry.ServiceCall    ||
-                           _scStr(entry.Comments)     ||
-                           _scStr(entry.IssueDetails) ||
-                           _scStr(entry.SrvcIss)      ||
-                           _scStr(entry.SrvcIssCAT));
-                }
+                finTable[fin].hasServiceCall =
+                    !!(entry.ServiceCall    ||
+                       _scStr(entry.Comments)     ||
+                       _scStr(entry.IssueDetails) ||
+                       _scStr(entry.SrvcIss)      ||
+                       _scStr(entry.SrvcIssCAT));
 
                 const snapSkip = new Set(['N/A', 'NtRqrd', 'Msng', '', 'RMVD', 'Rmvd']);
 
@@ -6958,19 +6957,17 @@
                         finTable[fin].lastRemoved   = incoming.lastRemoved;
                         finTable[fin].type          = incoming.type || finTable[fin].type;
                         finTable[fin].body          = incoming.body || finTable[fin].body;
-                        // hasServiceCall is append-only — once true it must never be lost during a merge.
-                        // Previously this field was omitted here, causing the blue ● dot to vanish
-                        // on peers after a reconnect/full-sync.
-                        if (incoming.hasServiceCall) finTable[fin].hasServiceCall = true;
+                        // Mirror hasServiceCall from the incoming (newer) record — it reflects
+                        // whether the most-recent entry for this FIN was a service call.
+                        // Using the incoming value directly (not append-only) ensures the dot
+                        // clears correctly when a newer non-service-call entry arrives via P2P.
+                        finTable[fin].hasServiceCall = !!incoming.hasServiceCall;
                         finTable[fin]._ts           = incoming._ts;
                         changed = true;
                     }
-                    // Fallback: incoming is older — only propagate hasServiceCall since
-                    // it is append-only and must never be lost even from a stale record.
-                    else if (incoming.hasServiceCall && !finTable[fin].hasServiceCall) {
-                        finTable[fin].hasServiceCall = true;
-                        changed = true;
-                    }
+                    // Fallback: incoming is older — don't overwrite hasServiceCall since
+                    // our local record is already more recent.
+                    // (No hasServiceCall propagation needed; local state is authoritative.)
                 });
                 // After merging finTable, scrub any asset from lastOnboard/lastRemoved that
                 // our assetIndex places on a DIFFERENT FIN with a newer or equal timestamp.
