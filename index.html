@@ -913,6 +913,7 @@
         let invLastCat = '';   // remembered within an inventory session only
         let invLastIss = '';
         let activeRefTab = 'aircraft';
+        let perfActiveFilter = null; // null = show all; 'SERVICED'|'PENDING'|'MISSED'|'MTC'|'NO_TURNS'
 
         // ─── Storage obfuscation ──────────────────────────────────────────────
         // XOR cipher — keeps data unreadable in DevTools / plain-text storage
@@ -1751,6 +1752,7 @@
             const _ahSum  = document.getElementById('asset-history-summary'); if (tab !== 'assethistory') { _ahSum.classList.add('hidden'); _ahSum.innerHTML = ''; } else { _ahSum.classList.remove('hidden'); }
             if (tab !== 'synctable') { stFilterFin = ''; stFilterAsset = ''; stFilterAgent = ''; stFilterDate = ''; }
             if (tab !== 'assethistory') { ahFilterAsset = ''; ahFilterTr = ''; ahFilterLoc = ''; ahFilterDate = ''; }
+            if (tab !== 'perf') { perfActiveFilter = null; }
             if (tab === 'assethistory') {
                 const el = document.getElementById('assethistory-count-label');
                 if (el) el.textContent = assetHistory.length + ' records';
@@ -4957,15 +4959,10 @@
 
         function renderPerfReport(container) {
             // Capture a single reference timestamp for this entire render pass.
-            // Both computePerfData and getPerfRotationsForFin receive this value so
-            // the 72-hour window boundary and hoursSince are consistent throughout.
             const now = Date.now();
             const { rows, eligible, serviced, pending, missed } = computePerfData(now);
-            // Confirmed rate: only aircraft actually serviced
-            // On-Track rate: serviced + pending (still has time today)
-            const confirmedRate = eligible.length > 0 ? Math.round((serviced.length / eligible.length) * 100) : null;
-            const onTrackRate   = eligible.length > 0 ? Math.round(((serviced.length + pending.length) / eligible.length) * 100) : null;
-            const CELL    = 'padding:5px 8px;white-space:nowrap;border-right:1px solid #f1f5f9;font-size:10px;';
+
+            const CELL = 'padding:5px 8px;white-space:nowrap;border-right:1px solid #f1f5f9;font-size:10px;';
             const statusStyle = {
                 SERVICED: 'background:#dcfce7;color:#166534;font-weight:900;',
                 PENDING:  'background:#fff7ed;color:#c2410c;font-weight:900;',
@@ -4974,48 +4971,159 @@
                 NO_TURNS: 'background:#f8fafc;color:#94a3b8;font-weight:700;',
             };
 
-            // ── Summary bar — pinned above the scroll area ────────────────────
+            // ── Summary header — two-section compact design ───────────────────
             const perfHdr = document.getElementById('perf-sticky-header');
             if (perfHdr) {
                 perfHdr.innerHTML = '';
                 perfHdr.classList.remove('hidden');
+
                 const mtcCount    = rows.filter(r => r.status === 'MTC').length;
                 const noTurnCount = rows.filter(r => r.status === 'NO_TURNS').length;
-                const p1Due       = rows.filter(r => computeFinPriority(r.fin) === 1).length;
-                const p1Eligible  = eligible.filter(r => computeFinPriority(r.fin) === 1);
-                const p1Serviced  = p1Eligible.filter(r => r.status === 'SERVICED');
-                const p1Pending   = p1Eligible.filter(r => r.status === 'PENDING');
-                const p1Missed    = p1Eligible.filter(r => r.status === 'MISSED');
-                const p1SvcPct    = p1Eligible.length > 0 ? Math.round((p1Serviced.length / p1Eligible.length) * 100) : 0;
-                const svcPct      = confirmedRate !== null ? confirmedRate : 0;
+                const svcbleCount = eligible.length; // after excluding MTC + NO_TURNS
+                const svcPct      = svcbleCount > 0 ? Math.round((serviced.length / svcbleCount) * 100) : 0;
                 const eligColor   = svcPct >= 90 ? '#34d399' : svcPct >= 70 ? '#fb923c' : '#f87171';
-                const p1Color     = p1SvcPct >= 90 ? '#34d399' : p1SvcPct >= 70 ? '#fb923c' : '#f87171';
-                const SEG = (lbl, val, lc, vc) =>
-                    `<span style="color:${lc};font-size:11px;font-family:monospace;font-weight:500;">${lbl}: </span><span style="color:${vc};font-size:11px;font-family:monospace;font-weight:900;">${val}</span>`;
-                const PIPE = `<span style="color:#334155;padding:0 8px;">|</span>`;
-                const summaryDiv = document.createElement('div');
-                summaryDiv.style.cssText = 'background:#1e293b;padding:5px 12px;display:flex;flex-direction:column;gap:3px;';
-                summaryDiv.innerHTML = `
-                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:0;">
-                        ${SEG('Total', rows.length,    '#e2e8f0', '#e2e8f0')}${PIPE}
-                        ${SEG('MTC',   mtcCount,       '#c084fc', '#c084fc')}${PIPE}
-                        ${SEG('Not accessible', noTurnCount, '#64748b', '#64748b')}${PIPE}
-                        ${SEG('Svc/72hr', `${serviced.length} / ${svcPct}%`, eligColor, eligColor)}
+                const barColor    = eligColor;
+
+                // P1 72h
+                const p1Eligible = eligible.filter(r => computeFinPriority(r.fin) === 1);
+                const p1Serviced = p1Eligible.filter(r => r.status === 'SERVICED');
+                const p1Pending  = p1Eligible.filter(r => r.status === 'PENDING');
+                const p1Missed   = p1Eligible.filter(r => r.status === 'MISSED');
+                const p1SvcPct   = p1Eligible.length > 0 ? Math.round((p1Serviced.length / p1Eligible.length) * 100) : 0;
+                const p1Color    = p1SvcPct >= 90 ? '#34d399' : p1SvcPct >= 70 ? '#fb923c' : '#f87171';
+
+                // Today (PENDING = due today)
+                const todayTotal    = rows.filter(r => r.status === 'PENDING' || (r.status === 'SERVICED' && r.hoursSince !== null && Math.floor(r.hoursSince/24) >= 3));
+                // "Due today" = all PENDING (eligible, due this cycle) + already serviced today (hoursSince ~0-24h)
+                const dueToday      = rows.filter(r => r.status === 'PENDING');
+                const servicedToday = eligible.filter(r => r.status === 'SERVICED' && r.hoursSince !== null && r.hoursSince <= 24);
+                const todayMtc      = rows.filter(r => r.status === 'MTC');
+                const todayNT       = rows.filter(r => r.status === 'NO_TURNS');
+                // Serviceable today = pending + already serviced today (excludes MTC/NO_TURNS)
+                const svcbleToday   = dueToday.length + servicedToday.length;
+                const todayPct      = svcbleToday > 0 ? Math.round((servicedToday.length / svcbleToday) * 100) : 0;
+                const todayColor    = todayPct >= 90 ? '#34d399' : todayPct >= 70 ? '#fb923c' : '#f87171';
+
+                // P1 today
+                const p1DueToday      = dueToday.filter(r => computeFinPriority(r.fin) === 1);
+                const p1ServicedToday = servicedToday.filter(r => computeFinPriority(r.fin) === 1);
+                const p1TodayTotal    = p1DueToday.length + p1ServicedToday.length;
+                const p1TodayPct      = p1TodayTotal > 0 ? Math.round((p1ServicedToday.length / p1TodayTotal) * 100) : 0;
+                const p1TodayColor    = p1TodayPct >= 90 ? '#34d399' : p1TodayPct >= 70 ? '#fb923c' : '#f87171';
+
+                // Helper: build a clickable filter chip
+                // status = filter key or null (clear); label = display text; count = number; color = accent hex
+                const chip = (status, label, count, accentColor, bgColor) => {
+                    const isActive = perfActiveFilter === status;
+                    const border   = isActive ? `2px solid ${accentColor}` : `1px solid #334155`;
+                    const bg       = isActive ? bgColor : '#1e293b';
+                    const cursor   = 'pointer';
+                    return `<span onclick="setPerfFilter('${status}')" style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:3px;border:${border};background:${bg};cursor:${cursor};user-select:none;transition:all 0.1s;">` +
+                        `<span style="font-size:9px;font-weight:700;color:#94a3b8;">${label}</span>` +
+                        `<span style="font-size:11px;font-weight:900;color:${accentColor};">${count}</span>` +
+                    `</span>`;
+                };
+
+                const PIPE = `<span style="color:#1e3a5f;padding:0 4px;">|</span>`;
+                const SEG  = (lbl, val, vc) =>
+                    `<span style="font-size:10px;font-family:monospace;"><span style="color:#64748b;">${lbl} </span><span style="color:${vc};font-weight:900;">${val}</span></span>`;
+
+                // Clear-filter chip
+                const clearChip = perfActiveFilter
+                    ? `<span onclick="setPerfFilter(null)" style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:3px;border:1px solid #475569;background:#0f172a;cursor:pointer;user-select:none;font-size:9px;font-weight:900;color:#94a3b8;">✕ ALL</span>`
+                    : '';
+
+                const hdr = document.createElement('div');
+                hdr.style.cssText = 'background:#0f172a;font-family:monospace;';
+
+                hdr.innerHTML = `
+                  <!-- Section 1: 72h Performance -->
+                  <div style="padding:4px 10px 3px;border-bottom:1px solid #1e293b;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                      <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.12em;color:#3b82f6;background:#1e3a5f;padding:1px 6px;border-radius:2px;">72-HR / 3-Day</span>
+                      <span style="font-size:9px;color:#475569;">excl. MTC&nbsp;·&nbsp;No Turns</span>
                     </div>
-                    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:0;">
-                        ${SEG('P1 Due',    p1Due,               '#e2e8f0', '#e2e8f0')}${PIPE}
-                        ${SEG('Eligible',  p1Eligible.length,   '#e2e8f0', '#e2e8f0')}${PIPE}
-                        ${SEG('Missed',    p1Missed.length,     '#f87171', '#f87171')}${PIPE}
-                        ${SEG('Svc\'d',    p1Serviced.length,   '#34d399', '#34d399')}${PIPE}
-                        ${SEG('Pending',   p1Pending.length,    '#fb923c', '#fb923c')}${PIPE}
-                        ${SEG('P1 Svc\'d', p1SvcPct + '%',      p1Color,   p1Color)}
-                    </div>`;
-                perfHdr.appendChild(summaryDiv);
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                      <div style="display:flex;align-items:baseline;gap:3px;">
+                        <span style="font-size:18px;font-weight:900;color:${barColor};line-height:1;">${serviced.length}</span>
+                        <span style="font-size:11px;color:#475569;">/ ${svcbleCount}</span>
+                        <span style="font-size:16px;font-weight:900;color:${barColor};margin-left:4px;">${svcPct}%</span>
+                      </div>
+                      <div style="flex:1;min-width:60px;">
+                        <div style="height:4px;background:#1e293b;border-radius:2px;overflow:hidden;">
+                          <div style="width:${svcPct}%;height:100%;background:${barColor};border-radius:2px;"></div>
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                        ${chip('SERVICED', 'Svc\'d', serviced.length, '#34d399', '#0d2d1e')}
+                        ${chip('MISSED',   'Missed', missed.length,   '#f87171', '#2d0d0d')}
+                        ${chip('MTC',      'MTC',    mtcCount,        '#c084fc', '#1e0d2e')}
+                        ${chip('NO_TURNS', 'No Turns', noTurnCount,   '#64748b', '#1e293b')}
+                        ${clearChip}
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0;margin-top:2px;flex-wrap:wrap;">
+                      <span style="font-size:8px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
+                      ${SEG('Elig', p1Eligible.length, '#e2e8f0')}${PIPE}
+                      ${SEG('Svc\'d', p1Serviced.length, '#34d399')}${PIPE}
+                      ${SEG('Miss', p1Missed.length, '#f87171')}${PIPE}
+                      ${SEG('Pend', p1Pending.length, '#fb923c')}${PIPE}
+                      <span style="font-size:10px;font-weight:900;color:${p1Color};">${p1SvcPct}%</span>
+                    </div>
+                  </div>
+
+                  <!-- Section 2: Due Today -->
+                  <div style="padding:4px 10px 3px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                      <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.12em;color:#4ade80;background:#0d2d1e;padding:1px 6px;border-radius:2px;">Due Today</span>
+                      <span style="font-size:9px;color:#475569;">excl. MTC&nbsp;·&nbsp;No Turns</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                      <div style="display:flex;align-items:baseline;gap:3px;">
+                        <span style="font-size:18px;font-weight:900;color:${todayColor};line-height:1;">${servicedToday.length}</span>
+                        <span style="font-size:11px;color:#475569;">/ ${svcbleToday}</span>
+                        <span style="font-size:16px;font-weight:900;color:${todayColor};margin-left:4px;">${todayPct}%</span>
+                      </div>
+                      <div style="flex:1;min-width:60px;">
+                        <div style="height:4px;background:#1e293b;border-radius:2px;overflow:hidden;">
+                          <div style="width:${todayPct}%;height:100%;background:${todayColor};border-radius:2px;"></div>
+                        </div>
+                      </div>
+                      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                        ${chip('PENDING', 'Pending', dueToday.length, '#fb923c', '#2d1a08')}
+                        ${clearChip}
+                      </div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:0;margin-top:2px;flex-wrap:wrap;">
+                      <span style="font-size:8px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
+                      ${SEG('Due', p1TodayTotal, '#e2e8f0')}${PIPE}
+                      ${SEG('Svc\'d', p1ServicedToday.length, '#34d399')}${PIPE}
+                      ${SEG('Pend', p1DueToday.length, '#fb923c')}${PIPE}
+                      <span style="font-size:10px;font-weight:900;color:${p1TodayColor};">${p1TodayPct}%</span>
+                    </div>
+                  </div>
+                `;
+                perfHdr.appendChild(hdr);
             }
 
-            // ── Table — single scroll container; thead is sticky-top so it pins
-            // vertically while the whole table (header included) scrolls horizontally.
-            // ref-editor-list owns both scroll axes for the perf tab.
+            // ── Table ─────────────────────────────────────────────────────────
+            // Apply active filter if set
+            const displayRows = perfActiveFilter
+                ? rows.filter(r => r.status === perfActiveFilter)
+                : rows;
+
+            // Show filter label strip if active
+            if (perfActiveFilter) {
+                const filterStrip = document.createElement('div');
+                filterStrip.style.cssText = 'background:#1e2a3a;padding:3px 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #334155;';
+                const statusLabels = { SERVICED:'Serviced', PENDING:'Pending Today', MISSED:'Missed', MTC:'In MTC', NO_TURNS:'No Turns' };
+                filterStrip.innerHTML = `<span style="font-size:9px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:0.1em;">Filtered:</span>` +
+                    `<span style="font-size:9px;font-weight:900;color:#93c5fd;">${statusLabels[perfActiveFilter] || perfActiveFilter}</span>` +
+                    `<span style="font-size:9px;color:#475569;">(${displayRows.length} aircraft)</span>` +
+                    `<span onclick="setPerfFilter(null)" style="margin-left:auto;font-size:9px;font-weight:900;color:#475569;cursor:pointer;padding:1px 5px;border:1px solid #334155;border-radius:2px;">✕ Clear</span>`;
+                container.appendChild(filterStrip);
+            }
+
             const wrap = document.createElement('div');
             wrap.id = 'perf-body-scroll';
             const tbl = document.createElement('table');
@@ -5034,18 +5142,17 @@
             </tr></thead>`;
             const tbody = document.createElement('tbody');
 
-            rows.forEach((r, i) => {
-                const rowBg      = i % 2 === 0 ? '#ffffff' : '#f8fafc';
-                const tr         = document.createElement('tr');
+            displayRows.forEach((r, i) => {
+                const rowBg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+                const tr    = document.createElement('tr');
                 tr.style.background = rowBg;
-                tr.onmouseenter  = () => tr.style.background = '#f0f9ff';
-                tr.onmouseleave  = () => tr.style.background = rowBg;
+                tr.onmouseenter = () => tr.style.background = '#f0f9ff';
+                tr.onmouseleave = () => tr.style.background = rowBg;
 
-                const turnsSummary = r.rots.length > 0 ? r.rots.map(rot => fmtRot(rot)).join(' · ') : '—';
-                const note         = r.explanation || (r.status === 'MTC' ? `MTC @ ${r.mtcStn || '?'}` : '');
-                const hoursDisplay = fmtDays(r.hoursSince);
-                const daysSince    = r.hoursSince !== null ? Math.floor(r.hoursSince / 24) : null;
-                // Colour the days cell: red if missed (4+ days), orange if pending (3 days), grey otherwise
+                const turnsSummary  = r.rots.length > 0 ? r.rots.map(rot => fmtRot(rot)).join(' · ') : '—';
+                const note          = r.explanation || (r.status === 'MTC' ? `MTC @ ${r.mtcStn || '?'}` : '');
+                const hoursDisplay  = fmtDays(r.hoursSince);
+                const daysSince     = r.hoursSince !== null ? Math.floor(r.hoursSince / 24) : null;
                 const daysCellColor = daysSince === null ? '#94a3b8'
                     : r.status === 'MISSED'  ? '#ef4444'
                     : r.status === 'PENDING' ? '#ea580c'
@@ -5069,6 +5176,16 @@
             tbl.appendChild(tbody);
             wrap.appendChild(tbl);
             container.appendChild(wrap);
+        }
+
+        // Called by filter chips — sets filter and re-renders the perf tab
+        function setPerfFilter(status) {
+            perfActiveFilter = status || null;
+            const container = document.getElementById('ref-editor-list');
+            if (container) {
+                container.innerHTML = '';
+                renderPerfReport(container);
+            }
         }
 
         // Export 2-sheet XLSX: Sheet 1 = service records, Sheet 2 = 72h perf report
