@@ -4876,9 +4876,10 @@
         // when they render at approximately the same moment.
         function computePerfData(now) {
             if (now === undefined) now = Date.now();
-            const windowStart = now - PERF_WINDOW_MS;
-            const allFins     = new Set([...Object.keys(aircraftRef), ...Object.keys(finTable)]);
-            const rows        = [];
+            const windowStart  = now - PERF_WINDOW_MS;
+            const next24End    = now + 24 * 3600 * 1000; // 24 h from now — the "today" service window
+            const allFins      = new Set([...Object.keys(aircraftRef), ...Object.keys(finTable)]);
+            const rows         = [];
 
             allFins.forEach(fin => {
                 if (!/^(AC|RV|QK)\d{3,4}$/.test(fin)) return;
@@ -4910,13 +4911,32 @@
                 }
 
                 if (servicedInWindow) {
-                    rows.push({ fin, type, body, status: 'SERVICED', statusLabel: 'Serviced', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true });
+                    // Already serviced within the 72h window.
+                    // Check if this FIN was also part of the "due today" obligation set —
+                    // i.e. it was at 48-71h when it got serviced so it needed to be hit
+                    // today to stay in cycle.  We approximate this by checking whether
+                    // it would have been DUE_TODAY had it not been serviced: hoursSince
+                    // would be 48-95h (2-3 completed days) AND it has/had a serviceable
+                    // turn at a PERF_STATION within the next-24h window.
+                    const wouldBeDueToday = hoursSince !== null && hoursSince >= 48 && hoursSince < 96;
+                    rows.push({ fin, type, body, status: 'SERVICED', statusLabel: 'Serviced', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, dueToday: wouldBeDueToday });
                 } else {
-                    // PENDING: aircraft just crossed the 72-hour mark (day 3) — it's due
-                    // for service today but hasn't been missed yet.  Once it passes 96 h
-                    // without service it moves to MISSED (the 3rd day has come and gone).
                     const daysSince = hoursSince !== null ? Math.floor(hoursSince / 24) : null;
-                    const isPending  = daysSince !== null && daysSince === 3;   // exactly on day 3
+
+                    // DUE_TODAY: still inside the 72h window (48–71 h since last service,
+                    // i.e. day 2) BUT has a serviceable turn at a PERF_STATION within the
+                    // next 24 hours — meaning it must be hit today or it will breach the cycle.
+                    // Also treat aircraft already past 72h (daysSince >= 3) as due today
+                    // rather than immediately missed — they're overdue but still actionable today.
+                    const has_turn_today = nonMtcRots.some(r => {
+                        const odtTs = r.odt ? new Date(r.odt).getTime() : 0;
+                        const idtTs = r.idt ? new Date(r.idt).getTime() : 0;
+                        // Turn is "today" if it departs or arrives within the next 24h window
+                        return (odtTs >= now && odtTs <= next24End) || (idtTs >= now && idtTs <= next24End);
+                    });
+
+                    const isDueToday = (daysSince !== null && daysSince >= 2 && has_turn_today)
+                                    || (daysSince !== null && daysSince >= 3);
 
                     let explanation = 'No service record in 72h window';
                     if (lastServiceTs && !PERF_STATIONS.has(lastServiceStation.toUpperCase()) && lastServiceStation) {
@@ -4924,24 +4944,34 @@
                     } else if (!lastServiceTs) {
                         explanation = 'Never serviced';
                     } else if (hoursSince !== null) {
-                        explanation = isPending
+                        explanation = isDueToday
                             ? `Due today — last service ${fmtDays(hoursSince)} ago at ${lastServiceStation || '?'}`
                             : `Last service ${fmtDays(hoursSince)} ago at ${lastServiceStation || '?'}`;
                     }
 
-                    if (isPending) {
-                        rows.push({ fin, type, body, status: 'PENDING', statusLabel: 'Pending', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, explanation });
+                    if (isDueToday) {
+                        // Split overdue (≥72h) vs pending-today (48-71h with turn today)
+                        // into one unified DUE_TODAY bucket so the header counts are correct,
+                        // but carry a flag so the table can distinguish them if needed.
+                        const isOverdue = daysSince !== null && daysSince >= 3;
+                        rows.push({ fin, type, body, status: 'DUE_TODAY', statusLabel: isOverdue ? 'Overdue' : 'Due Today', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, explanation, dueToday: true, isOverdue });
                     } else {
                         rows.push({ fin, type, body, status: 'MISSED', statusLabel: 'Missed', rots, lastServiceDate, lastServiceStation, lastServiceAgent, hoursSince, eligible: true, explanation });
                     }
                 }
             });
 
-            // MISSED first (most urgent), then PENDING (due today), then SERVICED,
-            // then ineligible categories.
+            // Sort: DUE_TODAY overdue first, then DUE_TODAY pending, then SERVICED,
+            // then MISSED (no reachable turn today), then ineligible.
             rows.sort((a, b) => {
-                const order = { PENDING: 0, MISSED: 1, SERVICED: 2, MTC: 3, NO_TURNS: 4 };
+                const order = { DUE_TODAY: 0, MISSED: 1, SERVICED: 2, MTC: 3, NO_TURNS: 4 };
                 if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
+                // Within DUE_TODAY: overdue (isOverdue) first, then by hours descending
+                if (a.status === 'DUE_TODAY' && b.status === 'DUE_TODAY') {
+                    if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+                    const ah = a.hoursSince ?? 0, bh = b.hoursSince ?? 0;
+                    if (bh !== ah) return bh - ah;
+                }
                 // Within MISSED: most overdue first
                 if (a.status === 'MISSED' && b.status === 'MISSED') {
                     const ah = a.hoursSince ?? 0, bh = b.hoursSince ?? 0;
@@ -4950,25 +4980,26 @@
                 return a.fin.localeCompare(b.fin);
             });
 
-            const eligible = rows.filter(r => r.eligible);
-            const serviced = eligible.filter(r => r.status === 'SERVICED');
-            const pending  = eligible.filter(r => r.status === 'PENDING');
-            const missed   = eligible.filter(r => r.status === 'MISSED');
-            return { rows, eligible, serviced, pending, missed };
+            const eligible      = rows.filter(r => r.eligible);
+            const serviced      = eligible.filter(r => r.status === 'SERVICED');
+            const dueToday      = eligible.filter(r => r.status === 'DUE_TODAY');        // unserviced, due today
+            const dueTodaySvcd  = eligible.filter(r => r.status === 'SERVICED' && r.dueToday); // already serviced, were due today
+            const missed        = eligible.filter(r => r.status === 'MISSED');
+            return { rows, eligible, serviced, dueToday, dueTodaySvcd, missed };
         }
 
         function renderPerfReport(container) {
             // Capture a single reference timestamp for this entire render pass.
             const now = Date.now();
-            const { rows, eligible, serviced, pending, missed } = computePerfData(now);
+            const { rows, eligible, serviced, dueToday, dueTodaySvcd, missed } = computePerfData(now);
 
             const CELL = 'padding:5px 8px;white-space:nowrap;border-right:1px solid #f1f5f9;font-size:10px;';
             const statusStyle = {
-                SERVICED: 'background:#dcfce7;color:#166534;font-weight:900;',
-                PENDING:  'background:#fff7ed;color:#c2410c;font-weight:900;',
-                MISSED:   'background:#fee2e2;color:#991b1b;font-weight:900;',
-                MTC:      'background:#f3e8ff;color:#6b21a8;font-weight:900;',
-                NO_TURNS: 'background:#f8fafc;color:#94a3b8;font-weight:700;',
+                SERVICED:  'background:#dcfce7;color:#166534;font-weight:900;',
+                DUE_TODAY: 'background:#fff7ed;color:#c2410c;font-weight:900;',
+                MISSED:    'background:#fee2e2;color:#991b1b;font-weight:900;',
+                MTC:       'background:#f3e8ff;color:#6b21a8;font-weight:900;',
+                NO_TURNS:  'background:#f8fafc;color:#94a3b8;font-weight:700;',
             };
 
             // ── Summary header — two-section compact design ───────────────────
@@ -4979,7 +5010,10 @@
 
                 const mtcCount    = rows.filter(r => r.status === 'MTC').length;
                 const noTurnCount = rows.filter(r => r.status === 'NO_TURNS').length;
-                const svcbleCount = eligible.length; // after excluding MTC + NO_TURNS
+                // 72h rate denominator = only aircraft whose window has definitively closed
+                // (SERVICED + MISSED). DUE_TODAY are still actionable today — counting them
+                // against the rate would penalise aircraft that haven't yet had a chance to miss.
+                const svcbleCount = serviced.length + missed.length;
                 const svcPct      = svcbleCount > 0 ? Math.round((serviced.length / svcbleCount) * 100) : 0;
                 const eligColor   = svcPct >= 90 ? '#34d399' : svcPct >= 70 ? '#fb923c' : '#f87171';
                 const barColor    = eligColor;
@@ -4987,29 +5021,26 @@
                 // P1 72h
                 const p1Eligible = eligible.filter(r => computeFinPriority(r.fin) === 1);
                 const p1Serviced = p1Eligible.filter(r => r.status === 'SERVICED');
-                const p1Pending  = p1Eligible.filter(r => r.status === 'PENDING');
+                const p1DueToday = p1Eligible.filter(r => r.status === 'DUE_TODAY');
                 const p1Missed   = p1Eligible.filter(r => r.status === 'MISSED');
-                const p1SvcPct   = p1Eligible.length > 0 ? Math.round((p1Serviced.length / p1Eligible.length) * 100) : 0;
+                const p1SvcCount = p1Serviced.length + p1Missed.length; // same closed-window logic as overall
+                const p1SvcPct   = p1SvcCount > 0 ? Math.round((p1Serviced.length / p1SvcCount) * 100) : 0;
                 const p1Color    = p1SvcPct >= 90 ? '#34d399' : p1SvcPct >= 70 ? '#fb923c' : '#f87171';
 
-                // Today (PENDING = due today)
-                const todayTotal    = rows.filter(r => r.status === 'PENDING' || (r.status === 'SERVICED' && r.hoursSince !== null && Math.floor(r.hoursSince/24) >= 3));
-                // "Due today" = all PENDING (eligible, due this cycle) + already serviced today (hoursSince ~0-24h)
-                const dueToday      = rows.filter(r => r.status === 'PENDING');
-                const servicedToday = eligible.filter(r => r.status === 'SERVICED' && r.hoursSince !== null && r.hoursSince <= 24);
-                const todayMtc      = rows.filter(r => r.status === 'MTC');
-                const todayNT       = rows.filter(r => r.status === 'NO_TURNS');
-                // Serviceable today = pending + already serviced today (excludes MTC/NO_TURNS)
-                const svcbleToday   = dueToday.length + servicedToday.length;
-                const todayPct      = svcbleToday > 0 ? Math.round((servicedToday.length / svcbleToday) * 100) : 0;
-                const todayColor    = todayPct >= 90 ? '#34d399' : todayPct >= 70 ? '#fb923c' : '#f87171';
+                // Due Today section:
+                //   dueToday     = unserviced FINs that must be hit today (DUE_TODAY status)
+                //   dueTodaySvcd = FINs already serviced that were in the "due today" obligation set
+                //   svcbleToday  = total obligation (serviced + unserviced)
+                const svcbleToday  = dueToday.length + dueTodaySvcd.length;
+                const todayPct     = svcbleToday > 0 ? Math.round((dueTodaySvcd.length / svcbleToday) * 100) : 0;
+                const todayColor   = todayPct >= 90 ? '#34d399' : todayPct >= 70 ? '#fb923c' : '#f87171';
 
-                // P1 today
-                const p1DueToday      = dueToday.filter(r => computeFinPriority(r.fin) === 1);
-                const p1ServicedToday = servicedToday.filter(r => computeFinPriority(r.fin) === 1);
-                const p1TodayTotal    = p1DueToday.length + p1ServicedToday.length;
-                const p1TodayPct      = p1TodayTotal > 0 ? Math.round((p1ServicedToday.length / p1TodayTotal) * 100) : 0;
-                const p1TodayColor    = p1TodayPct >= 90 ? '#34d399' : p1TodayPct >= 70 ? '#fb923c' : '#f87171';
+                // P1 Due Today
+                const p1DueTodayAll  = p1DueToday;
+                const p1DueTodaySvcd = p1Eligible.filter(r => r.status === 'SERVICED' && r.dueToday);
+                const p1TodayTotal   = p1DueTodayAll.length + p1DueTodaySvcd.length;
+                const p1TodayPct     = p1TodayTotal > 0 ? Math.round((p1DueTodaySvcd.length / p1TodayTotal) * 100) : 0;
+                const p1TodayColor   = p1TodayPct >= 90 ? '#34d399' : p1TodayPct >= 70 ? '#fb923c' : '#f87171';
 
                 // Helper: build a clickable filter chip
                 // status = filter key or null (clear); label = display text; count = number; color = accent hex
@@ -5064,10 +5095,10 @@
                     </div>
                     <div style="display:flex;align-items:center;gap:0;margin-top:2px;flex-wrap:wrap;">
                       <span style="font-size:8px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
-                      ${SEG('Elig', p1Eligible.length, '#e2e8f0')}${PIPE}
+                      ${SEG('Elig', p1SvcCount, '#e2e8f0')}${PIPE}
                       ${SEG('Svc\'d', p1Serviced.length, '#34d399')}${PIPE}
                       ${SEG('Miss', p1Missed.length, '#f87171')}${PIPE}
-                      ${SEG('Pend', p1Pending.length, '#fb923c')}${PIPE}
+                      ${SEG('Due', p1DueToday.length, '#fb923c')}${PIPE}
                       <span style="font-size:10px;font-weight:900;color:${p1Color};">${p1SvcPct}%</span>
                     </div>
                   </div>
@@ -5080,7 +5111,7 @@
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:baseline;gap:3px;">
-                        <span style="font-size:18px;font-weight:900;color:${todayColor};line-height:1;">${servicedToday.length}</span>
+                        <span style="font-size:18px;font-weight:900;color:${todayColor};line-height:1;">${dueTodaySvcd.length}</span>
                         <span style="font-size:11px;color:#475569;">/ ${svcbleToday}</span>
                         <span style="font-size:16px;font-weight:900;color:${todayColor};margin-left:4px;">${todayPct}%</span>
                       </div>
@@ -5090,15 +5121,15 @@
                         </div>
                       </div>
                       <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
-                        ${chip('PENDING', 'Pending', dueToday.length, '#fb923c', '#2d1a08')}
+                        ${chip('DUE_TODAY', 'Due Today', dueToday.length, '#fb923c', '#2d1a08')}
                         ${clearChip}
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:0;margin-top:2px;flex-wrap:wrap;">
                       <span style="font-size:8px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
                       ${SEG('Due', p1TodayTotal, '#e2e8f0')}${PIPE}
-                      ${SEG('Svc\'d', p1ServicedToday.length, '#34d399')}${PIPE}
-                      ${SEG('Pend', p1DueToday.length, '#fb923c')}${PIPE}
+                      ${SEG('Svc\'d', p1DueTodaySvcd.length, '#34d399')}${PIPE}
+                      ${SEG('Pend', p1DueTodayAll.length, '#fb923c')}${PIPE}
                       <span style="font-size:10px;font-weight:900;color:${p1TodayColor};">${p1TodayPct}%</span>
                     </div>
                   </div>
@@ -5116,7 +5147,7 @@
             if (perfActiveFilter) {
                 const filterStrip = document.createElement('div');
                 filterStrip.style.cssText = 'background:#1e2a3a;padding:3px 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #334155;';
-                const statusLabels = { SERVICED:'Serviced', PENDING:'Pending Today', MISSED:'Missed', MTC:'In MTC', NO_TURNS:'No Turns' };
+                const statusLabels = { SERVICED:'Serviced', DUE_TODAY:'Due Today', MISSED:'Missed', MTC:'In MTC', NO_TURNS:'No Turns' };
                 filterStrip.innerHTML = `<span style="font-size:9px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:0.1em;">Filtered:</span>` +
                     `<span style="font-size:9px;font-weight:900;color:#93c5fd;">${statusLabels[perfActiveFilter] || perfActiveFilter}</span>` +
                     `<span style="font-size:9px;color:#475569;">(${displayRows.length} aircraft)</span>` +
@@ -5154,10 +5185,10 @@
                 const hoursDisplay  = fmtDays(r.hoursSince);
                 const daysSince     = r.hoursSince !== null ? Math.floor(r.hoursSince / 24) : null;
                 const daysCellColor = daysSince === null ? '#94a3b8'
-                    : r.status === 'MISSED'  ? '#ef4444'
-                    : r.status === 'PENDING' ? '#ea580c'
+                    : r.status === 'MISSED'    ? '#ef4444'
+                    : r.status === 'DUE_TODAY' ? '#ea580c'
                     : '#475569';
-                const daysCellWeight = (r.status === 'MISSED' || r.status === 'PENDING') ? '900' : '400';
+                const daysCellWeight = (r.status === 'MISSED' || r.status === 'DUE_TODAY') ? '900' : '400';
 
                 tr.innerHTML = `
                     <td style="${CELL}font-family:monospace;font-weight:900;color:#2563eb;">${r.fin}</td>
