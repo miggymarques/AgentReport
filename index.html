@@ -5057,7 +5057,7 @@
 
                 const PIPE = `<span style="color:#1e3a5f;padding:0 4px;">|</span>`;
                 const SEG  = (lbl, val, vc) =>
-                    `<span style="font-size:10px;font-family:monospace;"><span style="color:#64748b;">${lbl} </span><span style="color:${vc};font-weight:900;">${val}</span></span>`;
+                    `<span style="font-size:9px;font-family:monospace;"><span style="color:#94a3b8;font-weight:700;">${lbl} </span><span style="color:${vc};font-weight:900;">${val}</span></span>`;
 
                 // Clear-filter chip
                 const clearChip = perfActiveFilter
@@ -5070,9 +5070,15 @@
                 hdr.innerHTML = `
                   <!-- Section 1: 72h Performance -->
                   <div style="padding:4px 10px 3px;border-bottom:1px solid #1e293b;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
-                      <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.12em;color:#3b82f6;background:#1e3a5f;padding:1px 6px;border-radius:2px;">72-HR / 3-Day</span>
-                      <span style="font-size:9px;color:#475569;">excl. MTC&nbsp;·&nbsp;No Turns</span>
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
+                      <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.12em;color:#3b82f6;background:#1e3a5f;padding:1px 6px;border-radius:2px;flex-shrink:0;">72-HR / 3-Day</span>
+                      <span style="font-size:8px;font-weight:700;color:#94a3b8;">${rows.length}&nbsp;total</span>
+                      <span style="color:#1e3a5f;font-size:8px;">·</span>
+                      <span style="font-size:8px;font-weight:700;color:#94a3b8;">Elig&nbsp;${eligible.length}</span>
+                      <span style="color:#1e3a5f;font-size:8px;">·</span>
+                      <span style="font-size:8px;font-weight:700;color:#c084fc;">MTC&nbsp;${mtcCount}</span>
+                      <span style="color:#1e3a5f;font-size:8px;">·</span>
+                      <span style="font-size:8px;font-weight:700;color:#94a3b8;">No&nbsp;Turns&nbsp;${noTurnCount}</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:baseline;gap:3px;">
@@ -5094,20 +5100,19 @@
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:0;margin-top:2px;flex-wrap:wrap;">
-                      <span style="font-size:8px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
+                      <span style="font-size:7px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
                       ${SEG('Elig', p1SvcCount, '#e2e8f0')}${PIPE}
                       ${SEG('Svc\'d', p1Serviced.length, '#34d399')}${PIPE}
                       ${SEG('Miss', p1Missed.length, '#f87171')}${PIPE}
                       ${SEG('Due', p1DueToday.length, '#fb923c')}${PIPE}
-                      <span style="font-size:10px;font-weight:900;color:${p1Color};">${p1SvcPct}%</span>
+                      <span style="font-size:9px;font-weight:900;color:${p1Color};">${p1SvcPct}%</span>
                     </div>
                   </div>
 
                   <!-- Section 2: Due Today -->
                   <div style="padding:4px 10px 3px;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+                    <div style="display:flex;align-items:center;margin-bottom:3px;">
                       <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.12em;color:#4ade80;background:#0d2d1e;padding:1px 6px;border-radius:2px;">Due Today</span>
-                      <span style="font-size:9px;color:#475569;">excl. MTC&nbsp;·&nbsp;No Turns</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                       <div style="display:flex;align-items:baseline;gap:3px;">
@@ -5126,11 +5131,11 @@
                       </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:0;margin-top:2px;flex-wrap:wrap;">
-                      <span style="font-size:8px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
+                      <span style="font-size:7px;font-weight:900;color:#475569;margin-right:5px;">P1</span>
                       ${SEG('Due', p1TodayTotal, '#e2e8f0')}${PIPE}
                       ${SEG('Svc\'d', p1DueTodaySvcd.length, '#34d399')}${PIPE}
                       ${SEG('Pend', p1DueTodayAll.length, '#fb923c')}${PIPE}
-                      <span style="font-size:10px;font-weight:900;color:${p1TodayColor};">${p1TodayPct}%</span>
+                      <span style="font-size:9px;font-weight:900;color:${p1TodayColor};">${p1TodayPct}%</span>
                     </div>
                   </div>
                 `;
