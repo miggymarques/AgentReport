@@ -5008,114 +5008,177 @@
                 perfHdr.innerHTML = '';
                 perfHdr.classList.remove('hidden');
 
+                // Overall MTC / No-Turns counts across full 72h window (for pill filters)
                 const mtcCount    = rows.filter(r => r.status === 'MTC').length;
                 const noTurnCount = rows.filter(r => r.status === 'NO_TURNS').length;
-                // 72h rate denominator = only aircraft whose window has definitively closed
-                // (SERVICED + MISSED). DUE_TODAY are still actionable today — counting them
-                // against the rate would penalise aircraft that haven't yet had a chance to miss.
-                const svcbleCount = serviced.length + missed.length;
-                const svcPct      = svcbleCount > 0 ? Math.round((serviced.length / svcbleCount) * 100) : 0;
-                const eligColor   = svcPct >= 90 ? '#34d399' : svcPct >= 70 ? '#fb923c' : '#f87171';
-                const barColor    = eligColor;
 
-                // P1 72h
-                const p1Eligible = eligible.filter(r => computeFinPriority(r.fin) === 1);
-                const p1Serviced = p1Eligible.filter(r => r.status === 'SERVICED');
-                const p1DueToday = p1Eligible.filter(r => r.status === 'DUE_TODAY');
-                const p1Missed   = p1Eligible.filter(r => r.status === 'MISSED');
-                const p1SvcCount = p1Serviced.length + p1Missed.length; // same closed-window logic as overall
-                const p1SvcPct   = p1SvcCount > 0 ? Math.round((p1Serviced.length / p1SvcCount) * 100) : 0;
-                const p1Color    = p1SvcPct >= 90 ? '#34d399' : p1SvcPct >= 70 ? '#fb923c' : '#f87171';
+                // ── Per-window sub-boundaries ───────────────────────────────────
+                // "Last 2 days" = closed 48h block: windowStart → yesterday (now - 24h)
+                // "Today"       = open 24h block:   (now - 24h)  → next24End
+                const windowStart  = now - PERF_WINDOW_MS;          // 72h ago
+                const todayStart   = now - 24 * 3600 * 1000;        // 24h ago
+                const next24End    = now + 24 * 3600 * 1000;        // 24h ahead
 
-                // Due Today section:
-                //   dueToday     = unserviced FINs that must be hit today (DUE_TODAY status)
-                //   dueTodaySvcd = FINs already serviced that were in the "due today" obligation set
-                //   svcbleToday  = total obligation (serviced + unserviced)
+                // For each FIN determine whether it had MTC-only or no-serviceable turns
+                // specifically within the last-2-days window (windowStart → todayStart)
+                // and within the today window (todayStart → next24End).
+                let past2MtcCount = 0, past2NoTurnCount = 0;
+                let todayMtcCount = 0, todayNoTurnCount = 0;
+
+                rows.forEach(r => {
+                    const allRots = r.rots || [];
+
+                    // ── Last 2 Days sub-window ──────────────────────────────────
+                    const past2Rots = allRots.filter(rot => {
+                        const odtTs = rot.odt ? new Date(rot.odt).getTime() : 0;
+                        const idtTs = rot.idt ? new Date(rot.idt).getTime() : 0;
+                        return (odtTs >= windowStart && odtTs < todayStart)
+                            || (idtTs >= windowStart && idtTs < todayStart);
+                    });
+                    if (past2Rots.length === 0) {
+                        past2NoTurnCount++;
+                    } else {
+                        const past2NonMtc = past2Rots.filter(rot => !isMtcRotation(rot));
+                        if (past2NonMtc.length === 0) past2MtcCount++;
+                    }
+
+                    // ── Today sub-window ────────────────────────────────────────
+                    const todayRots = allRots.filter(rot => {
+                        const odtTs = rot.odt ? new Date(rot.odt).getTime() : 0;
+                        const idtTs = rot.idt ? new Date(rot.idt).getTime() : 0;
+                        return (odtTs >= todayStart && odtTs <= next24End)
+                            || (idtTs >= todayStart && idtTs <= next24End);
+                    });
+                    if (todayRots.length === 0) {
+                        todayNoTurnCount++;
+                    } else {
+                        const todayNonMtc = todayRots.filter(rot => !isMtcRotation(rot));
+                        if (todayNonMtc.length === 0) todayMtcCount++;
+                    }
+                });
+
+                // ── Last 2 Days metrics ─────────────────────────────────────────
+                // Clean split — mutually exclusive, sum = total eligible fleet:
+                //   past2 (closed window):  serviced before today + missed
+                //   today (open window):    dueToday (unserviced) + dueTodaySvcd (serviced today)
+                const servicedBeforeToday = serviced.filter(r => !r.dueToday);  // hit in days 1-2, not today
+                const past2Target  = servicedBeforeToday.length + missed.length + dueToday.length;
+                const past2Svc     = servicedBeforeToday.length;
+                const past2Missed  = missed.length + dueToday.length; // not yet serviced from that window
+                const svcPct       = past2Target > 0 ? Math.round((past2Svc / past2Target) * 100) : 0;
+                const svcColor     = svcPct >= 90 ? '#34d399' : svcPct >= 70 ? '#fb923c' : '#f87171';
+
+                // ── Today metrics ───────────────────────────────────────────────
+                // svcbleToday = dueToday (pending) + dueTodaySvcd (already hit today)
                 const svcbleToday  = dueToday.length + dueTodaySvcd.length;
                 const todayPct     = svcbleToday > 0 ? Math.round((dueTodaySvcd.length / svcbleToday) * 100) : 0;
                 const todayColor   = todayPct >= 90 ? '#34d399' : todayPct >= 70 ? '#fb923c' : '#f87171';
 
-                // P1 Due Today
-                const p1DueTodayAll  = p1DueToday;
-                const p1DueTodaySvcd = p1Eligible.filter(r => r.status === 'SERVICED' && r.dueToday);
-                const p1TodayTotal   = p1DueTodayAll.length + p1DueTodaySvcd.length;
-                const p1TodayPct     = p1TodayTotal > 0 ? Math.round((p1DueTodaySvcd.length / p1TodayTotal) * 100) : 0;
-                const p1TodayColor   = p1TodayPct >= 90 ? '#34d399' : p1TodayPct >= 70 ? '#fb923c' : '#f87171';
+                // ── Overall ─────────────────────────────────────────────────────
+                // Total serviced across both windows (no overlap):
+                //   servicedBeforeToday + dueTodaySvcd
+                // Overall elig = past2Target + svcbleToday
+                // Sanity: past2Target + svcbleToday = (svcBefore + missed + dueToday) + (dueToday + dueTodaySvcd)
+                //   but dueToday appears in both — fix: overall elig = eligible.length (all eligible aircraft)
+                const totalServiced   = past2Svc + dueTodaySvcd.length;
+                const overallElig     = eligible.length;  // = past2Target - dueToday + svcbleToday = all eligible, no overlap
+                const overallPct      = overallElig > 0 ? Math.round((totalServiced / overallElig) * 100) : 0;
+                const overallColor    = overallPct >= 90 ? '#34d399' : overallPct >= 70 ? '#fb923c' : '#f87171';
 
-                // Helper: build a clickable filter chip
-                // status = filter key or null (clear); label = display text; count = number; color = accent hex
+                // ── Helper: pill filter chip ────────────────────────────────────
                 const chip = (status, label, count, accentColor, bgColor) => {
                     const isActive = perfActiveFilter === status;
                     const border   = isActive ? `2px solid ${accentColor}` : `1px solid #334155`;
                     const bg       = isActive ? bgColor : '#1e293b';
-                    const cursor   = 'pointer';
-                    return `<span onclick="setPerfFilter('${status}')" style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:3px;border:${border};background:${bg};cursor:${cursor};user-select:none;transition:all 0.1s;">` +
+                    return `<span onclick="setPerfFilter('${status}')" style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;border:${border};background:${bg};cursor:pointer;user-select:none;transition:all 0.1s;white-space:nowrap;">` +
                         `<span style="font-size:9px;font-weight:700;color:#94a3b8;">${label}</span>` +
-                        `<span style="font-size:11px;font-weight:900;color:${accentColor};">${count}</span>` +
+                        `<span style="font-size:10px;font-weight:900;color:${accentColor};">${count}</span>` +
                     `</span>`;
                 };
-
-                const PIPE = `<span style="color:#1e3a5f;padding:0 4px;">|</span>`;
-                const SEG  = (lbl, val, vc) =>
-                    `<span style="font-size:9px;font-family:monospace;"><span style="color:#94a3b8;font-weight:700;">${lbl} </span><span style="color:${vc};font-weight:900;">${val}</span></span>`;
-
-                // Clear-filter chip
                 const clearChip = perfActiveFilter
-                    ? `<span onclick="setPerfFilter(null)" style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:3px;border:1px solid #475569;background:#0f172a;cursor:pointer;user-select:none;font-size:9px;font-weight:900;color:#94a3b8;">✕ ALL</span>`
+                    ? `<span onclick="setPerfFilter(null)" style="display:inline-flex;align-items:center;gap:2px;padding:2px 7px;border-radius:10px;border:1px solid #475569;background:#0f172a;cursor:pointer;user-select:none;font-size:9px;font-weight:900;color:#94a3b8;">✕ ALL</span>`
                     : '';
 
                 const hdr = document.createElement('div');
-                hdr.style.cssText = 'background:#0f172a;font-family:monospace;';
+                hdr.style.cssText = 'background:#0f172a;font-family:monospace;border-bottom:1px solid #1e293b;';
+
+                // Compact inline stat: "LABEL val/denom pct% [bar]" all on one line
+                const inlineStat = (label, labelColor, val, denom, pct, pctColor) =>
+                    `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;">` +
+                        `<span style="font-size:8px;font-weight:800;color:${labelColor};">${label}</span>` +
+                        `<span style="font-size:8px;font-weight:900;color:${pctColor};">${val}</span>` +
+                        `<span style="font-size:8px;font-weight:700;color:#64748b;">/${denom}</span>` +
+                        `<span style="font-size:8px;font-weight:900;color:${pctColor};margin-left:1px;">${pct}%</span>` +
+                        `<div style="width:28px;height:3px;background:#1e293b;border-radius:2px;overflow:hidden;flex-shrink:0;"><div style="width:${pct}%;height:100%;background:${pctColor};border-radius:2px;"></div></div>` +
+                    `</div>`;
+
+                // Small inline annotation for excluded aircraft e.g. "excl. 3 MTC · 5 Unreachable"
+                const subNote = (mtc, noTrn) => {
+                    const parts = [];
+                    if (mtc > 0)   parts.push(`<span style="font-size:8px;font-weight:800;color:#c084fc;">${mtc}&nbsp;MTC</span>`);
+                    if (noTrn > 0) parts.push(`<span style="font-size:8px;font-weight:800;color:#64748b;">${noTrn}&nbsp;Unreachable</span>`);
+                    if (!parts.length) return '';
+                    return `<span style="font-size:8px;font-weight:700;color:#475569;">excl.&nbsp;</span>` + parts.join(`<span style="color:#1e3a5f;padding:0 2px;">·</span>`);
+                };
+
+                const PIPE = `<span style="color:#334155;padding:0 3px;font-size:9px;">|</span>`;
 
                 hdr.innerHTML = `
-                  <!-- Section 1: 72h Performance -->
-                  <div style="padding:4px 10px 3px;border-bottom:1px solid #1e293b;">
-                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;flex-wrap:wrap;">
-                      <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.12em;color:#3b82f6;background:#1e3a5f;padding:1px 6px;border-radius:2px;flex-shrink:0;">72-HR / 3-Day</span>
-                      <span style="font-size:8px;font-weight:700;color:#94a3b8;">${rows.length}&nbsp;total</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                      <div style="display:flex;align-items:baseline;gap:3px;">
-                        <span style="font-size:18px;font-weight:900;color:${barColor};line-height:1;">${serviced.length}</span>
-                        <span style="font-size:11px;color:#475569;">/ ${svcbleCount}</span>
-                        <span style="font-size:16px;font-weight:900;color:${barColor};margin-left:4px;">${svcPct}%</span>
-                      </div>
-                      <div style="flex:1;min-width:60px;">
-                        <div style="height:4px;background:#1e293b;border-radius:2px;overflow:hidden;">
-                          <div style="width:${svcPct}%;height:100%;background:${barColor};border-radius:2px;"></div>
-                        </div>
-                      </div>
-                      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
-                        ${chip('SERVICED', 'Svc\'d', serviced.length, '#34d399', '#0d2d1e')}
-                        ${chip('MISSED',   'Missed', missed.length,   '#f87171', '#2d0d0d')}
-                        ${chip('MTC',      'MTC',    mtcCount,        '#c084fc', '#1e0d2e')}
-                        ${chip('NO_TURNS', 'No Turns', noTurnCount,   '#64748b', '#1e293b')}
-                        ${clearChip}
-                      </div>
+                  <!-- Row 1: badge + fleet counts + pill filters -->
+                  <div style="padding:3px 8px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                    <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#3b82f6;background:#1e3a5f;padding:1px 5px;border-radius:2px;flex-shrink:0;">72-HR</span>
+                    <span style="font-size:8px;font-weight:800;color:#94a3b8;">${rows.length}&nbsp;Total</span>
+                    <div style="margin-left:auto;display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
+                      ${chip('SERVICED',  'Svc\'d',       serviced.length,  '#34d399', '#0d2d1e')}
+                      ${chip('MISSED',    'Miss',          past2Missed,      '#f87171', '#2d0d0d')}
+                      ${chip('DUE_TODAY', 'Due',           dueToday.length,  '#fb923c', '#2d1a08')}
+                      ${chip('MTC',       'MTC',           mtcCount,         '#c084fc', '#1e0d2e')}
+                      ${chip('NO_TURNS',  'Unreachable',   noTurnCount,      '#64748b', '#1e293b')}
+                      ${clearChip}
                     </div>
                   </div>
 
-                  <!-- Section 2: Due Today -->
-                  <div style="padding:4px 10px 3px;">
-                    <div style="display:flex;align-items:center;margin-bottom:3px;">
-                      <span style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:0.12em;color:#4ade80;background:#0d2d1e;padding:1px 6px;border-radius:2px;">Due Today</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                      <div style="display:flex;align-items:baseline;gap:3px;">
-                        <span style="font-size:18px;font-weight:900;color:${todayColor};line-height:1;">${dueTodaySvcd.length}</span>
-                        <span style="font-size:11px;color:#475569;">/ ${svcbleToday}</span>
-                        <span style="font-size:16px;font-weight:900;color:${todayColor};margin-left:4px;">${todayPct}%</span>
+                  <!-- Row 2: Last 2 Days | Today — all inline -->
+                  <div style="display:grid;grid-template-columns:1fr 1px 1fr;gap:0;">
+
+                    <!-- LEFT: Last 2 Days -->
+                    <div style="padding:3px 8px;display:flex;flex-direction:column;gap:2px;">
+                      <span style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#3b82f6;">Last 2 Days</span>
+                      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Tgt&nbsp;<span style="color:#94a3b8;font-weight:900;">${past2Target}</span></span>
+                        ${PIPE}
+                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Svc'd&nbsp;<span style="color:#34d399;font-weight:900;">${past2Svc}</span></span>
+                        ${PIPE}
+                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Not Svc'd&nbsp;<span style="color:#f87171;font-weight:900;">${past2Missed}</span></span>
+                        ${PIPE}
+                        ${subNote(past2MtcCount, past2NoTurnCount)}
                       </div>
-                      <div style="flex:1;min-width:60px;">
-                        <div style="height:4px;background:#1e293b;border-radius:2px;overflow:hidden;">
-                          <div style="width:${todayPct}%;height:100%;background:${todayColor};border-radius:2px;"></div>
-                        </div>
-                      </div>
-                      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
-                        ${chip('DUE_TODAY', 'Due Today', dueToday.length, '#fb923c', '#2d1a08')}
-                        ${clearChip}
+                      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        ${inlineStat('Svc ', '#7a8fa6', past2Svc, past2Target, svcPct, svcColor)}
                       </div>
                     </div>
+
+                    <!-- Divider -->
+                    <div style="background:#1e293b;"></div>
+
+                    <!-- RIGHT: Today + Overall -->
+                    <div style="padding:3px 8px;display:flex;flex-direction:column;gap:2px;">
+                      <span style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;">Today</span>
+                      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Elig&nbsp;<span style="color:#93c5fd;font-weight:900;">${svcbleToday}</span></span>
+                        ${PIPE}
+                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Svc'd&nbsp;<span style="color:#34d399;font-weight:900;">${dueTodaySvcd.length}</span></span>
+                        ${PIPE}
+                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Pend&nbsp;<span style="color:#fb923c;font-weight:900;">${dueToday.length}</span></span>
+                        ${PIPE}
+                        ${subNote(todayMtcCount, todayNoTurnCount)}
+                      </div>
+                      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        ${inlineStat('Svc/Elig ', '#7a8fa6', dueTodaySvcd.length, svcbleToday, todayPct, todayColor)}
+                        ${inlineStat('Overall ', '#7a8fa6', totalServiced, overallElig, overallPct, overallColor)}
+                      </div>
+                    </div>
+
                   </div>
                 `;
                 perfHdr.appendChild(hdr);
