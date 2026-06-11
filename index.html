@@ -5043,17 +5043,22 @@
                     }
 
                     // ── Today sub-window ────────────────────────────────────────
-                    const todayRots = allRots.filter(rot => {
-                        const odtTs = rot.odt ? new Date(rot.odt).getTime() : 0;
-                        const idtTs = rot.idt ? new Date(rot.idt).getTime() : 0;
-                        return (odtTs >= todayStart && odtTs <= next24End)
-                            || (idtTs >= todayStart && idtTs <= next24End);
-                    });
-                    if (todayRots.length === 0) {
-                        todayNoTurnCount++;
+                    // MTC-classified aircraft always count as MTC regardless of rotation window
+                    if (r.status === 'MTC') {
+                        todayMtcCount++;
                     } else {
-                        const todayNonMtc = todayRots.filter(rot => !isMtcRotation(rot));
-                        if (todayNonMtc.length === 0) todayMtcCount++;
+                        const todayRots = allRots.filter(rot => {
+                            const odtTs = rot.odt ? new Date(rot.odt).getTime() : 0;
+                            const idtTs = rot.idt ? new Date(rot.idt).getTime() : 0;
+                            return (odtTs >= todayStart && odtTs <= next24End)
+                                || (idtTs >= todayStart && idtTs <= next24End);
+                        });
+                        if (todayRots.length === 0) {
+                            todayNoTurnCount++;
+                        } else {
+                            const todayNonMtc = todayRots.filter(rot => !isMtcRotation(rot));
+                            if (todayNonMtc.length === 0) todayMtcCount++;
+                        }
                     }
                 });
 
