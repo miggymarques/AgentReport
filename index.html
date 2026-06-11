@@ -1721,6 +1721,8 @@
         function closeRefEditor() { document.getElementById('editor-modal').classList.remove('open'); }
 
         function switchRefTab(tab) {
+            // Tear down gantt orientation listener when leaving that tab
+            if (activeRefTab === 'gantt' && tab !== 'gantt') _ganttTeardown();
             activeRefTab = tab;
             document.getElementById('ref-tab-aircraft').className    = `flex-1 py-3 border-b-2 ${tab === 'aircraft'     ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-assets').className       = `flex-1 py-3 border-b-2 ${tab === 'assets'       ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
@@ -1763,17 +1765,21 @@
             // scrollbar is always visible at the bottom of the modal.
             const _list = document.getElementById('ref-editor-list');
             if (tab === 'schedule' || tab === 'perf' || tab === 'gantt') {
-                _list.style.overflowX = 'auto';
+                _list.style.overflowX = 'hidden';
                 _list.style.overflowY = 'auto';
                 _list.style.padding   = '0';
                 _list.style.scrollbarWidth = 'thin';
                 _list.style.scrollbarColor = '#475569 #f1f5f9';
+                _list.style.display   = '';
+                _list.style.flexDirection = '';
             } else {
                 _list.style.overflowX = '';
                 _list.style.overflowY = '';
                 _list.style.padding   = '';
                 _list.style.scrollbarWidth = '';
                 _list.style.scrollbarColor = '';
+                _list.style.display   = '';
+                _list.style.flexDirection = '';
             }
             renderRefList();
         }
@@ -5470,6 +5476,19 @@
             container.appendChild(tbl);
         }
 
+        // ─── Gantt Chart state (persists across re-renders) ──────────────────────
+        let _ganttStnFilter  = null;  // null = all, 'YUL'|'YYZ'|'YYC'|'YVR' = filtered
+        let _ganttOrientMQ   = null;  // MediaQueryList — cleaned up on tab switch
+        let _ganttOrientCb   = null;  // listener ref so we can remove it
+
+        // Call this from switchRefTab when leaving gantt to tear down the listener
+        function _ganttTeardown() {
+            if (_ganttOrientMQ && _ganttOrientCb) {
+                try { _ganttOrientMQ.removeEventListener('change', _ganttOrientCb); } catch(e) {}
+                _ganttOrientMQ = null; _ganttOrientCb = null;
+            }
+        }
+
         // ─── Gantt Chart ─────────────────────────────────────────────────────────
         function renderGanttChart(container) {
             if (Object.keys(scheduleData).length === 0) {
@@ -5477,112 +5496,201 @@
                 return;
             }
 
-            const SLOTS = 96; // 96 × 15 min = 24 h
-            const SLOT_W = 14; // px per slot — used for current-time line positioning
-            const FIN_COL_W = 70; // px for the sticky FIN column
+            // ── Orientation-aware layout constants ──────────────────────────────
+            // On mobile landscape we squeeze rows/cols so the full 24h fits (or nearly)
+            // without horizontal scroll. On portrait / desktop we use generous sizing.
+            const isMobile    = window.innerWidth <= 900 || ('ontouchstart' in window);
+            const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+            const mobileLS    = isMobile && isLandscape; // mobile + landscape = compact mode
 
-            const slotLabels = [];
-            for (let i = 0; i < SLOTS; i++) {
-                const hh = String(Math.floor(i / 4)).padStart(2, '0');
-                const mm = String((i % 4) * 15).padStart(2, '0');
-                slotLabels.push(`${hh}:${mm}`);
+            const SLOTS     = 96;
+            const SLOT_W    = mobileLS ? Math.max(7, Math.floor((window.innerWidth - 56) / 96)) : 14;
+            const FIN_COL_W = mobileLS ? 52 : 72;
+            const ROW_H     = mobileLS ? 18 : 22;
+            const LABEL_FS  = mobileLS ? 7  : 8.5; // block label font-size
+            const HDR_FS_KEY= mobileLS ? 8  : 10;  // key-hour font size in header
+            const HDR_FS    = mobileLS ? 7  : 9;
+
+            // Register orientation listener once per gantt session
+            if (!_ganttOrientMQ) {
+                _ganttOrientMQ = window.matchMedia('(orientation: landscape)');
+                _ganttOrientCb = () => {
+                    if (activeRefTab === 'gantt') {
+                        container.innerHTML = '';
+                        renderGanttChart(container);
+                    }
+                };
+                try { _ganttOrientMQ.addEventListener('change', _ganttOrientCb); } catch(e) {}
             }
 
-            // Resolve station timezone
+            // Station colour map
+            const SVC_STATIONS = new Set(['YYZ', 'YUL', 'YYC', 'YVR']);
+            const STN_COLOR = {
+                YUL: '#ca8a04',   // amber/yellow
+                YYZ: '#dc2626',   // red
+                YVR: '#16a34a',   // green
+                YYC: '#4a6fa5',   // blue-grey (distinct from grey-out)
+            };
+            const STN_COLOR_DIM = {
+                YUL: '#a16207',
+                YYZ: '#991b1b',
+                YVR: '#15803d',
+                YYC: '#3a5a8a',
+            };
+            const MTC_COLOR     = '#64748b';  // slate — greyed blocks
+            const NONSVC_COLOR  = '#94a3b8';  // lighter grey — non-svc non-MTC
+            const DIM_ALPHA     = '55';       // overlay opacity suffix for filtered-out blocks
+
+            // Resolve station tz
             const _tz = STATION_TZ[(document.getElementById('station-field')?.value || '').toUpperCase()]
                       || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-            // Datetime string → minutes-since-midnight in station tz
-            const toMinutes = (dtStr) => {
+            const fmtHM = (dtStr) => {
                 if (!dtStr) return null;
                 const d = new Date(dtStr);
                 if (isNaN(d)) return null;
-                const parts = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).formatToParts(d);
-                const h = parseInt(parts.find(p => p.type === 'hour')?.value || 0);
-                const m = parseInt(parts.find(p => p.type === 'minute')?.value || 0);
+                return new Intl.DateTimeFormat('en-US', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:_tz }).format(d);
+            };
+            const toMinutes = (dtStr) => {
+                const lbl = fmtHM(dtStr);
+                if (!lbl) return null;
+                const [h, m] = lbl.split(':').map(Number);
                 return h * 60 + m;
             };
 
-            // Current time → minutes-since-midnight in station tz
-            const nowMinutes = (() => {
-                const now = new Date();
-                const parts = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).formatToParts(now);
-                const h = parseInt(parts.find(p => p.type === 'hour')?.value || 0);
-                const m = parseInt(parts.find(p => p.type === 'minute')?.value || 0);
-                return h * 60 + m;
-            })();
-            const nowSlot = nowMinutes / 15; // fractional slot position
+            // Current time
+            const nowLabel   = fmtHM(new Date().toISOString()) || '??:??';
+            const nowMinutes = (() => { const [h,m] = nowLabel.split(':').map(Number); return h*60+m; })();
+            const nowSlot    = nowMinutes / 15;
+            const nowLineLeft = FIN_COL_W + Math.round(nowSlot * SLOT_W);
 
-            // Group FINs by airline
+            // Group FINs
             const AIRLINES = ['AC', 'RV', 'QK'];
-            const groups = { AC: [], RV: [], QK: [], OTHER: [] };
+            const groups = { AC:[], RV:[], QK:[], OTHER:[] };
             Object.keys(scheduleData).sort().forEach(fin => {
                 const al = AIRLINES.find(a => fin.startsWith(a)) || 'OTHER';
                 groups[al].push(fin);
             });
+            const AIRLINE_BG    = { AC:'#fef2f2', RV:'#eff6ff', QK:'#f0fdf4', OTHER:'#f5f3ff' };
+            const AIRLINE_FG    = { AC:'#b91c1c', RV:'#1d4ed8', QK:'#15803d', OTHER:'#6d28d9' };
 
-            const AIRLINE_COLOR = { AC: '#dc2626', RV: '#2563eb', QK: '#16a34a', OTHER: '#7c3aed' };
-            const AIRLINE_BG    = { AC: '#fef2f2', RV: '#eff6ff', QK: '#f0fdf4', OTHER: '#f5f3ff' };
-            const AIRLINE_LABEL = { AC: 'Air Canada', RV: 'Porter', QK: 'Jazz', OTHER: 'Other' };
-
-            // ── Outer wrapper (position:relative so the now-line can be absolutely placed)
+            // ── Root wrapper — flex column, fills available height
             const wrap = document.createElement('div');
-            wrap.style.cssText = 'font-size:10px;font-family:ui-monospace,monospace;white-space:nowrap;position:relative;';
+            wrap.style.cssText = 'display:flex;flex-direction:column;font-size:10px;font-family:ui-monospace,monospace;white-space:nowrap;min-height:100%;background:#ffffff;';
 
-            // ── Legend
-            const legend = document.createElement('div');
-            legend.style.cssText = 'display:flex;gap:12px;padding:6px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;flex-wrap:wrap;align-items:center;';
-            const nowFmt = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).format(new Date());
-            legend.innerHTML = AIRLINES.map(al =>
-                `<span style="display:flex;align-items:center;gap:4px;">
-                    <span style="display:inline-block;width:12px;height:9px;background:${AIRLINE_COLOR[al]};border-radius:2px;opacity:0.85;"></span>
-                    <span style="font-weight:900;color:#475569;font-size:9px;text-transform:uppercase;letter-spacing:0.08em;">${al} – ${AIRLINE_LABEL[al]}</span>
-                </span>`
-            ).join('') +
-            `<span style="display:flex;align-items:center;gap:4px;margin-left:auto;">
-                <span style="display:inline-block;width:2px;height:12px;background:#f59e0b;border-radius:1px;"></span>
-                <span style="font-weight:900;color:#92400e;font-size:9px;">NOW ${nowFmt}</span>
-            </span>`;
-            wrap.appendChild(legend);
+            // ── Top bar: station filter pills + NOW button
+            const topBar = document.createElement('div');
+            topBar.style.cssText = 'display:flex;align-items:center;gap:6px;padding:5px 8px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;flex-wrap:wrap;';
 
-            // ── Scrollable table container (needed for sticky header + now-line overlay)
+            const STN_KEYS = ['YUL','YYZ','YVR','YYC'];
+            STN_KEYS.forEach(stn => {
+                const pill = document.createElement('button');
+                const active = _ganttStnFilter === stn;
+                pill.dataset.stn = stn;
+                pill.style.cssText = [
+                    'padding:2px 8px',
+                    'border-radius:99px',
+                    'border:2px solid ' + STN_COLOR[stn],
+                    'background:' + (active ? STN_COLOR[stn] : 'transparent'),
+                    'color:' + (active ? '#fff' : STN_COLOR[stn]),
+                    'font-size:9px',
+                    'font-weight:900',
+                    'cursor:pointer',
+                    'font-family:ui-monospace,monospace',
+                    'letter-spacing:0.08em',
+                    'transition:all 0.15s',
+                ].join(';');
+                pill.textContent = stn;
+                pill.onclick = () => {
+                    _ganttStnFilter = (_ganttStnFilter === stn) ? null : stn;
+                    container.innerHTML = '';
+                    renderGanttChart(container);
+                };
+                topBar.appendChild(pill);
+            });
+
+            // MTC pill
+            const mtcPill = document.createElement('span');
+            mtcPill.style.cssText = 'display:flex;align-items:center;gap:3px;margin-left:4px;';
+            mtcPill.innerHTML = `<span style="display:inline-block;width:10px;height:10px;background:${MTC_COLOR};border-radius:2px;"></span><span style="font-size:9px;font-weight:700;color:#475569;">MTC</span>`;
+            topBar.appendChild(mtcPill);
+
+            // Spacer + NOW button
+            const spacer = document.createElement('span');
+            spacer.style.cssText = 'flex:1;';
+            topBar.appendChild(spacer);
+
+            const nowBtn = document.createElement('button');
+            nowBtn.style.cssText = [
+                'display:flex;align-items:center;gap:4px',
+                'padding:2px 8px',
+                'background:#f59e0b',
+                'color:#fff',
+                'border:none',
+                'border-radius:99px',
+                'font-size:9px',
+                'font-weight:900',
+                'cursor:pointer',
+                'font-family:ui-monospace,monospace',
+                'letter-spacing:0.05em',
+                'box-shadow:0 0 6px #f59e0b88',
+            ].join(';');
+            nowBtn.innerHTML = `<span style="display:inline-block;width:2px;height:12px;background:#fff;border-radius:1px;margin-right:2px;"></span>NOW ${nowLabel}`;
+            nowBtn.onclick = () => snapToNow();
+            topBar.appendChild(nowBtn);
+            wrap.appendChild(topBar);
+
+            // ── Scroll container — fixed height = remaining panel space so the
+            //    horizontal scrollbar always sits at the visible bottom, never off-screen.
+            //    We measure available height after the topBar is in the DOM via rAF,
+            //    but set a reasonable initial value using viewport height as fallback.
             const scrollWrap = document.createElement('div');
-            scrollWrap.style.cssText = 'overflow-x:auto;overflow-y:visible;position:relative;';
+            scrollWrap.id = 'gantt-scroll-wrap';
+            scrollWrap.style.cssText = [
+                'overflow-x:auto',
+                'overflow-y:auto',
+                'position:relative',
+                'background:#ffffff',
+                // Will be corrected by rAF below; this prevents layout flash
+                'height:calc(100vh - 180px)',
+            ].join(';');
 
             // ── Table
-            const tbl = document.createElement('table');
-            tbl.id = 'gantt-tbl';
-            tbl.style.cssText = 'border-collapse:collapse;table-layout:fixed;';
+            const tblW = FIN_COL_W + SLOTS * SLOT_W;
+            const tbl  = document.createElement('table');
+            tbl.style.cssText = `border-collapse:collapse;table-layout:fixed;width:${tblW}px;`;
 
-            // ── Two-row thead: hour band (row 1) + 15-min tick row (row 2)
+            let cgHtml = `<colgroup><col style="width:${FIN_COL_W}px;">`;
+            for (let i = 0; i < SLOTS; i++) cgHtml += `<col style="width:${SLOT_W}px;">`;
+            cgHtml += '</colgroup>';
+            tbl.innerHTML = cgHtml;
+
+            // ── thead — sticky to top of scrollWrap
             const thead = document.createElement('thead');
+            thead.style.cssText = 'position:sticky;top:0;z-index:8;';
 
-            // Row 1: FIN label spanning 2 header rows + hour blocks (each spanning 4 slots)
+            // Row 1: hour labels
             let r1 = `<tr style="background:#0f172a;">
-                <th rowspan="2" style="width:${FIN_COL_W}px;min-width:${FIN_COL_W}px;padding:4px 6px;text-align:left;color:#94a3b8;font-weight:900;font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-right:2px solid #334155;position:sticky;left:0;background:#0f172a;z-index:4;vertical-align:middle;">AIRCRAFT</th>`;
+                <th rowspan="2" style="width:${FIN_COL_W}px;padding:3px 5px;text-align:left;color:#e2e8f0;font-weight:900;font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-right:2px solid #475569;position:sticky;left:0;background:#0f172a;z-index:9;vertical-align:middle;">ACFT</th>`;
             for (let h = 0; h < 24; h++) {
-                const isMidnight = h === 0;
-                const isNoon     = h === 12;
-                const bg = (h % 2 === 0) ? '#1e293b' : '#0f172a';
-                const labelColor = isMidnight || isNoon ? '#f8fafc' : (h % 6 === 0 ? '#cbd5e1' : '#64748b');
-                const fw = (h % 6 === 0) ? '900' : '700';
-                r1 += `<th colspan="4" style="width:${SLOT_W * 4}px;background:${bg};padding:3px 2px;text-align:center;color:${labelColor};font-weight:${fw};font-size:${h % 6 === 0 ? 10 : 9}px;border-left:${h > 0 ? '1px solid #334155' : 'none'};letter-spacing:0.05em;">
-                    ${String(h).padStart(2,'0')}:00
-                </th>`;
+                const bg    = h % 2 === 0 ? '#1e293b' : '#0f172a';
+                const isKey = h === 0 || h === 6 || h === 12 || h === 18;
+                const col   = isKey ? '#ffffff' : '#cbd5e1';
+                const fw    = isKey ? 900 : 700;
+                const fs    = isKey ? HDR_FS_KEY : HDR_FS;
+                r1 += `<th colspan="4" style="background:${bg};padding:4px 1px 2px;text-align:center;color:${col};font-weight:${fw};font-size:${fs}px;border-left:1px solid #475569;letter-spacing:0.04em;">${String(h).padStart(2,'0')}:00</th>`;
             }
             r1 += '</tr>';
 
-            // Row 2: 15-min tick marks — small notch every slot, taller at :30
-            let r2 = `<tr style="background:#0f172a;">`;
+            // Row 2: tick marks
+            let r2 = '<tr style="background:#0f172a;">';
             for (let i = 0; i < SLOTS; i++) {
-                const isHour    = i % 4 === 0;
-                const isHalf    = i % 4 === 2;
-                const isQuarter = !isHour && !isHalf;
-                const tickH  = isHour ? 0 : isHalf ? 6 : 3;   // hour boundary handled by row1 border
-                const tickColor = isHalf ? '#475569' : '#334155';
-                const borderL = isHour ? '1px solid #334155' : 'none';
-                r2 += `<th style="width:${SLOT_W}px;min-width:${SLOT_W}px;padding:0;border-left:${borderL};background:#0f172a;vertical-align:bottom;">
-                    ${tickH > 0 ? `<div style="width:100%;height:${tickH}px;background:${tickColor};"></div>` : ''}
+                const isHour = i % 4 === 0;
+                const isHalf = i % 4 === 2;
+                const tickH  = isHalf ? 7 : 3;
+                const tickC  = isHalf ? '#94a3b8' : '#475569';
+                r2 += `<th style="padding:0;border-left:${isHour ? '1px solid #475569' : 'none'};background:#0f172a;vertical-align:bottom;">
+                    <div style="height:${tickH}px;background:${tickC};width:100%;"></div>
                 </th>`;
             }
             r2 += '</tr>';
@@ -5597,65 +5705,162 @@
                 const fins = groups[al];
                 if (!fins.length) return;
 
-                // Group header row
+                // When a station filter is active, only include FINs that have at least
+                // one rotation at that station — skip the rest entirely (compact view).
+                const visibleFins = _ganttStnFilter
+                    ? fins.filter(fin => (scheduleData[fin] || []).some(r =>
+                        (r.stn || '').trim().toUpperCase() === _ganttStnFilter))
+                    : fins;
+                if (!visibleFins.length) return;
+
+                // Group header — show filtered count when a filter is active
+                const countLabel = _ganttStnFilter
+                    ? `${visibleFins.length} of ${fins.length} aircraft`
+                    : `${fins.length} aircraft`;
                 const groupRow = document.createElement('tr');
-                groupRow.innerHTML = `<td colspan="${SLOTS + 1}" style="padding:3px 8px;font-weight:900;font-size:9px;text-transform:uppercase;letter-spacing:0.15em;color:${AIRLINE_COLOR[al]};background:${AIRLINE_BG[al]};border-top:2px solid ${AIRLINE_COLOR[al]}44;border-bottom:1px solid ${AIRLINE_COLOR[al]}22;">
-                    ${al} · ${AIRLINE_LABEL[al]} · ${fins.length} aircraft
-                </td>`;
+                groupRow.innerHTML = `<td colspan="${SLOTS+1}" style="padding:3px 8px;font-weight:900;font-size:9px;text-transform:uppercase;letter-spacing:0.14em;color:${AIRLINE_FG[al]};background:${AIRLINE_BG[al]};border-top:2px solid ${AIRLINE_FG[al]}44;border-bottom:1px solid ${AIRLINE_FG[al]}22;">${al} · ${countLabel}</td>`;
                 tbody.appendChild(groupRow);
 
-                fins.forEach((fin, finIdx) => {
+                visibleFins.forEach((fin, finIdx) => {
                     const rots = scheduleData[fin] || [];
 
-                    // Build ground bitmap + station label per run
-                    // groundStn[s] = station code string if on ground, else null
-                    const groundStn = new Array(SLOTS).fill(null);
-                    rots.forEach(rot => {
-                        const idt = toMinutes(rot.idt);
-                        const odt = toMinutes(rot.odt);
-                        if (idt === null || odt === null) return;
-                        const stn = (rot.stn || '').toUpperCase() || '—';
-                        const startSlot = Math.floor(idt / 15);
-                        let endSlot = Math.floor(odt / 15);
+                    // Build per-slot info: store full rotation context per slot
+                    // groundInfo[s] = { stn, isMtc, isSvc, idtLabel, odtLabel, startSlot, endSlot, rotIdx }
+                    const groundInfo = new Array(SLOTS).fill(null);
+                    rots.forEach((rot, ri) => {
+                        const idtMin = toMinutes(rot.idt);
+                        const odtMin = toMinutes(rot.odt);
+                        if (idtMin === null || odtMin === null) return;
+                        const stn      = (rot.stn || '').trim().toUpperCase();
+                        const isMtc    = isMtcRotation(rot);
+                        const isSvc    = SVC_STATIONS.has(stn);
+                        const idtLabel = fmtHM(rot.idt);
+                        const odtLabel = fmtHM(rot.odt);
+                        const startSlot = Math.floor(idtMin / 15);
+                        let   endSlot   = Math.floor(odtMin / 15);
                         if (endSlot <= startSlot) endSlot = SLOTS;
                         for (let s = startSlot; s < Math.min(endSlot, SLOTS); s++) {
-                            groundStn[s] = stn;
+                            groundInfo[s] = { stn: stn||'—', isMtc, isSvc, idtLabel, odtLabel, startSlot, endSlot, rotIdx: ri };
                         }
                     });
 
                     const isEven = finIdx % 2 === 0;
-                    const rowBg = isEven ? '#fff' : '#f8fafc';
-                    const tr = document.createElement('tr');
-                    tr.style.cssText = `background:${rowBg};`;
+                    const rowBg  = isEven ? '#ffffff' : '#f8fafc';
+                    const tr     = document.createElement('tr');
+                    tr.style.background = rowBg;
                     tr.onmouseenter = () => tr.style.background = '#fef9c3';
                     tr.onmouseleave = () => tr.style.background = rowBg;
 
-                    let rowHtml = `<td style="width:${FIN_COL_W}px;min-width:${FIN_COL_W}px;padding:1px 5px;font-weight:900;font-size:10px;color:${AIRLINE_COLOR[al]};border-right:2px solid #e2e8f0;white-space:nowrap;overflow:hidden;position:sticky;left:0;background:inherit;z-index:1;">${fin}</td>`;
+                    let rowHtml = `<td style="padding:1px 5px;font-weight:900;font-size:10px;color:${AIRLINE_FG[al]};border-right:2px solid #e2e8f0;overflow:hidden;position:sticky;left:0;background:inherit;z-index:2;">${fin}</td>`;
 
-                    // Merge consecutive same-state slots
+                    const timFS = Math.max(6, LABEL_FS - 1);
+
+                    // Full label pixel width estimate (monospace chars at timFS/LABEL_FS)
+                    // "HH:MM" ≈ 5 × timFS × 0.62, "YYZ" ≈ 3 × LABEL_FS × 0.65, gaps ≈ 8px
+                    const FULL_W = Math.ceil(5 * timFS * 0.62 + 8 + 3 * LABEL_FS * 0.65 + 8 + 5 * timFS * 0.62);
+                    const MED_W  = Math.ceil(5 * timFS * 0.62 + 6 + 3 * LABEL_FS * 0.65);
+                    const MIN_W  = Math.ceil(3 * LABEL_FS * 0.65);
+
+                    // Pre-build a list of all ground blocks for this row so we can look up
+                    // the start pixel of the NEXT block when computing clip width.
+                    // blockList[i] = { startSlot, endSlot (exclusive), run, rotIdx }
+                    const blockList = [];
+                    {
+                        let bs = 0;
+                        while (bs < SLOTS) {
+                            if (groundInfo[bs] !== null) {
+                                const ri = groundInfo[bs].rotIdx;
+                                let br = 1;
+                                while (bs + br < SLOTS && groundInfo[bs+br] !== null && groundInfo[bs+br].rotIdx === ri) br++;
+                                blockList.push({ startSlot: bs, run: br, rotIdx: ri });
+                                bs += br;
+                            } else {
+                                bs++;
+                            }
+                        }
+                    }
+
                     let s = 0;
+                    let blockIdx = 0;
                     while (s < SLOTS) {
-                        const stn = groundStn[s];
-                        if (stn !== null) {
-                            // Ground run — collect all slots with same station
-                            let run = 1;
-                            while (s + run < SLOTS && groundStn[s + run] !== null) run++;
-                            const midSlot = s + Math.floor(run / 2);
-                            // Show station label if run is wide enough (≥4 slots = 1 hr)
-                            const showLabel = run >= 4;
-                            const labelHtml = showLabel
-                                ? `<span style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-size:8px;font-weight:900;color:rgba(255,255,255,0.92);letter-spacing:0.08em;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${stn}</span>`
-                                : '';
-                            rowHtml += `<td colspan="${run}" style="position:relative;background:${AIRLINE_COLOR[al]};opacity:0.88;height:20px;border-left:1px solid rgba(255,255,255,0.2);" title="${slotLabels[s]} – ${slotLabels[Math.min(s+run,SLOTS-1)]} · ${stn}">${labelHtml}</td>`;
+                        const info = groundInfo[s];
+                        if (info !== null) {
+                            const blk  = blockList[blockIdx];
+                            const run  = blk.run;
+                            blockIdx++;
+
+                            const blockStartPx = s * SLOT_W;
+                            const blockPx      = run * SLOT_W;
+                            const blockEndPx   = blockStartPx + blockPx;
+
+                            // Next block start pixel — if no next block, use end of timeline
+                            const nextBlk         = blockList[blockIdx]; // already incremented
+                            const nextBlockStartPx = nextBlk
+                                ? nextBlk.startSlot * SLOT_W
+                                : SLOTS * SLOT_W;
+
+                            // The label is centred over the block midpoint.
+                            // It can extend left freely (nothing to collide with on the left
+                            // within this td — previous block is a separate td).
+                            // It can extend right until (nextBlockStartPx - blockStartPx),
+                            // i.e. up to the start of the NEXT block relative to this td's left.
+                            // We use clip-right = nextBlockStartPx - blockStartPx.
+                            const clipRight = nextBlockStartPx - blockStartPx; // px from this td's left
+
+                            // Label width: as wide as needed for full label, but right edge
+                            // never exceeds clipRight.
+                            const labelNeedW  = FULL_W;
+                            const halfNeed    = labelNeedW / 2;
+                            const midPx       = blockPx / 2; // centre of block within td
+                            // Left edge of label (can go negative = overflows left of td, fine)
+                            const labelLeft   = midPx - halfNeed;
+                            // Right edge clipped at clipRight
+                            const labelRight  = Math.min(midPx + halfNeed, clipRight - 1);
+                            const labelW      = Math.max(0, labelRight - labelLeft);
+
+                            // Decide what fits
+                            const showFull = labelW >= FULL_W;
+                            const showMed  = labelW >= MED_W;
+                            const showMin  = labelW >= MIN_W;
+
+                            // Colour: dark with white text-shadow — readable on any bg
+                            const isOtherStn  = _ganttStnFilter && info.stn !== _ganttStnFilter;
+                            const dimmed      = isOtherStn;
+                            const displayStn  = info.isMtc ? 'MTC' : info.stn;
+
+                            let baseColor;
+                            if (info.isMtc)       baseColor = MTC_COLOR;
+                            else if (!info.isSvc) baseColor = NONSVC_COLOR;
+                            else                  baseColor = STN_COLOR[info.stn] || '#64748b';
+
+                            const bgStyle    = dimmed ? `background:${baseColor};opacity:0.3;` : `background:${baseColor};`;
+                            // Dark label colour with white outline — works on coloured blocks AND white bg
+                            const labelColor = dimmed ? 'transparent' : '#0f172a';
+                            const txtShadow  = 'text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff';
+
+                            let labelHtml = '';
+                            if (showMin) {
+                                const inner = showFull
+                                    ? `<span style="${txtShadow};opacity:0.9;font-size:${timFS}px;flex-shrink:0;white-space:nowrap;">${info.idtLabel}</span><span style="${txtShadow};margin:0 3px;font-size:${LABEL_FS}px;letter-spacing:0.06em;flex-shrink:0;white-space:nowrap;">${displayStn}</span><span style="${txtShadow};opacity:0.9;font-size:${timFS}px;flex-shrink:0;white-space:nowrap;">${info.odtLabel}</span>`
+                                    : showMed
+                                    ? `<span style="${txtShadow};opacity:0.9;font-size:${timFS}px;flex-shrink:0;white-space:nowrap;">${info.idtLabel}</span><span style="${txtShadow};margin-left:3px;font-size:${LABEL_FS}px;letter-spacing:0.06em;flex-shrink:0;white-space:nowrap;">${displayStn}</span>`
+                                    : `<span style="${txtShadow};font-size:${LABEL_FS}px;letter-spacing:0.06em;white-space:nowrap;">${displayStn}</span>`;
+
+                                labelHtml = `<div style="position:absolute;top:0;bottom:0;left:${labelLeft}px;width:${labelW}px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:${labelColor};font-weight:900;pointer-events:none;z-index:3;">${inner}</div>`;
+                            }
+
+                            const titleTxt = `${info.idtLabel||'?'} → ${info.odtLabel||'?'} · ${displayStn}${info.isMtc?' [MTC]':''}`;
+                            rowHtml += `<td colspan="${run}" style="position:relative;${bgStyle}height:${ROW_H}px;border-left:1px solid rgba(255,255,255,0.15);overflow:visible;" title="${titleTxt}">${labelHtml}</td>`;
                             s += run;
                         } else {
                             let run = 1;
-                            while (s + run < SLOTS && groundStn[s + run] === null) run++;
-                            const borderL = (s % 4 === 0) ? 'border-left:1px solid #f1f5f9;' : '';
-                            rowHtml += `<td colspan="${run}" style="height:20px;${borderL}"></td>`;
+                            while (s + run < SLOTS && groundInfo[s+run] === null) run++;
+                            const bl = s % 4 === 0 ? 'border-left:1px solid #f1f5f9;' : '';
+                            rowHtml += `<td colspan="${run}" style="height:${ROW_H}px;${bl}overflow:visible;"></td>`;
                             s += run;
                         }
                     }
+
                     tr.innerHTML = rowHtml;
                     tbody.appendChild(tr);
                 });
@@ -5663,32 +5868,51 @@
 
             tbl.appendChild(tbody);
             scrollWrap.appendChild(tbl);
-            wrap.appendChild(scrollWrap);
 
-            // ── Current-time line overlay (injected after table renders so we can measure)
-            // We use a fixed-width calculation based on SLOT_W rather than DOM measurement
-            // so it works before layout settles.
-            const nowLineLeft = FIN_COL_W + 2 + Math.round(nowSlot * SLOT_W); // px from left of scrollWrap
+            // ── Now-line — absolute inside scrollWrap, scrolls with content
             const nowLine = document.createElement('div');
             nowLine.id = 'gantt-now-line';
             nowLine.style.cssText = [
                 'position:absolute',
                 `left:${nowLineLeft}px`,
                 'top:0',
-                'bottom:0',
                 'width:2px',
                 'background:#f59e0b',
-                'z-index:10',
+                'z-index:20',
                 'pointer-events:none',
-                'box-shadow:0 0 6px #f59e0b88',
+                'box-shadow:0 0 8px #f59e0bcc',
             ].join(';');
-
-            // Small label at top of the line
-            const nowFmt2 = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).format(new Date());
-            nowLine.innerHTML = `<div style="position:absolute;top:0;left:3px;background:#f59e0b;color:#fff;font-size:8px;font-weight:900;padding:1px 3px;border-radius:2px;white-space:nowrap;line-height:1.4;">${nowFmt2}</div>`;
+            nowLine.innerHTML = `<div style="position:sticky;top:2px;left:0;background:#f59e0b;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:3px;">${nowLabel}</div>`;
             scrollWrap.appendChild(nowLine);
 
+            // Size the now-line to full table height after layout, and
+            // correct the scrollWrap height to exactly fill the remaining panel.
+            requestAnimationFrame(() => {
+                const h = tbl.offsetHeight;
+                if (h > 0) nowLine.style.height = h + 'px';
+
+                // Measure available height: panel container minus topBar
+                const listEl = document.getElementById('ref-editor-list');
+                if (listEl && topBar) {
+                    const available = listEl.clientHeight - topBar.offsetHeight;
+                    if (available > 80) scrollWrap.style.height = available + 'px';
+                }
+            });
+
+            wrap.appendChild(scrollWrap);
             container.appendChild(wrap);
+
+            // ── Snap to now on initial render
+            requestAnimationFrame(() => snapToNow());
+
+            // ── snapToNow: scroll so current-time line is horizontally centred
+            function snapToNow() {
+                const sw = document.getElementById('gantt-scroll-wrap');
+                if (!sw) return;
+                const viewW  = sw.clientWidth;
+                const target = nowLineLeft - viewW / 2;
+                sw.scrollLeft = Math.max(0, target);
+            }
         }
 
         // Airline importance rank — lower = higher importance.
