@@ -436,6 +436,7 @@
                 <button onclick="switchRefTab('perf')" id="ref-tab-perf" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">PERF</button>
                 <button onclick="switchRefTab('synctable')" id="ref-tab-synctable" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">SVC HST</button>
                 <button onclick="switchRefTab('schedule')" id="ref-tab-schedule" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">SKD</button>
+                <button onclick="switchRefTab('gantt')" id="ref-tab-gantt" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">GNTT</button>
                 <button onclick="switchRefTab('agents')" id="ref-tab-agents" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">AGNT</button>
                 <button onclick="switchRefTab('alldata')" id="ref-tab-alldata" class="flex-1 py-3 border-b-2 border-transparent text-slate-400">DATA</button>
             </div>
@@ -1727,6 +1728,7 @@
             document.getElementById('ref-tab-perf').className         = `flex-1 py-3 border-b-2 ${tab === 'perf'         ? 'border-cyan-500 text-cyan-600'        : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-synctable').className    = `flex-1 py-3 border-b-2 ${tab === 'synctable'    ? 'border-emerald-500 text-emerald-600'  : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-schedule').className     = `flex-1 py-3 border-b-2 ${tab === 'schedule'     ? 'border-violet-500 text-violet-600'   : 'border-transparent text-slate-400'}`;
+            document.getElementById('ref-tab-gantt').className        = `flex-1 py-3 border-b-2 ${tab === 'gantt'        ? 'border-orange-500 text-orange-600'   : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-agents').className       = `flex-1 py-3 border-b-2 ${tab === 'agents'       ? 'border-rose-500 text-rose-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-alldata').className      = `flex-1 py-3 border-b-2 ${tab === 'alldata'      ? 'border-teal-500 text-teal-600'       : 'border-transparent text-slate-400'}`;
             // Add-panel and delete-button visibility is handled by applyAdminVisibility,
@@ -1760,7 +1762,7 @@
             // Schedule + perf tabs: let ref-editor-list own horizontal scroll so the
             // scrollbar is always visible at the bottom of the modal.
             const _list = document.getElementById('ref-editor-list');
-            if (tab === 'schedule' || tab === 'perf') {
+            if (tab === 'schedule' || tab === 'perf' || tab === 'gantt') {
                 _list.style.overflowX = 'auto';
                 _list.style.overflowY = 'auto';
                 _list.style.padding   = '0';
@@ -1832,6 +1834,8 @@
                 renderSyncTable(container);
             } else if (activeRefTab === 'schedule') {
                 renderScheduleList(container);
+            } else if (activeRefTab === 'gantt') {
+                renderGanttChart(container);
             } else if (activeRefTab === 'agents') {
                 renderAgentList(container);
             } else if (activeRefTab === 'alldata') {
@@ -5464,6 +5468,227 @@
             });
             tbl.appendChild(tbody);
             container.appendChild(tbl);
+        }
+
+        // ─── Gantt Chart ─────────────────────────────────────────────────────────
+        function renderGanttChart(container) {
+            if (Object.keys(scheduleData).length === 0) {
+                container.innerHTML = `<div style="text-align:center;padding:2rem;color:#94a3b8;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:0.15em;">No schedule imported yet</div>`;
+                return;
+            }
+
+            const SLOTS = 96; // 96 × 15 min = 24 h
+            const SLOT_W = 14; // px per slot — used for current-time line positioning
+            const FIN_COL_W = 70; // px for the sticky FIN column
+
+            const slotLabels = [];
+            for (let i = 0; i < SLOTS; i++) {
+                const hh = String(Math.floor(i / 4)).padStart(2, '0');
+                const mm = String((i % 4) * 15).padStart(2, '0');
+                slotLabels.push(`${hh}:${mm}`);
+            }
+
+            // Resolve station timezone
+            const _tz = STATION_TZ[(document.getElementById('station-field')?.value || '').toUpperCase()]
+                      || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+            // Datetime string → minutes-since-midnight in station tz
+            const toMinutes = (dtStr) => {
+                if (!dtStr) return null;
+                const d = new Date(dtStr);
+                if (isNaN(d)) return null;
+                const parts = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).formatToParts(d);
+                const h = parseInt(parts.find(p => p.type === 'hour')?.value || 0);
+                const m = parseInt(parts.find(p => p.type === 'minute')?.value || 0);
+                return h * 60 + m;
+            };
+
+            // Current time → minutes-since-midnight in station tz
+            const nowMinutes = (() => {
+                const now = new Date();
+                const parts = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).formatToParts(now);
+                const h = parseInt(parts.find(p => p.type === 'hour')?.value || 0);
+                const m = parseInt(parts.find(p => p.type === 'minute')?.value || 0);
+                return h * 60 + m;
+            })();
+            const nowSlot = nowMinutes / 15; // fractional slot position
+
+            // Group FINs by airline
+            const AIRLINES = ['AC', 'RV', 'QK'];
+            const groups = { AC: [], RV: [], QK: [], OTHER: [] };
+            Object.keys(scheduleData).sort().forEach(fin => {
+                const al = AIRLINES.find(a => fin.startsWith(a)) || 'OTHER';
+                groups[al].push(fin);
+            });
+
+            const AIRLINE_COLOR = { AC: '#dc2626', RV: '#2563eb', QK: '#16a34a', OTHER: '#7c3aed' };
+            const AIRLINE_BG    = { AC: '#fef2f2', RV: '#eff6ff', QK: '#f0fdf4', OTHER: '#f5f3ff' };
+            const AIRLINE_LABEL = { AC: 'Air Canada', RV: 'Porter', QK: 'Jazz', OTHER: 'Other' };
+
+            // ── Outer wrapper (position:relative so the now-line can be absolutely placed)
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'font-size:10px;font-family:ui-monospace,monospace;white-space:nowrap;position:relative;';
+
+            // ── Legend
+            const legend = document.createElement('div');
+            legend.style.cssText = 'display:flex;gap:12px;padding:6px 10px;border-bottom:1px solid #e2e8f0;background:#f8fafc;flex-wrap:wrap;align-items:center;';
+            const nowFmt = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).format(new Date());
+            legend.innerHTML = AIRLINES.map(al =>
+                `<span style="display:flex;align-items:center;gap:4px;">
+                    <span style="display:inline-block;width:12px;height:9px;background:${AIRLINE_COLOR[al]};border-radius:2px;opacity:0.85;"></span>
+                    <span style="font-weight:900;color:#475569;font-size:9px;text-transform:uppercase;letter-spacing:0.08em;">${al} – ${AIRLINE_LABEL[al]}</span>
+                </span>`
+            ).join('') +
+            `<span style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+                <span style="display:inline-block;width:2px;height:12px;background:#f59e0b;border-radius:1px;"></span>
+                <span style="font-weight:900;color:#92400e;font-size:9px;">NOW ${nowFmt}</span>
+            </span>`;
+            wrap.appendChild(legend);
+
+            // ── Scrollable table container (needed for sticky header + now-line overlay)
+            const scrollWrap = document.createElement('div');
+            scrollWrap.style.cssText = 'overflow-x:auto;overflow-y:visible;position:relative;';
+
+            // ── Table
+            const tbl = document.createElement('table');
+            tbl.id = 'gantt-tbl';
+            tbl.style.cssText = 'border-collapse:collapse;table-layout:fixed;';
+
+            // ── Two-row thead: hour band (row 1) + 15-min tick row (row 2)
+            const thead = document.createElement('thead');
+
+            // Row 1: FIN label spanning 2 header rows + hour blocks (each spanning 4 slots)
+            let r1 = `<tr style="background:#0f172a;">
+                <th rowspan="2" style="width:${FIN_COL_W}px;min-width:${FIN_COL_W}px;padding:4px 6px;text-align:left;color:#94a3b8;font-weight:900;font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-right:2px solid #334155;position:sticky;left:0;background:#0f172a;z-index:4;vertical-align:middle;">AIRCRAFT</th>`;
+            for (let h = 0; h < 24; h++) {
+                const isMidnight = h === 0;
+                const isNoon     = h === 12;
+                const bg = (h % 2 === 0) ? '#1e293b' : '#0f172a';
+                const labelColor = isMidnight || isNoon ? '#f8fafc' : (h % 6 === 0 ? '#cbd5e1' : '#64748b');
+                const fw = (h % 6 === 0) ? '900' : '700';
+                r1 += `<th colspan="4" style="width:${SLOT_W * 4}px;background:${bg};padding:3px 2px;text-align:center;color:${labelColor};font-weight:${fw};font-size:${h % 6 === 0 ? 10 : 9}px;border-left:${h > 0 ? '1px solid #334155' : 'none'};letter-spacing:0.05em;">
+                    ${String(h).padStart(2,'0')}:00
+                </th>`;
+            }
+            r1 += '</tr>';
+
+            // Row 2: 15-min tick marks — small notch every slot, taller at :30
+            let r2 = `<tr style="background:#0f172a;">`;
+            for (let i = 0; i < SLOTS; i++) {
+                const isHour    = i % 4 === 0;
+                const isHalf    = i % 4 === 2;
+                const isQuarter = !isHour && !isHalf;
+                const tickH  = isHour ? 0 : isHalf ? 6 : 3;   // hour boundary handled by row1 border
+                const tickColor = isHalf ? '#475569' : '#334155';
+                const borderL = isHour ? '1px solid #334155' : 'none';
+                r2 += `<th style="width:${SLOT_W}px;min-width:${SLOT_W}px;padding:0;border-left:${borderL};background:#0f172a;vertical-align:bottom;">
+                    ${tickH > 0 ? `<div style="width:100%;height:${tickH}px;background:${tickColor};"></div>` : ''}
+                </th>`;
+            }
+            r2 += '</tr>';
+
+            thead.innerHTML = r1 + r2;
+            tbl.appendChild(thead);
+
+            // ── tbody
+            const tbody = document.createElement('tbody');
+
+            AIRLINES.forEach(al => {
+                const fins = groups[al];
+                if (!fins.length) return;
+
+                // Group header row
+                const groupRow = document.createElement('tr');
+                groupRow.innerHTML = `<td colspan="${SLOTS + 1}" style="padding:3px 8px;font-weight:900;font-size:9px;text-transform:uppercase;letter-spacing:0.15em;color:${AIRLINE_COLOR[al]};background:${AIRLINE_BG[al]};border-top:2px solid ${AIRLINE_COLOR[al]}44;border-bottom:1px solid ${AIRLINE_COLOR[al]}22;">
+                    ${al} · ${AIRLINE_LABEL[al]} · ${fins.length} aircraft
+                </td>`;
+                tbody.appendChild(groupRow);
+
+                fins.forEach((fin, finIdx) => {
+                    const rots = scheduleData[fin] || [];
+
+                    // Build ground bitmap + station label per run
+                    // groundStn[s] = station code string if on ground, else null
+                    const groundStn = new Array(SLOTS).fill(null);
+                    rots.forEach(rot => {
+                        const idt = toMinutes(rot.idt);
+                        const odt = toMinutes(rot.odt);
+                        if (idt === null || odt === null) return;
+                        const stn = (rot.stn || '').toUpperCase() || '—';
+                        const startSlot = Math.floor(idt / 15);
+                        let endSlot = Math.floor(odt / 15);
+                        if (endSlot <= startSlot) endSlot = SLOTS;
+                        for (let s = startSlot; s < Math.min(endSlot, SLOTS); s++) {
+                            groundStn[s] = stn;
+                        }
+                    });
+
+                    const isEven = finIdx % 2 === 0;
+                    const rowBg = isEven ? '#fff' : '#f8fafc';
+                    const tr = document.createElement('tr');
+                    tr.style.cssText = `background:${rowBg};`;
+                    tr.onmouseenter = () => tr.style.background = '#fef9c3';
+                    tr.onmouseleave = () => tr.style.background = rowBg;
+
+                    let rowHtml = `<td style="width:${FIN_COL_W}px;min-width:${FIN_COL_W}px;padding:1px 5px;font-weight:900;font-size:10px;color:${AIRLINE_COLOR[al]};border-right:2px solid #e2e8f0;white-space:nowrap;overflow:hidden;position:sticky;left:0;background:inherit;z-index:1;">${fin}</td>`;
+
+                    // Merge consecutive same-state slots
+                    let s = 0;
+                    while (s < SLOTS) {
+                        const stn = groundStn[s];
+                        if (stn !== null) {
+                            // Ground run — collect all slots with same station
+                            let run = 1;
+                            while (s + run < SLOTS && groundStn[s + run] !== null) run++;
+                            const midSlot = s + Math.floor(run / 2);
+                            // Show station label if run is wide enough (≥4 slots = 1 hr)
+                            const showLabel = run >= 4;
+                            const labelHtml = showLabel
+                                ? `<span style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-size:8px;font-weight:900;color:rgba(255,255,255,0.92);letter-spacing:0.08em;pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${stn}</span>`
+                                : '';
+                            rowHtml += `<td colspan="${run}" style="position:relative;background:${AIRLINE_COLOR[al]};opacity:0.88;height:20px;border-left:1px solid rgba(255,255,255,0.2);" title="${slotLabels[s]} – ${slotLabels[Math.min(s+run,SLOTS-1)]} · ${stn}">${labelHtml}</td>`;
+                            s += run;
+                        } else {
+                            let run = 1;
+                            while (s + run < SLOTS && groundStn[s + run] === null) run++;
+                            const borderL = (s % 4 === 0) ? 'border-left:1px solid #f1f5f9;' : '';
+                            rowHtml += `<td colspan="${run}" style="height:20px;${borderL}"></td>`;
+                            s += run;
+                        }
+                    }
+                    tr.innerHTML = rowHtml;
+                    tbody.appendChild(tr);
+                });
+            });
+
+            tbl.appendChild(tbody);
+            scrollWrap.appendChild(tbl);
+            wrap.appendChild(scrollWrap);
+
+            // ── Current-time line overlay (injected after table renders so we can measure)
+            // We use a fixed-width calculation based on SLOT_W rather than DOM measurement
+            // so it works before layout settles.
+            const nowLineLeft = FIN_COL_W + 2 + Math.round(nowSlot * SLOT_W); // px from left of scrollWrap
+            const nowLine = document.createElement('div');
+            nowLine.id = 'gantt-now-line';
+            nowLine.style.cssText = [
+                'position:absolute',
+                `left:${nowLineLeft}px`,
+                'top:0',
+                'bottom:0',
+                'width:2px',
+                'background:#f59e0b',
+                'z-index:10',
+                'pointer-events:none',
+                'box-shadow:0 0 6px #f59e0b88',
+            ].join(';');
+
+            // Small label at top of the line
+            const nowFmt2 = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: _tz }).format(new Date());
+            nowLine.innerHTML = `<div style="position:absolute;top:0;left:3px;background:#f59e0b;color:#fff;font-size:8px;font-weight:900;padding:1px 3px;border-radius:2px;white-space:nowrap;line-height:1.4;">${nowFmt2}</div>`;
+            scrollWrap.appendChild(nowLine);
+
+            container.appendChild(wrap);
         }
 
         // Airline importance rank — lower = higher importance.
