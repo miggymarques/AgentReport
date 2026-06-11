@@ -5116,7 +5116,7 @@
                 const subNote = (mtc, noTrn) => {
                     const parts = [];
                     if (mtc > 0)   parts.push(`<span style="font-size:8px;font-weight:800;color:#c084fc;">${mtc}&nbsp;MTC</span>`);
-                    if (noTrn > 0) parts.push(`<span style="font-size:8px;font-weight:800;color:#64748b;">${noTrn}&nbsp;Unreachable</span>`);
+                    if (noTrn > 0) parts.push(`<span style="font-size:8px;font-weight:800;color:#64748b;">${noTrn}&nbsp;NoTrns</span>`);
                     if (!parts.length) return '';
                     return `<span style="font-size:8px;font-weight:700;color:#475569;">excl.&nbsp;</span>` + parts.join(`<span style="color:#1e3a5f;padding:0 2px;">·</span>`);
                 };
@@ -5130,10 +5130,9 @@
                     <span style="font-size:8px;font-weight:800;color:#94a3b8;">${rows.length}&nbsp;Total</span>
                     <div style="margin-left:auto;display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
                       ${chip('SERVICED',  'Svc\'d',       serviced.length,  '#34d399', '#0d2d1e')}
-                      ${chip('MISSED',    'Miss',          past2Missed,      '#f87171', '#2d0d0d')}
-                      ${chip('DUE_TODAY', 'Due',           dueToday.length,  '#fb923c', '#2d1a08')}
+                      ${chip('DUE_TODAY', 'Pend',          dueToday.length,  '#fb923c', '#2d1a08')}
                       ${chip('MTC',       'MTC',           mtcCount,         '#c084fc', '#1e0d2e')}
-                      ${chip('NO_TURNS',  'Unreachable',   noTurnCount,      '#64748b', '#1e293b')}
+                      ${chip('NO_TURNS',  'NoTrns',        noTurnCount,      '#64748b', '#1e293b')}
                       ${clearChip}
                     </div>
                   </div>
@@ -5145,7 +5144,7 @@
                     <div style="padding:3px 8px;display:flex;flex-direction:column;gap:2px;">
                       <span style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#3b82f6;">Last 2 Days</span>
                       <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
-                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Tgt&nbsp;<span style="color:#94a3b8;font-weight:900;">${past2Target}</span></span>
+                        <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Elig&nbsp;<span style="color:#94a3b8;font-weight:900;">${past2Target}</span></span>
                         ${PIPE}
                         <span style="font-size:8px;font-weight:700;color:#7a8fa6;">Svc'd&nbsp;<span style="color:#34d399;font-weight:900;">${past2Svc}</span></span>
                         ${PIPE}
@@ -5161,7 +5160,7 @@
                     <!-- Divider -->
                     <div style="background:#1e293b;"></div>
 
-                    <!-- RIGHT: Today + Overall -->
+                    <!-- RIGHT: Today -->
                     <div style="padding:3px 8px;display:flex;flex-direction:column;gap:2px;">
                       <span style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#4ade80;">Today</span>
                       <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
@@ -5175,10 +5174,15 @@
                       </div>
                       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         ${inlineStat('Svc/Elig ', '#7a8fa6', dueTodaySvcd.length, svcbleToday, todayPct, todayColor)}
-                        ${inlineStat('Overall ', '#7a8fa6', totalServiced, overallElig, overallPct, overallColor)}
                       </div>
                     </div>
 
+                  </div>
+
+                  <!-- Row 3: Overall service rate — full width single line -->
+                  <div style="padding:3px 8px;border-top:1px solid #1e293b;display:flex;align-items:center;justify-content:center;gap:6px;">
+                    <span style="font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:0.1em;color:#94a3b8;flex-shrink:0;">Overall</span>
+                    ${inlineStat('Service Rate ', '#7a8fa6', totalServiced, overallElig, overallPct, overallColor)}
                   </div>
                 `;
                 perfHdr.appendChild(hdr);
@@ -5207,16 +5211,16 @@
             const tbl = document.createElement('table');
             tbl.style.cssText = 'width:100%;border-collapse:collapse;min-width:max-content;font-size:10px;';
             tbl.innerHTML = `<thead><tr style="background:#334155;color:white;position:sticky;top:0;z-index:5;">
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">FIN</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Type</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Body</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Status</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Last Serviced</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Days Since</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Stn</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Agent</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Turns at Base (72h)</th>
-                <th style="${CELL}font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Note</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">FIN</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Type</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Body</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Status</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Last Serviced</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Days Since</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Stn</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Agent</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Turns at Base (72h)</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Note</th>
             </tr></thead>`;
             const tbody = document.createElement('tbody');
 
