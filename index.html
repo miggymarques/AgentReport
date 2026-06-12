@@ -5659,39 +5659,38 @@
             mtcPill.innerHTML = `<span style="display:inline-block;width:10px;height:10px;background:${MTC_COLOR};border-radius:2px;"></span><span style="font-size:9px;font-weight:700;color:#475569;">MTC</span>`;
             topBar.appendChild(mtcPill);
 
-            // Spacer + rotate button (mobile only) + NOW button
+            // Spacer + rotate button + NOW button
             const spacer = document.createElement('span');
             spacer.style.cssText = 'flex:1;';
             topBar.appendChild(spacer);
 
-            // Rotate button — only shown on mobile/touch devices
-            if (isMobile) {
-                const rotBtn = document.createElement('button');
-                const isCompact = mobileLS; // current state
-                rotBtn.title = isCompact ? 'Switch to portrait layout' : 'Switch to landscape layout';
-                rotBtn.style.cssText = [
-                    'display:flex;align-items:center;justify-content:center',
-                    'width:28px;height:28px',
-                    'background:' + (isCompact ? '#0f172a' : '#e2e8f0'),
-                    'color:' + (isCompact ? '#fff' : '#475569'),
-                    'border:none',
-                    'border-radius:8px',
-                    'cursor:pointer',
-                    'flex-shrink:0',
-                    'transition:all 0.15s',
-                ].join(';');
-                // SVG phone-rotate icon
-                rotBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" ${isCompact ? 'transform="rotate(-90 12 12)"' : ''}/>
-                    <path d="${isCompact ? 'M8 12h8M14 9l3 3-3 3' : 'M12 8v8M9 14l3 3 3-3'}"/>
-                </svg>`;
-                rotBtn.onclick = () => {
-                    _ganttForceLandscape = !_ganttForceLandscape;
-                    const c = document.getElementById('ref-editor-list');
-                    if (c) { c.innerHTML = ''; renderGanttChart(c); }
-                };
-                topBar.appendChild(rotBtn);
-            }
+            // Rotate/compact toggle button — always visible on GNTT tab
+            const rotBtn = document.createElement('button');
+            const isCompact = mobileLS;
+            rotBtn.title = isCompact ? 'Switch to standard layout' : 'Switch to compact landscape layout';
+            rotBtn.style.cssText = [
+                'display:flex;align-items:center;justify-content:center;gap:4px',
+                'padding:2px 8px',
+                'background:' + (isCompact ? '#0f172a' : '#e2e8f0'),
+                'color:' + (isCompact ? '#fff' : '#475569'),
+                'border:none',
+                'border-radius:99px',
+                'font-size:9px',
+                'font-weight:900',
+                'cursor:pointer',
+                'font-family:ui-monospace,monospace',
+                'letter-spacing:0.05em',
+                'flex-shrink:0',
+            ].join(';');
+            rotBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 8H3M3 8l4-4M3 8l4 4M3 16h18M21 16l-4-4M21 16l-4 4"/>
+            </svg>${isCompact ? 'WIDE' : 'CMPCT'}`;
+            rotBtn.onclick = () => {
+                _ganttForceLandscape = !_ganttForceLandscape;
+                const c = document.getElementById('ref-editor-list');
+                if (c) { c.innerHTML = ''; renderGanttChart(c); }
+            };
+            topBar.appendChild(rotBtn);
 
             const nowBtn = document.createElement('button');
             nowBtn.style.cssText = [
