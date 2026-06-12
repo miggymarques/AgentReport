@@ -5505,9 +5505,10 @@
         }
 
         // ─── Gantt Chart state (persists across re-renders) ──────────────────────
-        let _ganttStnFilter  = null;  // null = all, 'YUL'|'YYZ'|'YYC'|'YVR' = filtered
-        let _ganttOrientMQ   = null;  // MediaQueryList — cleaned up on tab switch
-        let _ganttOrientCb   = null;  // listener ref so we can remove it
+        let _ganttStnFilter     = null;  // null = all, 'YUL'|'YYZ'|'YYC'|'YVR' = filtered
+        let _ganttOrientMQ      = null;  // MediaQueryList — cleaned up on tab switch
+        let _ganttOrientCb      = null;  // listener ref so we can remove it
+        let _ganttForceLandscape = false; // manual landscape override (rotate button)
 
         // Call this from switchRefTab when leaving gantt to tear down the listener
         function _ganttTeardown() {
@@ -5517,6 +5518,7 @@
                 try { screen.orientation.removeEventListener('change', _ganttOrientCb); } catch(e) {}
                 try { window.removeEventListener('resize', _ganttOrientCb); } catch(e) {}
                 _ganttOrientMQ = null; _ganttOrientCb = null;
+                _ganttForceLandscape = false;
             }
         }
 
@@ -5532,7 +5534,7 @@
             // without horizontal scroll. On portrait / desktop we use generous sizing.
             const isMobile    = window.innerWidth <= 900 || ('ontouchstart' in window);
             const isLandscape = window.matchMedia('(orientation: landscape)').matches;
-            const mobileLS    = isMobile && isLandscape; // mobile + landscape = compact mode
+            const mobileLS    = isMobile && (isLandscape || _ganttForceLandscape);
 
             const SLOTS     = 96;
             const SLOT_W    = mobileLS ? Math.max(7, Math.floor((window.innerWidth - 56) / 96)) : 14;
@@ -5657,10 +5659,39 @@
             mtcPill.innerHTML = `<span style="display:inline-block;width:10px;height:10px;background:${MTC_COLOR};border-radius:2px;"></span><span style="font-size:9px;font-weight:700;color:#475569;">MTC</span>`;
             topBar.appendChild(mtcPill);
 
-            // Spacer + NOW button
+            // Spacer + rotate button (mobile only) + NOW button
             const spacer = document.createElement('span');
             spacer.style.cssText = 'flex:1;';
             topBar.appendChild(spacer);
+
+            // Rotate button — only shown on mobile/touch devices
+            if (isMobile) {
+                const rotBtn = document.createElement('button');
+                const isCompact = mobileLS; // current state
+                rotBtn.title = isCompact ? 'Switch to portrait layout' : 'Switch to landscape layout';
+                rotBtn.style.cssText = [
+                    'display:flex;align-items:center;justify-content:center',
+                    'width:28px;height:28px',
+                    'background:' + (isCompact ? '#0f172a' : '#e2e8f0'),
+                    'color:' + (isCompact ? '#fff' : '#475569'),
+                    'border:none',
+                    'border-radius:8px',
+                    'cursor:pointer',
+                    'flex-shrink:0',
+                    'transition:all 0.15s',
+                ].join(';');
+                // SVG phone-rotate icon
+                rotBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" ${isCompact ? 'transform="rotate(-90 12 12)"' : ''}/>
+                    <path d="${isCompact ? 'M8 12h8M14 9l3 3-3 3' : 'M12 8v8M9 14l3 3 3-3'}"/>
+                </svg>`;
+                rotBtn.onclick = () => {
+                    _ganttForceLandscape = !_ganttForceLandscape;
+                    const c = document.getElementById('ref-editor-list');
+                    if (c) { c.innerHTML = ''; renderGanttChart(c); }
+                };
+                topBar.appendChild(rotBtn);
+            }
 
             const nowBtn = document.createElement('button');
             nowBtn.style.cssText = [
