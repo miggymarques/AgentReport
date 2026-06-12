@@ -5516,7 +5516,7 @@
                 try { _ganttOrientMQ.removeEventListener('change', _ganttOrientCb); } catch(e) {}
                 try { _ganttOrientMQ.removeListener(_ganttOrientCb); } catch(e) {}
                 try { screen.orientation.removeEventListener('change', _ganttOrientCb); } catch(e) {}
-                try { window.removeEventListener('resize', _ganttOrientCb); } catch(e) {}
+                window.removeEventListener('resize', _ganttOrientCb);
                 _ganttOrientMQ = null; _ganttOrientCb = null;
                 _ganttForceLandscape = false;
             }
@@ -5530,11 +5530,16 @@
             }
 
             // ── Orientation-aware layout constants ──────────────────────────────
-            // On mobile landscape we squeeze rows/cols so the full 24h fits (or nearly)
-            // without horizontal scroll. On portrait / desktop we use generous sizing.
-            const isMobile    = window.innerWidth <= 900 || ('ontouchstart' in window);
-            const isLandscape = window.matchMedia('(orientation: landscape)').matches;
-            const mobileLS    = isMobile && (isLandscape || _ganttForceLandscape);
+            // _ganttForceLandscape (button) works on ANY device — it's the reliable path.
+            // Auto-detection is best-effort; Android WebView often doesn't fire events.
+            const isMobile    = window.innerWidth <= 1024
+                             || navigator.maxTouchPoints > 0
+                             || ('ontouchstart' in window)
+                             || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            const isLandscape = window.matchMedia('(orientation: landscape)').matches
+                             || (window.screen && window.screen.width > window.screen.height);
+            // mobileLS: compact layout when button forced OR auto-detected mobile landscape
+            const mobileLS    = _ganttForceLandscape || (isMobile && isLandscape);
 
             const SLOTS     = 96;
             const SLOT_W    = mobileLS ? Math.max(7, Math.floor((window.innerWidth - 56) / 96)) : 14;
@@ -5545,26 +5550,32 @@
             const HDR_FS    = mobileLS ? 7  : 9;
 
             // Register orientation listener once per gantt session.
-            // Use both matchMedia AND screen.orientation change for broad mobile support.
+            // Android WebView is unreliable with matchMedia — we use a resize observer
+            // on the document body as the most reliable cross-platform signal.
             if (!_ganttOrientMQ) {
                 _ganttOrientMQ = window.matchMedia('(orientation: landscape)');
+                let _lastOrientation = isLandscape ? 'landscape' : 'portrait';
                 _ganttOrientCb = () => {
                     if (activeRefTab !== 'gantt') return;
+                    // Check actual orientation from screen dimensions (most reliable on Android)
+                    const nowLandscape = window.screen
+                        ? window.screen.width > window.screen.height
+                        : window.matchMedia('(orientation: landscape)').matches;
+                    const nowOrient = nowLandscape ? 'landscape' : 'portrait';
+                    // Only re-render if orientation actually changed (avoid resize noise)
+                    if (nowOrient === _lastOrientation && !_ganttForceLandscape) return;
+                    _lastOrientation = nowOrient;
                     const c = document.getElementById('ref-editor-list');
                     if (!c) return;
                     c.innerHTML = '';
                     renderGanttChart(c);
                 };
+                // All three strategies — whichever fires on the current device wins
                 try { _ganttOrientMQ.addEventListener('change', _ganttOrientCb); } catch(e) {
                     try { _ganttOrientMQ.addListener(_ganttOrientCb); } catch(e2) {}
                 }
-                // iOS Safari: also listen on screen.orientation
-                try {
-                    screen.orientation.addEventListener('change', _ganttOrientCb);
-                } catch(e) {
-                    // fallback: window resize covers most remaining cases
-                    window.addEventListener('resize', _ganttOrientCb);
-                }
+                try { screen.orientation.addEventListener('change', _ganttOrientCb); } catch(e) {}
+                window.addEventListener('resize', _ganttOrientCb);
             }
 
             // Station colour map
