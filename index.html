@@ -1718,11 +1718,39 @@
         }
 
         function openRefEditor() { switchRefTab(activeRefTab); document.getElementById('editor-modal').classList.add('open'); }
-        function closeRefEditor() { document.getElementById('editor-modal').classList.remove('open'); }
+        function closeRefEditor() {
+            // Restore modal sizing if we're leaving from gantt fullscreen
+            _ganttSetModalSize(false);
+            document.getElementById('editor-modal').classList.remove('open');
+        }
+
+        // Expand/collapse the editor modal for the GNTT tab
+        function _ganttSetModalSize(expand) {
+            const modal     = document.getElementById('editor-modal');
+            const innerPanel = modal?.querySelector('.bg-white');
+            if (!modal || !innerPanel) return;
+            if (expand) {
+                modal.style.padding       = '0';
+                innerPanel.style.maxWidth = '100vw';
+                innerPanel.style.width    = '100vw';
+                innerPanel.style.maxHeight= '100vh';
+                innerPanel.style.height   = '100vh';
+                innerPanel.style.borderRadius = '0';
+            } else {
+                modal.style.padding       = '';
+                innerPanel.style.maxWidth = '';
+                innerPanel.style.width    = '';
+                innerPanel.style.maxHeight= '';
+                innerPanel.style.height   = '';
+                innerPanel.style.borderRadius = '';
+            }
+        }
 
         function switchRefTab(tab) {
             // Tear down gantt orientation listener when leaving that tab
             if (activeRefTab === 'gantt' && tab !== 'gantt') _ganttTeardown();
+            // Expand modal to full screen for GNTT, restore for all others
+            _ganttSetModalSize(tab === 'gantt');
             activeRefTab = tab;
             document.getElementById('ref-tab-aircraft').className    = `flex-1 py-3 border-b-2 ${tab === 'aircraft'     ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
             document.getElementById('ref-tab-assets').className       = `flex-1 py-3 border-b-2 ${tab === 'assets'       ? 'border-blue-600 text-blue-600'       : 'border-transparent text-slate-400'}`;
@@ -5485,6 +5513,9 @@
         function _ganttTeardown() {
             if (_ganttOrientMQ && _ganttOrientCb) {
                 try { _ganttOrientMQ.removeEventListener('change', _ganttOrientCb); } catch(e) {}
+                try { _ganttOrientMQ.removeListener(_ganttOrientCb); } catch(e) {}
+                try { screen.orientation.removeEventListener('change', _ganttOrientCb); } catch(e) {}
+                try { window.removeEventListener('resize', _ganttOrientCb); } catch(e) {}
                 _ganttOrientMQ = null; _ganttOrientCb = null;
             }
         }
@@ -5511,16 +5542,27 @@
             const HDR_FS_KEY= mobileLS ? 8  : 10;  // key-hour font size in header
             const HDR_FS    = mobileLS ? 7  : 9;
 
-            // Register orientation listener once per gantt session
+            // Register orientation listener once per gantt session.
+            // Use both matchMedia AND screen.orientation change for broad mobile support.
             if (!_ganttOrientMQ) {
                 _ganttOrientMQ = window.matchMedia('(orientation: landscape)');
                 _ganttOrientCb = () => {
-                    if (activeRefTab === 'gantt') {
-                        container.innerHTML = '';
-                        renderGanttChart(container);
-                    }
+                    if (activeRefTab !== 'gantt') return;
+                    const c = document.getElementById('ref-editor-list');
+                    if (!c) return;
+                    c.innerHTML = '';
+                    renderGanttChart(c);
                 };
-                try { _ganttOrientMQ.addEventListener('change', _ganttOrientCb); } catch(e) {}
+                try { _ganttOrientMQ.addEventListener('change', _ganttOrientCb); } catch(e) {
+                    try { _ganttOrientMQ.addListener(_ganttOrientCb); } catch(e2) {}
+                }
+                // iOS Safari: also listen on screen.orientation
+                try {
+                    screen.orientation.addEventListener('change', _ganttOrientCb);
+                } catch(e) {
+                    // fallback: window resize covers most remaining cases
+                    window.addEventListener('resize', _ganttOrientCb);
+                }
             }
 
             // Station colour map
@@ -5695,7 +5737,45 @@
             }
             r2 += '</tr>';
 
-            thead.innerHTML = r1 + r2;
+            // Row 3: per-slot ground count (respects station filter)
+            // Pre-compute: slotCount[s] = number of aircraft on the ground at slot s
+            const slotCount = new Array(SLOTS).fill(0);
+            Object.keys(scheduleData).forEach(fin => {
+                (scheduleData[fin] || []).forEach(rot => {
+                    const stn = (rot.stn || '').trim().toUpperCase();
+                    // If station filter active, only count matching station
+                    if (_ganttStnFilter && stn !== _ganttStnFilter) return;
+                    const idtMin = toMinutes(rot.idt);
+                    const odtMin = toMinutes(rot.odt);
+                    if (idtMin === null || odtMin === null) return;
+                    const startSlot = Math.floor(idtMin / 15);
+                    let   endSlot   = Math.floor(odtMin / 15);
+                    if (endSlot <= startSlot) endSlot = SLOTS;
+                    for (let s = startSlot; s < Math.min(endSlot, SLOTS); s++) slotCount[s]++;
+                });
+            });
+            // Max count for colour scaling
+            const maxCount = Math.max(1, ...slotCount);
+
+            // Build count row — merge consecutive slots with same count for performance
+            // Show counts only on hour boundaries to keep it readable; other cells are
+            // coloured by density but blank.
+            let r3 = `<tr style="background:#0f172a;">
+                <th style="width:${FIN_COL_W}px;padding:0;border-right:2px solid #475569;position:sticky;left:0;background:#0f172a;z-index:9;"></th>`;
+            for (let i = 0; i < SLOTS; i++) {
+                const cnt      = slotCount[i];
+                const isHour   = i % 4 === 0;
+                // Colour: 0 = dark bg, > 0 scale from #1e3a5f to #3b82f6
+                const intensity = cnt / maxCount;
+                const alpha     = cnt > 0 ? Math.round(30 + intensity * 180) : 0;
+                const bg        = cnt > 0 ? `rgba(59,130,246,${(alpha/255).toFixed(2)})` : 'transparent';
+                const showNum   = isHour && cnt > 0;
+                const txtColor  = intensity > 0.5 ? '#fff' : '#93c5fd';
+                r3 += `<th style="padding:0;background:${bg};border-left:${isHour ? '1px solid #334155' : 'none'};height:12px;vertical-align:middle;font-size:7px;font-weight:900;color:${txtColor};text-align:center;" title="${cnt} aircraft on ground">${showNum ? cnt : ''}</th>`;
+            }
+            r3 += '</tr>';
+
+            thead.innerHTML = r1 + r2 + r3;
             tbl.appendChild(thead);
 
             // ── tbody
@@ -5834,19 +5914,20 @@
                             else                  baseColor = STN_COLOR[info.stn] || '#64748b';
 
                             const bgStyle    = dimmed ? `background:${baseColor};opacity:0.3;` : `background:${baseColor};`;
-                            // Dark label colour with white outline — works on coloured blocks AND white bg
                             const labelColor = dimmed ? 'transparent' : '#0f172a';
-                            const txtShadow  = 'text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff';
+                            // Pill box: white background + 1px black border — readable on any colour
+                            const pillStyle = dimmed ? '' :
+                                'background:#fff;border:1px solid #000;border-radius:3px;padding:0 3px;line-height:1.5;display:inline-flex;align-items:center;gap:2px;white-space:nowrap;';
 
                             let labelHtml = '';
                             if (showMin) {
                                 const inner = showFull
-                                    ? `<span style="${txtShadow};opacity:0.9;font-size:${timFS}px;flex-shrink:0;white-space:nowrap;">${info.idtLabel}</span><span style="${txtShadow};margin:0 3px;font-size:${LABEL_FS}px;letter-spacing:0.06em;flex-shrink:0;white-space:nowrap;">${displayStn}</span><span style="${txtShadow};opacity:0.9;font-size:${timFS}px;flex-shrink:0;white-space:nowrap;">${info.odtLabel}</span>`
+                                    ? `<span style="font-size:${timFS}px;flex-shrink:0;">${info.idtLabel}</span><span style="font-size:${LABEL_FS}px;letter-spacing:0.06em;flex-shrink:0;margin:0 1px;">${displayStn}</span><span style="font-size:${timFS}px;flex-shrink:0;">${info.odtLabel}</span>`
                                     : showMed
-                                    ? `<span style="${txtShadow};opacity:0.9;font-size:${timFS}px;flex-shrink:0;white-space:nowrap;">${info.idtLabel}</span><span style="${txtShadow};margin-left:3px;font-size:${LABEL_FS}px;letter-spacing:0.06em;flex-shrink:0;white-space:nowrap;">${displayStn}</span>`
-                                    : `<span style="${txtShadow};font-size:${LABEL_FS}px;letter-spacing:0.06em;white-space:nowrap;">${displayStn}</span>`;
+                                    ? `<span style="font-size:${timFS}px;flex-shrink:0;">${info.idtLabel}</span><span style="font-size:${LABEL_FS}px;letter-spacing:0.06em;flex-shrink:0;margin-left:1px;">${displayStn}</span>`
+                                    : `<span style="font-size:${LABEL_FS}px;letter-spacing:0.06em;">${displayStn}</span>`;
 
-                                labelHtml = `<div style="position:absolute;top:0;bottom:0;left:${labelLeft}px;width:${labelW}px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:${labelColor};font-weight:900;pointer-events:none;z-index:3;">${inner}</div>`;
+                                labelHtml = `<div style="position:absolute;top:0;bottom:0;left:${labelLeft}px;width:${labelW}px;display:flex;align-items:center;justify-content:center;overflow:hidden;color:${labelColor};font-weight:900;pointer-events:none;z-index:3;"><span style="${pillStyle}">${inner}</span></div>`;
                             }
 
                             const titleTxt = `${info.idtLabel||'?'} → ${info.odtLabel||'?'} · ${displayStn}${info.isMtc?' [MTC]':''}`;
