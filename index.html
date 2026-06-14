@@ -5251,19 +5251,21 @@
 
             const wrap = document.createElement('div');
             wrap.id = 'perf-body-scroll';
+            wrap.style.cssText = 'overflow-x:auto;overflow-y:auto;position:relative;background:#fff;';
+
             const tbl = document.createElement('table');
             tbl.style.cssText = 'width:100%;border-collapse:collapse;min-width:max-content;font-size:10px;';
-            tbl.innerHTML = `<thead><tr style="background:#334155;color:white;position:sticky;top:0;z-index:5;">
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">FIN</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Type</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Body</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Status</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Last Serviced</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Days Since</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Stn</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Agent</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Turns at Base (72h)</th>
-                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;position:sticky;top:0;background:#334155;">Note</th>
+            tbl.innerHTML = `<thead style="position:sticky;top:0;z-index:5;"><tr style="background:#334155;color:white;">
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">FIN</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Type</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Body</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Status</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Last Serviced</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Days Since</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Stn</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Agent</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Turns at Base (72h)</th>
+                <th style="${CELL}font-size:8px;font-weight:900;text-transform:uppercase;background:#334155;">Note</th>
             </tr></thead>`;
             const tbody = document.createElement('tbody');
 
@@ -5301,6 +5303,19 @@
             tbl.appendChild(tbody);
             wrap.appendChild(tbl);
             container.appendChild(wrap);
+
+            // Size wrap to fill remaining panel height so horizontal scrollbar
+            // always sits at the visible bottom, not at the end of the data.
+            requestAnimationFrame(() => {
+                const listEl = document.getElementById('ref-editor-list');
+                if (listEl) {
+                    // Account for sticky header and any filter strip above wrap
+                    const wrapTop = wrap.getBoundingClientRect().top;
+                    const listBottom = listEl.getBoundingClientRect().bottom;
+                    const available = listBottom - wrapTop;
+                    if (available > 80) wrap.style.height = available + 'px';
+                }
+            });
         }
 
         // Called by filter chips — sets filter and re-renders the perf tab
@@ -5980,9 +5995,9 @@
                     const W_L2   = Math.ceil(5*cT + G + 3*cS);             // arr STN
                     const W_L1   = Math.ceil(3*cS);                         // STN only
 
-                    // Pre-build a list of all ground blocks for this row so we can look up
-                    // the start pixel of the NEXT block when computing clip width.
-                    // blockList[i] = { startSlot, endSlot (exclusive), run, rotIdx }
+                    // Pre-build blockList with priority ranks for label collision resolution.
+                    // Priority: 0 = current (nowSlot inside), then future blocks (1,2,3...),
+                    // then past blocks (higher numbers = lower priority = yield first).
                     const blockList = [];
                     {
                         let bs = 0;
@@ -5991,13 +6006,59 @@
                                 const ri = groundInfo[bs].rotIdx;
                                 let br = 1;
                                 while (bs + br < SLOTS && groundInfo[bs+br] !== null && groundInfo[bs+br].rotIdx === ri) br++;
-                                blockList.push({ startSlot: bs, run: br, rotIdx: ri });
+                                const isCurrent = nowSlot >= bs && nowSlot < bs + br;
+                                blockList.push({ startSlot: bs, run: br, rotIdx: ri, isCurrent });
                                 bs += br;
                             } else {
                                 bs++;
                             }
                         }
                     }
+
+                    // Two priority levels only:
+                    //   rank 0 = current block (now-line inside it)
+                    //   rank 1 = next block after now
+                    //   rank 2 = everything else
+                    // Only rank 0 and rank 1 blocks impose clipping on neighbours.
+                    // rank-2 blocks never clip anyone — they only get clipped by rank 0/1.
+                    const nowSlotInt = Math.floor(nowSlot);
+
+                    // Find current and next indices
+                    const currentIdx = blockList.findIndex(b => b.isCurrent);
+                    const nextIdx    = blockList.findIndex(b => b.startSlot > nowSlotInt && !b.isCurrent);
+
+                    blockList.forEach((b, i) => {
+                        if (i === currentIdx)    b.rank = 0;
+                        else if (i === nextIdx)  b.rank = 1;
+                        else                     b.rank = 2;
+                    });
+
+                    // Set pill extents and default clip bounds (no clipping)
+                    blockList.forEach(b => {
+                        const bMidPx   = (b.startSlot + b.run / 2) * SLOT_W;
+                        b.pillHalfW    = (W_FULL + 10) / 2;
+                        b.pillAbsLeft  = bMidPx - b.pillHalfW;
+                        b.pillAbsRight = bMidPx + b.pillHalfW;
+                        b.leftBound    = -99999;
+                        b.rightBound   =  99999;
+                    });
+
+                    // For each adjacent pair: only dominant (rank < 2) blocks impose clipping
+                    blockList.forEach((b, i) => {
+                        const rn = blockList[i + 1];
+                        if (!rn) return;
+                        const overlap = b.pillAbsRight - rn.pillAbsLeft;
+                        if (overlap <= 0) return;
+
+                        if (b.rank < rn.rank) {
+                            // b is dominant — clip rn's LEFT side by the overlap amount
+                            rn.leftBound = Math.max(rn.leftBound, rn.pillAbsLeft + overlap);
+                        } else if (rn.rank < b.rank) {
+                            // rn is dominant — clip b's RIGHT side by the overlap amount
+                            b.rightBound = Math.min(b.rightBound, b.pillAbsRight - overlap);
+                        }
+                        // equal rank: neither clips the other
+                    });
 
                     let s = 0;
                     let blockIdx = 0;
@@ -6012,28 +6073,20 @@
                             const blockPx      = run * SLOT_W;
                             const blockEndPx   = blockStartPx + blockPx;
 
-                            // Next block start pixel.
-                            // When no next block exists, use a very large number so the label
-                            // is NEVER clipped on the right — it can extend freely leftward.
-                            const nextBlk          = blockList[blockIdx]; // already incremented
-                            const nextBlockStartPx = nextBlk
-                                ? nextBlk.startSlot * SLOT_W
-                                : 99999; // no next block → no right clip
+                            // Convert absolute clip boundaries to relative-to-this-td px
+                            // clipLeft/clipRight are absolute; blockStartPx is this td's left
+                            // Timeline edge constraints (absolute px)
+                            const timelineLeft  = 0;
+                            const timelineRight = SLOTS * SLOT_W;
 
-                            // clipRight: max px the label right-edge can reach, relative to
-                            // this td's left edge (blockStartPx).
-                            const clipRight = nextBlockStartPx - blockStartPx;
+                            const midPx        = blockPx / 2;
+                            const blockAbsMid  = blockStartPx + midPx;
 
-                            // Degradation: only spaceRight limits what we can show.
-                            // Left is always free. Use clipRight but cap at a generous max
-                            // so end-of-timeline blocks always show full label.
-                            const midPx      = blockPx / 2;
-                            const spaceRight = Math.min(clipRight, 99999) - midPx;
-
-                            const showFull = spaceRight >= W_FULL / 2;
-                            const showL3   = !showFull && spaceRight >= W_L3 / 2;
-                            const showL2   = !showFull && !showL3 && spaceRight >= W_L2 / 2;
-                            const showMin  = showFull || showL3 || showL2 || spaceRight >= W_L1 / 2;
+                            // Always try full label — degrade only if block itself is tiny
+                            const showFull = true;
+                            const showL3   = false;
+                            const showL2   = false;
+                            const showMin  = true;
 
                             // Colour
                             const isOtherStn  = _ganttStnFilter && info.stn !== _ganttStnFilter;
@@ -6051,7 +6104,6 @@
 
                             const bgStyle    = dimmed ? `background:${baseColor};opacity:0.3;` : `background:${baseColor};`;
                             const labelColor = dimmed ? 'transparent' : '#0f172a';
-                            // Pill: always renders at natural width — border is never force-clipped
                             const pillStyle  = dimmed ? '' :
                                 'background:#fff;border:1px solid #000;border-radius:3px;padding:0 4px;line-height:1.6;display:inline-flex;align-items:center;gap:2px;white-space:nowrap;flex-shrink:0;';
 
@@ -6060,61 +6112,48 @@
                             const dot       = `<span style="opacity:0.4;font-size:${timFS}px;margin:0 1px;">·</span>`;
 
                             let labelHtml = '';
-                            if (showMin) {
-                                let inner;
-                                if (showFull) {
-                                    inner = [
-                                        iStnLabel ? `<span style="${secStyle}">${iStnLabel}</span>${dot}` : '',
-                                        `<span style="${secStyle}">${info.idtLabel}</span>`,
-                                        dot,
-                                        `<span style="${stnStyle}">${displayStn}</span>`,
-                                        dot,
-                                        `<span style="${secStyle}">${info.odtLabel}</span>`,
-                                        oStnLabel ? `${dot}<span style="${secStyle}">${oStnLabel}</span>` : '',
-                                    ].join('');
-                                } else if (showL3) {
-                                    inner = [
-                                        `<span style="${secStyle}">${info.idtLabel}</span>`,
-                                        dot,
-                                        `<span style="${stnStyle}">${displayStn}</span>`,
-                                        dot,
-                                        `<span style="${secStyle}">${info.odtLabel}</span>`,
-                                    ].join('');
-                                } else if (showL2) {
-                                    inner = [
-                                        `<span style="${secStyle}">${info.idtLabel}</span>`,
-                                        dot,
-                                        `<span style="${stnStyle}">${displayStn}</span>`,
-                                    ].join('');
-                                } else {
-                                    inner = `<span style="${stnStyle}">${displayStn}</span>`;
-                                }
+                            {
+                                const inner = [
+                                    iStnLabel ? `<span style="${secStyle}">${iStnLabel}</span>${dot}` : '',
+                                    `<span style="${secStyle}">${info.idtLabel}</span>`,
+                                    dot,
+                                    `<span style="${stnStyle}">${displayStn}</span>`,
+                                    dot,
+                                    `<span style="${secStyle}">${info.odtLabel}</span>`,
+                                    oStnLabel ? `${dot}<span style="${secStyle}">${oStnLabel}</span>` : '',
+                                ].join('');
 
-                                // Estimate pill natural width
-                                const pillEstW = showFull ? W_FULL + 10
-                                               : showL3   ? W_L3   + 8
-                                               : showL2   ? W_L2   + 8
-                                               :             W_L1   + 6;
+                                const pillEstW = W_FULL + 10;
 
-                                // The container sits at left:0 of the first slot td.
-                                // We use CSS transform to shift it leftward so the pill
-                                // is centred over the block midpoint — transforms are not
-                                // clipped by parent overflow boundaries the way negative
-                                // left values can be in table contexts.
-                                // Shift: move pill so its centre aligns with midPx.
-                                // If that would push the right edge past clipRight,
-                                // right-align against clipRight instead.
-                                const idealShift     = midPx - pillEstW / 2;  // negative = shift left
-                                const rightAlignShift = clipRight - pillEstW - 2;
-                                // Use whichever is more left (extends further left = more visible)
-                                const translateX = Math.min(idealShift, rightAlignShift);
-                                // Container width: wide enough to hold pill + any right overflow
-                                // Use clipRight so overflow:hidden clips only at next-block boundary
-                                const contW = clipRight > 99000
-                                    ? pillEstW + Math.abs(Math.min(0, translateX)) + 20 // no next block: natural
-                                    : clipRight - translateX; // next block present: clip at boundary
+                                // Centre pill over block midpoint, clamped so it never
+                                // exceeds the timeline boundaries on either side.
+                                const idealContLeft = midPx - pillEstW / 2;
+                                // Clamp left: pill must not start left of timeline (relative to td)
+                                const clampedLeft  = Math.max(idealContLeft, -blockStartPx);
+                                // Clamp right: pill must not end right of timeline (relative to td)
+                                const clampedRight = Math.min(clampedLeft + pillEstW, timelineRight - blockStartPx);
+                                // Final contLeft after both clamps
+                                const contLeft = clampedRight - pillEstW < clampedLeft
+                                    ? clampedLeft  // prefer left-clamp if both would fire
+                                    : clampedLeft;
 
-                                labelHtml = `<div style="position:absolute;top:0;bottom:0;left:0;width:${contW}px;overflow:hidden;display:flex;align-items:center;justify-content:flex-start;pointer-events:none;z-index:3;color:${labelColor};font-weight:900;transform:translateX(${translateX}px);">` +
+                                // Pill absolute extents after clamping
+                                const pillAbsL = blockStartPx + contLeft;
+                                const pillAbsR = pillAbsL + pillEstW;
+
+                                // Clip ONLY where a dominant neighbour's pill overlaps us.
+                                // No extra edge clipping — the contLeft clamping already
+                                // keeps the pill within the timeline.
+                                const leftCut  = blk.leftBound  > -99999 && blk.leftBound  > pillAbsL
+                                    ? blk.leftBound  - pillAbsL : 0;
+                                const rightCut = blk.rightBound <  99999 && blk.rightBound < pillAbsR
+                                    ? pillAbsR - blk.rightBound : 0;
+
+                                const clipStyle = (leftCut > 0 || rightCut > 0)
+                                    ? `clip-path:inset(0px ${rightCut}px 0px ${leftCut}px);`
+                                    : '';
+
+                                labelHtml = `<div style="position:absolute;top:0;bottom:0;left:${contLeft}px;width:${pillEstW}px;overflow:visible;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:3;color:${labelColor};font-weight:900;${clipStyle}">` +
                                     `<span style="${pillStyle}">${inner}</span></div>`;
                             }
 
