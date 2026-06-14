@@ -5521,9 +5521,10 @@
 
         // ─── Gantt Chart state (persists across re-renders) ──────────────────────
         let _ganttStnFilter      = null;   // null = all, 'YUL'|'YYZ'|'YYC'|'YVR'
-        let _ganttFilterP1       = false;  // show only P1 / due-today aircraft
-        let _ganttFilterGRN      = false;  // show only aircraft currently on the ground
-        let _ganttFilterMTC      = false;  // show only MTC aircraft
+        let _ganttFilterP1       = false;
+        let _ganttFilterGRN      = false;
+        let _ganttFilterMTC      = false;
+        let _ganttHideMTC        = false;  // exclude MTC blocks from chart entirely
         let _ganttOrientMQ       = null;
         let _ganttOrientCb       = null;
         let _ganttForceLandscape = false;
@@ -5540,6 +5541,7 @@
                 _ganttFilterP1  = false;
                 _ganttFilterGRN = false;
                 _ganttFilterMTC = false;
+                _ganttHideMTC   = false;
             }
         }
 
@@ -5640,6 +5642,12 @@
             const nowSlot    = nowMinutes / 15;
             const nowLineLeft = FIN_COL_W + Math.round(nowSlot * SLOT_W);
 
+            // UTC time line
+            const utcLabel   = new Intl.DateTimeFormat('en-US', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone:'UTC' }).format(new Date());
+            const utcMinutes = (() => { const [h,m] = utcLabel.split(':').map(Number); return h*60+m; })();
+            const utcSlot    = utcMinutes / 15;
+            const utcLineLeft = FIN_COL_W + Math.round(utcSlot * SLOT_W);
+
             // Group FINs
             const AIRLINES = ['AC', 'RV', 'QK'];
             const groups = { AC:[], RV:[], QK:[], OTHER:[] };
@@ -5733,6 +5741,23 @@
             mtcFilterPill.onclick = () => { _ganttFilterMTC = !_ganttFilterMTC; _rerender(); };
             topBar.appendChild(mtcFilterPill);
 
+            // Hide-MTC pill — removes MTC blocks from the chart entirely (⊘ MTC)
+            const hideMtcActive = _ganttHideMTC;
+            const hideMtcPill = document.createElement('button');
+            hideMtcPill.style.cssText = [
+                'padding:2px 7px','border-radius:99px',
+                'border:2px solid #64748b',
+                'background:' + (hideMtcActive ? '#64748b' : 'transparent'),
+                'color:' + (hideMtcActive ? '#fff' : '#475569'),
+                'font-size:9px','font-weight:900','cursor:pointer',
+                'font-family:ui-monospace,monospace','letter-spacing:0.06em',
+                'display:flex','align-items:center','gap:3px',
+            ].join(';');
+            hideMtcPill.innerHTML = `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="5" r="4"/><line x1="2" y1="8" x2="8" y2="2"/></svg>MTC`;
+            hideMtcPill.title = 'Hide all MTC blocks';
+            hideMtcPill.onclick = () => { _ganttHideMTC = !_ganttHideMTC; _rerender(); };
+            topBar.appendChild(hideMtcPill);
+
             // Spacer
             const spacer = document.createElement('span');
             spacer.style.cssText = 'flex:1;';
@@ -5758,9 +5783,9 @@
             const nowBtn = document.createElement('button');
             nowBtn.style.cssText = [
                 'display:flex;align-items:center;gap:4px','padding:2px 8px',
-                'background:#f59e0b','color:#fff','border:none','border-radius:99px',
+                'background:#dc2626','color:#fff','border:none','border-radius:99px',
                 'font-size:9px','font-weight:900','cursor:pointer',
-                'font-family:ui-monospace,monospace','box-shadow:0 0 6px #f59e0b88','flex-shrink:0',
+                'font-family:ui-monospace,monospace','box-shadow:0 0 6px #dc262688','flex-shrink:0',
             ].join(';');
             nowBtn.innerHTML = `<span style="display:inline-block;width:2px;height:12px;background:#fff;border-radius:1px;"></span>NOW`;
             nowBtn.onclick = () => snapToNow();
@@ -5880,6 +5905,15 @@
                             (r.stn || '').trim().toUpperCase() === _ganttStnFilter));
                 }
 
+                // Hide-MTC filter — remove aircraft that are ALL-day MTC (no non-MTC rotations)
+                if (_ganttHideMTC) {
+                    visibleFins = visibleFins.filter(fin => {
+                        const rots = scheduleData[fin] || [];
+                        // Keep fin only if it has at least one non-MTC rotation
+                        return rots.some(r => !isMtcRotation(r));
+                    });
+                }
+
                 // MTC filter — dedicated MTC view: only aircraft with any MTC rotation
                 if (_ganttFilterMTC) {
                     visibleFins = visibleFins.filter(fin =>
@@ -5951,6 +5985,8 @@
                         const iStn     = (rot.iStn || '').trim().toUpperCase();
                         const oStn     = (rot.oStn || '').trim().toUpperCase();
                         const isMtc    = isMtcRotation(rot);
+                        // Skip MTC blocks entirely when hide-MTC is active
+                        if (_ganttHideMTC && isMtc) return;
                         const isSvc    = SVC_STATIONS.has(stn);
                         const idtLabel = fmtHM(rot.idt);
                         const odtLabel = fmtHM(rot.odt);
@@ -6187,7 +6223,7 @@
             tbl.appendChild(tbody);
             scrollWrap.appendChild(tbl);
 
-            // ── Now-line — absolute inside scrollWrap, scrolls with content
+            // ── Local time line (red)
             const nowLine = document.createElement('div');
             nowLine.id = 'gantt-now-line';
             nowLine.style.cssText = [
@@ -6195,19 +6231,38 @@
                 `left:${nowLineLeft}px`,
                 'top:0',
                 'width:2px',
-                'background:#f59e0b',
+                'background:#dc2626',
                 'z-index:20',
                 'pointer-events:none',
-                'box-shadow:0 0 8px #f59e0bcc',
+                'box-shadow:0 0 6px #dc2626aa',
             ].join(';');
-            nowLine.innerHTML = `<div style="position:sticky;top:2px;left:0;background:#f59e0b;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:3px;">${nowLabel}</div>`;
+            nowLine.innerHTML = `<div style="position:sticky;top:2px;left:0;background:#dc2626;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:3px;">${nowLabel}</div>`;
             scrollWrap.appendChild(nowLine);
+
+            // ── UTC time line (grey)
+            const utcLine = document.createElement('div');
+            utcLine.id = 'gantt-utc-line';
+            utcLine.style.cssText = [
+                'position:absolute',
+                `left:${utcLineLeft}px`,
+                'top:0',
+                'width:2px',
+                'background:#94a3b8',
+                'z-index:19',
+                'pointer-events:none',
+                'box-shadow:0 0 4px #94a3b855',
+            ].join(';');
+            utcLine.innerHTML = `<div style="position:sticky;top:14px;left:0;background:#64748b;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:3px;">UTC ${utcLabel}</div>`;
+            scrollWrap.appendChild(utcLine);
 
             // Size the now-line to full table height after layout, and
             // correct the scrollWrap height to exactly fill the remaining panel.
             requestAnimationFrame(() => {
                 const h = tbl.offsetHeight;
-                if (h > 0) nowLine.style.height = h + 'px';
+                if (h > 0) {
+                    nowLine.style.height = h + 'px';
+                    utcLine.style.height = h + 'px';
+                }
 
                 // Measure available height: panel container minus topBar
                 const listEl = document.getElementById('ref-editor-list');
