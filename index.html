@@ -152,7 +152,7 @@
         <nav class="flex bg-white -mx-4 -mb-3 mt-2 border-t border-slate-700">
             <button id="tab-form" onclick="switchTab('form')" class="tab-btn active flex-1 py-3 text-center font-bold transition-colors text-slate-900">NEW ENTRY</button>
             <button id="tab-records" onclick="switchTab('records')" class="tab-btn flex-1 py-3 text-center font-bold transition-colors text-slate-500">HISTORY (<span id="count">0</span>)</button>
-            <button id="tab-priority" onclick="switchTab('priority')" class="tab-btn flex-1 py-3 text-center font-bold transition-colors text-slate-500">PRIORITY</button>
+            <button id="tab-priority" onclick="handlePriorityTabClick()" class="tab-btn flex-1 py-3 text-center font-bold transition-colors text-slate-500">PRIORITY <svg id="priority-chart-icon" style="display:none;vertical-align:middle;margin-left:3px;" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="4" height="9"/><rect x="10" y="7" width="4" height="14"/><rect x="17" y="3" width="4" height="18"/></svg></button>
         </nav>
     </header>
 
@@ -366,6 +366,8 @@
         </section>
 
         <section id="section-priority" class="hidden space-y-3">
+            <!-- Inline GNTT view — shown when Priority tab is double-clicked -->
+            <div id="priority-gantt-wrap" style="display:none;"></div>
             <div id="priority-filter-bar" class="sticky z-20 bg-slate-50 -mx-4 px-4 py-2 border-b border-slate-200 flex flex-wrap gap-2 items-center shadow-sm">
                 <span class="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Filter</span>
                 <div class="flex gap-1 flex-wrap">
@@ -4258,6 +4260,89 @@
             if (header) _headerResizeObserver.observe(header);
         });
 
+        // ── Priority tab toggle: first click = priority list, second click = GNTT chart ──
+        let _priorityGanttMode = false;
+
+        function handlePriorityTabClick() {
+            const onPriority = !document.getElementById('section-priority').classList.contains('hidden');
+            const inGantt    = _priorityGanttMode;
+
+            if (!onPriority) {
+                // Coming from another tab — go to priority list
+                _priorityGanttMode = false;
+                _showPriorityList();
+                return;
+            }
+            // Already on priority — toggle gantt
+            _priorityGanttMode = !inGantt;
+            if (_priorityGanttMode) {
+                _showPriorityGantt();
+            } else {
+                _showPriorityList();
+            }
+        }
+
+        const _PRIORITY_CONTENT_IDS = ['priority-filter-bar', 'pf-imp-hint', 'new-aircraft-notice', 'priority-list'];
+
+        function _setPriorityContentVisible(visible) {
+            _PRIORITY_CONTENT_IDS.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = visible ? '' : 'none';
+            });
+        }
+
+        function _showPriorityList() {
+            // Hide the gantt wrap and restore priority content
+            const gw = document.getElementById('priority-gantt-wrap');
+            if (gw) { gw.style.display = 'none'; gw.innerHTML = ''; }
+            _setPriorityContentVisible(true);
+            // Hide chart icon
+            const icon = document.getElementById('priority-chart-icon');
+            if (icon) icon.style.display = 'none';
+            // Teardown gantt listeners
+            _ganttTeardown();
+            // Normal priority tab behaviour — re-render list
+            switchTab('priority');
+        }
+
+        function _showPriorityGantt() {
+            // Ensure priority section is visible without re-rendering the list
+            document.getElementById('section-form').classList.add('hidden');
+            document.getElementById('section-records').classList.add('hidden');
+            document.getElementById('section-priority').classList.remove('hidden');
+            document.getElementById('tab-form').classList.remove('active');
+            document.getElementById('tab-records').classList.remove('active');
+            document.getElementById('tab-priority').classList.add('active');
+
+            // Hide priority list content
+            _setPriorityContentVisible(false);
+
+            // Show chart icon
+            const icon = document.getElementById('priority-chart-icon');
+            if (icon) icon.style.display = 'inline';
+
+            // Auto-set station filter from agent's base station
+            const agentStn = (document.getElementById('station-field')?.value || '').toUpperCase();
+            const validStns = ['YUL', 'YYZ', 'YYC', 'YVR'];
+            if (agentStn && validStns.includes(agentStn)) {
+                _ganttStnFilter = agentStn;
+            }
+
+            // Show and size the gantt wrap to fill available screen below the nav
+            const gw = document.getElementById('priority-gantt-wrap');
+            if (!gw) return;
+            gw.innerHTML = '';
+            gw.style.cssText = 'display:block;height:calc(100vh - 112px);overflow:hidden;';
+
+            // Container for the gantt chart
+            const ganttContainer = document.createElement('div');
+            ganttContainer.style.cssText = 'height:100%;display:flex;flex-direction:column;';
+            gw.appendChild(ganttContainer);
+
+            // Render the GNTT chart into this container
+            renderGanttChart(ganttContainer);
+        }
+
         function switchTab(tab) {
             document.getElementById('section-form').classList.toggle('hidden', tab !== 'form');
             document.getElementById('section-records').classList.toggle('hidden', tab !== 'records');
@@ -4265,6 +4350,15 @@
             document.getElementById('tab-form').classList.toggle('active', tab === 'form');
             document.getElementById('tab-records').classList.toggle('active', tab === 'records');
             document.getElementById('tab-priority').classList.toggle('active', tab === 'priority');
+            // Reset gantt mode when leaving priority tab
+            if (tab !== 'priority') {
+                _priorityGanttMode = false;
+                const gw = document.getElementById('priority-gantt-wrap');
+                if (gw) gw.style.display = 'none';
+                const icon = document.getElementById('priority-chart-icon');
+                if (icon) icon.style.display = 'none';
+                _ganttTeardown();
+            }
             if (tab === 'records') updateUI();
             if (tab === 'priority') renderPriorityList();
         }
