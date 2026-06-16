@@ -6043,6 +6043,11 @@
                             const idtMin = toMinutes(rot.idt);
                             const odtMin = toMinutes(rot.odt);
                             if (idtMin === null || odtMin === null) return false;
+                            // If a station filter is active, only count ground time at that station
+                            if (_ganttStnFilter) {
+                                const rotStn = (rot.stn || '').trim().toUpperCase();
+                                if (rotStn !== _ganttStnFilter) return false;
+                            }
                             const startSlot = Math.floor(idtMin / 15);
                             let   endSlot   = Math.floor(odtMin / 15);
                             if (endSlot <= startSlot) endSlot = SLOTS;
@@ -6330,7 +6335,7 @@
                 'pointer-events:none',
                 'box-shadow:0 0 6px #dc2626aa',
             ].join(';');
-            nowLine.innerHTML = `<div style="position:sticky;top:2px;left:0;background:#dc2626;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:3px;">${nowLabel}</div>`;
+            nowLine.innerHTML = `<div style="position:sticky;top:-10px;left:0;background:#dc2626;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:8px;">${nowLabel}</div>`;
             scrollWrap.appendChild(nowLine);
 
             // ── UTC time line (grey)
@@ -6346,7 +6351,7 @@
                 'pointer-events:none',
                 'box-shadow:0 0 4px #94a3b855',
             ].join(';');
-            utcLine.innerHTML = `<div style="position:sticky;top:14px;left:0;background:#64748b;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:3px;">UTC ${utcLabel}</div>`;
+            utcLine.innerHTML = `<div style="position:sticky;top:10px;left:0;background:#94a3b8;color:#fff;font-size:8px;font-weight:900;padding:1px 4px;border-radius:3px;white-space:nowrap;line-height:1.5;box-shadow:0 1px 4px rgba(0,0,0,0.3);margin-left:3px;">UTC ${utcLabel}</div>`;
             scrollWrap.appendChild(utcLine);
 
             // Size the now-line to full table height after layout, and
@@ -6357,6 +6362,7 @@
                     nowLine.style.height = h + 'px';
                     utcLine.style.height = h + 'px';
                 }
+
 
                 // Measure available height: panel container minus topBar
                 const listEl = document.getElementById('ref-editor-list');
