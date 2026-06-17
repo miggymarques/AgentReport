@@ -5721,7 +5721,8 @@
                 try { screen.orientation.removeEventListener('change', _ganttOrientCb); } catch(e) {}
                 window.removeEventListener('resize', _ganttOrientCb);
                 _ganttOrientMQ = null; _ganttOrientCb = null;
-                _ganttForceLandscape = false;
+                // _ganttForceLandscape is intentionally NOT reset here so the
+                // WIDE/CMPCT toggle persists when the user switches tabs and comes back.
                 _ganttFilterP1  = false;
                 _ganttFilterGRN = false;
                 _ganttFilterMTC = false;
@@ -5764,13 +5765,16 @@
                 let _lastOrientation = isLandscape ? 'landscape' : 'portrait';
                 _ganttOrientCb = () => {
                     if (activeRefTab !== 'gantt') return;
+                    // If the user has manually toggled WIDE/CMPCT, don't let the
+                    // device-orientation auto-detect override their choice.
+                    if (_ganttForceLandscape) return;
                     // Check actual orientation from screen dimensions (most reliable on Android)
                     const nowLandscape = window.screen
                         ? window.screen.width > window.screen.height
                         : window.matchMedia('(orientation: landscape)').matches;
                     const nowOrient = nowLandscape ? 'landscape' : 'portrait';
                     // Only re-render if orientation actually changed (avoid resize noise)
-                    if (nowOrient === _lastOrientation && !_ganttForceLandscape) return;
+                    if (nowOrient === _lastOrientation) return;
                     _lastOrientation = nowOrient;
                     const c = document.getElementById('ref-editor-list');
                     if (!c) return;
@@ -5948,14 +5952,16 @@
             topBar.appendChild(spacer);
 
             // Rotate/compact toggle button
+            // isCompact: true = currently in compact/portrait mode, button should offer WIDE
+            // isCompact: false = currently in wide mode, button should offer CMPCT
             const rotBtn = document.createElement('button');
-            const isCompact = mobileLS;
-            rotBtn.title = isCompact ? 'Switch to standard layout' : 'Switch to compact layout';
+            const isCompact = !mobileLS;  // mobileLS=true means we're already in wide/compact mode
+            rotBtn.title = isCompact ? 'Switch to compact (wide) layout' : 'Switch to standard layout';
             rotBtn.style.cssText = [
                 'display:flex;align-items:center;justify-content:center;gap:4px',
                 'padding:2px 8px',
-                'background:' + (isCompact ? '#0f172a' : '#e2e8f0'),
-                'color:' + (isCompact ? '#fff' : '#475569'),
+                'background:' + (!isCompact ? '#0f172a' : '#e2e8f0'),
+                'color:' + (!isCompact ? '#fff' : '#475569'),
                 'border:none','border-radius:99px','font-size:9px','font-weight:900',
                 'cursor:pointer','font-family:ui-monospace,monospace','flex-shrink:0',
             ].join(';');
