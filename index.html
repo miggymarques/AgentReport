@@ -5746,11 +5746,17 @@
                              || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
             const isLandscape = window.matchMedia('(orientation: landscape)').matches
                              || (window.screen && window.screen.width > window.screen.height);
-            // mobileLS: compact layout when button forced OR auto-detected mobile landscape
+            // mobileLS: use rotated landscape layout when button forced OR auto-detected mobile landscape
             const mobileLS    = _ganttForceLandscape || (isMobile && isLandscape);
 
+            // When in landscape/wide mode on a mobile device, CSS-rotate the scroll wrapper
+            // 90 degrees so the wide table fills the portrait screen using the full height as width.
+            const useRotate   = mobileLS && isMobile;
+            // Rotated: viewport height becomes the effective width for table sizing
+            const effectiveW  = useRotate ? window.innerHeight : window.innerWidth;
+
             const SLOTS     = 96;
-            const SLOT_W    = mobileLS ? Math.max(7, Math.floor((window.innerWidth - 56) / 96)) : 14;
+            const SLOT_W    = mobileLS ? Math.max(7, Math.floor((effectiveW - 56) / 96)) : 14;
             const FIN_COL_W = mobileLS ? 52 : 72;
             const ROW_H     = mobileLS ? 18 : 22;
             const LABEL_FS  = mobileLS ? 7  : 8.5; // block label font-size
@@ -5988,14 +5994,39 @@
             //    but set a reasonable initial value using viewport height as fallback.
             const scrollWrap = document.createElement('div');
             scrollWrap.id = 'gantt-scroll-wrap';
-            scrollWrap.style.cssText = [
-                'overflow-x:auto',
-                'overflow-y:auto',
-                'position:relative',
-                'background:#ffffff',
-                // Will be corrected by rAF below; this prevents layout flash
-                'height:calc(100vh - 180px)',
-            ].join(';');
+
+            // When useRotate is active we CSS-rotate the entire scroll container 90 degrees
+            // counter-clockwise so the Gantt's wide horizontal layout fills the portrait
+            // screen. The trick: rotate around the top-left corner, then translate so it
+            // sits in the right place; width/height are swapped to match the rotated dimensions.
+            if (useRotate) {
+                const vw = window.innerWidth;
+                const vh = window.innerHeight - topBar.offsetHeight - 56; // approx avail height
+                scrollWrap.style.cssText = [
+                    'overflow-x:auto',
+                    'overflow-y:auto',
+                    'position:relative',
+                    'background:#ffffff',
+                    // Swap w/h: after rotation the element's visual width = screen height, height = screen width
+                    'width:' + vh + 'px',
+                    'height:' + vw + 'px',
+                    // Rotate -90deg around top-left, then shift down so it stays in view
+                    'transform-origin:top left',
+                    'transform:rotate(-90deg) translateX(-' + vh + 'px)',
+                    // The outer container needs to know how much vertical space this takes
+                    // (after rotation the element occupies vh px vertically)
+                    'flex-shrink:0',
+                ].join(';');
+            } else {
+                scrollWrap.style.cssText = [
+                    'overflow-x:auto',
+                    'overflow-y:auto',
+                    'position:relative',
+                    'background:#ffffff',
+                    // Will be corrected by rAF below; this prevents layout flash
+                    'height:calc(100vh - 180px)',
+                ].join(';');
+            }
 
             // ── Table
             const tblW = FIN_COL_W + SLOTS * SLOT_W;
@@ -6490,16 +6521,27 @@
                     utcLine.style.height = h + 'px';
                 }
 
-
-                // Measure available height: panel container minus topBar
-                const listEl = document.getElementById('ref-editor-list');
-                if (listEl && topBar) {
-                    const available = listEl.clientHeight - topBar.offsetHeight;
-                    if (available > 80) scrollWrap.style.height = available + 'px';
+                if (!useRotate) {
+                    // Measure available height: panel container minus topBar
+                    const listEl = document.getElementById('ref-editor-list');
+                    if (listEl && topBar) {
+                        const available = listEl.clientHeight - topBar.offsetHeight;
+                        if (available > 80) scrollWrap.style.height = available + 'px';
+                    }
                 }
             });
 
             wrap.appendChild(scrollWrap);
+
+            // When CSS-rotating the scrollWrap, the parent wrap must have a height
+            // that matches the rotated element's visual footprint so the page doesn't
+            // collapse. The rotated element visually takes up window.innerWidth px vertically.
+            if (useRotate) {
+                wrap.style.height = window.innerWidth + 'px';
+                wrap.style.minHeight = '';
+                wrap.style.overflow = 'hidden';
+            }
+
             container.appendChild(wrap);
 
             // ── Snap to now on initial render
