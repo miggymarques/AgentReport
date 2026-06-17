@@ -5971,7 +5971,7 @@
                 'border:none','border-radius:99px','font-size:9px','font-weight:900',
                 'cursor:pointer','font-family:ui-monospace,monospace','flex-shrink:0',
             ].join(';');
-            rotBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8H3M3 8l4-4M3 8l4 4M3 16h18M21 16l-4-4M21 16l-4 4"/></svg>${isCompact ? 'WIDE' : 'CMPCT'}`;
+            rotBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 15.57a10 10 0 1 1-.57-8.38"/></svg>${isCompact ? 'ROT' : 'ROT'}`;
             rotBtn.onclick = () => { _ganttForceLandscape = !_ganttForceLandscape; const c = document.getElementById('ref-editor-list'); if (c) { c.innerHTML = ''; renderGanttChart(c); } };
             topBar.appendChild(rotBtn);
 
@@ -6001,20 +6001,20 @@
             // sits in the right place; width/height are swapped to match the rotated dimensions.
             if (useRotate) {
                 const vw = window.innerWidth;
-                const vh = window.innerHeight - topBar.offsetHeight - 56; // approx avail height
+                const vh = window.innerHeight; // full screen height = full table width after rotation
                 scrollWrap.style.cssText = [
                     'overflow-x:auto',
                     'overflow-y:auto',
                     'position:relative',
                     'background:#ffffff',
-                    // Swap w/h: after rotation the element's visual width = screen height, height = screen width
+                    // Pre-rotation: width = vh (screen height), height = vw (screen width)
+                    // After +90deg rotation: visual width = vh (full screen), visual height = vw
                     'width:' + vh + 'px',
                     'height:' + vw + 'px',
-                    // Rotate -90deg around top-left, then shift down so it stays in view
+                    // Rotate +90deg (clockwise) = user tilts phone counter-clockwise to read
+                    // transform-origin top-left + translateY(-vw) places it flush top-left of parent
                     'transform-origin:top left',
-                    'transform:rotate(-90deg) translateX(-' + vh + 'px)',
-                    // The outer container needs to know how much vertical space this takes
-                    // (after rotation the element occupies vh px vertically)
+                    'transform:rotate(90deg) translateY(-' + vw + 'px)',
                     'flex-shrink:0',
                 ].join(';');
             } else {
