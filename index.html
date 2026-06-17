@@ -3772,14 +3772,14 @@
         let priorityCardTimer = null;  // setTimeout handle for 15-min revert
         const PRIORITY_CARD_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
-        function claimFin(fin) {
+        function claimFin(fin, auto = false) {
             if (!fin) return;
             const agentVal   = document.getElementById('agent-field')?.value || '';
             const agentName  = agentVal.split(',')[0].trim();
             const stationVal = document.getElementById('station-field')?.value || '';
-            finClaims[fin] = { agent: agentName, ts: Date.now(), sessionId: MY_SESSION_ID, station: stationVal };
-            // Broadcast to peers
-            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts, sessionId: MY_SESSION_ID, station: stationVal };
+            finClaims[fin] = { agent: agentName, ts: Date.now(), sessionId: MY_SESSION_ID, station: stationVal, auto: !!auto };
+            // Broadcast to peers — include auto flag so peers can render correctly
+            const msg = { type: 'CLAIM_FIN', fin, agent: agentName, ts: finClaims[fin].ts, sessionId: MY_SESSION_ID, station: stationVal, auto: !!auto };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
         }
 
@@ -4096,7 +4096,7 @@
             if (prevSuggested && prevSuggested !== suggestedFin) {
                 releaseFin(prevSuggested);
             }
-            claimFin(suggestedFin);
+            claimFin(suggestedFin, true);  // auto=true — system suggestion, not manual claim
             updateFinPlaceholder._lastSuggested = suggestedFin;
         }
 
@@ -6398,9 +6398,12 @@
                             // ── Claim / suggest state for this ground block ──────────────
                             // Only applied to future/current blocks (elapsed slots stay neutral).
                             const blockIsPast     = (blk.startSlot + run) <= nowSlot;
-                            const suggestedFin    = updateFinPlaceholder._lastSuggested || null;
-                            const blockIsSystem   = !blockIsPast && !dimmed && fin === suggestedFin;
-                            const blockIsPeer     = !blockIsPast && !dimmed && !blockIsSystem && isFinClaimed(fin);
+                            const claim           = !blockIsPast && !dimmed ? finClaims[fin] : null;
+                            const claimValid      = claim && (Date.now() - claim.ts <= CLAIM_TTL_MS);
+                            // System-suggested: auto flag set (local or peer's system suggestion)
+                            // Peer-claimed: a peer manually claimed it (auto=false, different session)
+                            const blockIsSystem   = claimValid && claim.auto === true;
+                            const blockIsPeer     = claimValid && !claim.auto && isFinClaimed(fin);
                             const blockCellClass  = blockIsPeer   ? 'gantt-block-peer-claimed'
                                                   : blockIsSystem ? 'gantt-block-system-suggest'
                                                   : '';
@@ -8419,7 +8422,7 @@
                     if (finClaimReleases[fin] && c.ts <= finClaimReleases[fin]) return;
                     const existing = finClaims[fin];
                     if (!existing || c.ts > existing.ts) {
-                        finClaims[fin] = { agent: c.agent, ts: c.ts, sessionId: c.sessionId || null, station: c.station || '' };
+                        finClaims[fin] = { agent: c.agent, ts: c.ts, sessionId: c.sessionId || null, station: c.station || '', auto: !!c.auto };
                         claimChanged = true;
                     }
                 });
@@ -8868,7 +8871,7 @@
                     // Only store if newer than existing claim
                     const existing = finClaims[msg.fin];
                     if (!existing || msg.ts > existing.ts) {
-                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts, sessionId: msg.sessionId || null, station: msg.station || '' };
+                        finClaims[msg.fin] = { agent: msg.agent, ts: msg.ts, sessionId: msg.sessionId || null, station: msg.station || '', auto: !!msg.auto };
                         // If this FIN is our current suggestion, re-suggest
                         if (updateFinPlaceholder._lastSuggested === msg.fin) {
                             updateFinPlaceholder._lastSuggested = null;
