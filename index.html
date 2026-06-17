@@ -907,6 +907,7 @@
         let sharedDbClearTs = 0; // tombstone: entries with id <= this were cleared; persisted & synced
         let sharedDbBlock = {};  // tombstone map — deleted record ids; peers must never re-insert
         let finTable = {};  // persistent FIN → { type, body, assets, lastSeen, lastFlight }
+        let finTableBlock = {}; // tombstone map — { fin → deletedAt ts }; peers must never re-insert
         let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
         let aircraftRefBlock = {};
         let assetRef = { ...INITIAL_ASSETS };
@@ -966,9 +967,10 @@
         const ASSET_HISTORY_KEY            = 'yul_asset_history_v1';
         const ASSET_HISTORY_BLOCK_KEY      = 'yul_asset_history_block_v1'; // tombstone map: { entryId → deletedAt ts }
         const ASSET_HISTORY_ASSET_BLOCK_KEY = 'yul_asset_history_asset_block_v1'; // per-assetId tombstone: { assetId → deletedAt ts }
-        const SYNC_TABLE_KEY   = 'yul_fin_table_v1';
-        const ASSET_INDEX_KEY  = 'yul_asset_index_v1';
-        const NRO_INDEX_KEY    = 'yul_nro_index_v1';
+        const SYNC_TABLE_KEY       = 'yul_fin_table_v1';
+        const FIN_TABLE_BLOCK_KEY  = 'yul_fin_table_block_v1'; // tombstone map: { fin → deletedAt ts }
+        const ASSET_INDEX_KEY      = 'yul_asset_index_v1';
+        const NRO_INDEX_KEY        = 'yul_nro_index_v1';
         const SCHEDULE_KEY         = 'yul_schedule_v1';
         const SCHEDULE_HISTORY_KEY = 'yul_schedule_history_v1'; // archived rotations for 72-h perf window
         const P_PLUS_KEY           = 'yul_p_plus_flags_v1'; // P+ escalated priority flags
@@ -1303,6 +1305,56 @@
             storageSet(SYNC_TABLE_KEY, JSON.stringify(finTable));
         }
 
+        function saveFinTableBlock() {
+            storageSet(FIN_TABLE_BLOCK_KEY, JSON.stringify(finTableBlock));
+        }
+
+        // ─── Delete a FIN from the Sync Table ────────────────────────────────
+        // Removes the entry from finTable, clears all assetIndex / nroIndex
+        // records pointing at this FIN, and broadcasts tombstones to peers so
+        // the row never re-syncs back. Admin-gated.
+        function deleteFinTableEntry(fin) {
+            if (!requireAdmin('delete sync table entry')) return;
+            if (!confirm(`Remove all history for ${fin}? This will also remove it on all connected peers and cannot be undone.`)) return;
+
+            const deletedAtTs = Date.now();
+
+            // 1. Tombstone the FIN
+            finTableBlock[fin] = deletedAtTs;
+            delete finTable[fin];
+            saveFinTable();
+            saveFinTableBlock();
+
+            // 2. Clear all assetIndex records that point to this FIN
+            let assetIndexChanged = false;
+            Object.keys(assetIndex).forEach(assetId => {
+                if (assetIndex[assetId].fin === fin) {
+                    delete assetIndex[assetId];
+                    assetIndexChanged = true;
+                }
+            });
+            if (assetIndexChanged) saveAssetIndex();
+
+            // 3. Clear all nroIndex records for this FIN
+            let nroChanged = false;
+            Object.keys(nroIndex).forEach(assetId => {
+                if ((nroIndex[assetId].lastFin || '') === fin) {
+                    delete nroIndex[assetId];
+                    nroChanged = true;
+                }
+            });
+            if (nroChanged) saveNroIndex();
+
+            // 4. Broadcast the tombstone to all peers immediately
+            const msg = { type: 'FIN_TABLE_BLOCK', finTableBlock: { [fin]: deletedAtTs } };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+
+            // 5. Refresh UI
+            renderRefList();
+            renderPriorityList();
+            showToast(`${fin} removed from Sync Table`);
+        }
+
         function saveAssetIndex() {
             storageSet(ASSET_INDEX_KEY, JSON.stringify(assetIndex));
         }
@@ -1435,6 +1487,8 @@
         function updateFinTable(entry) {
             if (!entry || entry.FIN === 'INV') return;
             const fin = entry.FIN;
+            // Refuse to re-populate a deliberately deleted FIN row
+            if (finTableBlock[fin]) return;
             const entryTs = entry.id || 0;
 
             // Ensure finTable row exists
@@ -3151,7 +3205,7 @@
 
                 const div = document.createElement('div');
                 div.className = "grid gap-1 px-2 py-2 text-[10px] border-b border-slate-100 hover:bg-slate-50 items-start";
-                div.style.gridTemplateColumns = "3rem 3.5rem 1fr 5rem 3rem 1fr";
+                div.style.gridTemplateColumns = isCurrentUserAdmin() ? "3rem 3.5rem 1fr 5rem 3rem 1fr 1.5rem" : "3rem 3.5rem 1fr 5rem 3rem 1fr";
                 div.innerHTML = `
                     <span class="font-mono font-black text-blue-600">${finDisplay}</span>
                     <span class="font-bold text-slate-700">
@@ -3161,7 +3215,10 @@
                     <span class="font-mono text-[9px] leading-relaxed">${onboardHtml}${removedHtml}</span>
                     <span class="text-[9px] leading-relaxed">${agentDisplay}</span>
                     <span class="text-slate-700 text-[9px]">${entry.lastSeen || '—'}${entry.lastTime ? `<span class="block text-slate-600">${entry.lastTime}</span>` : ''}</span>
-                    <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>`;
+                    <span class="font-mono text-[9px] leading-relaxed">${nroCell}</span>
+                    ${isCurrentUserAdmin() ? `<button onclick="deleteFinTableEntry('${fin}')" class="text-slate-300 hover:text-red-500 transition-colors pt-0.5" title="Remove ${fin} from Sync Table">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>` : ''}`;
                 container.appendChild(div);
             });
 
@@ -4141,6 +4198,15 @@
                 const savedFinTable = storageGet(SYNC_TABLE_KEY);
                 if (savedFinTable) finTable = JSON.parse(savedFinTable);
             } catch(e) { console.warn("Could not load FIN table:", e); }
+            try {
+                const savedFinTableBlock = storageGet(FIN_TABLE_BLOCK_KEY);
+                if (savedFinTableBlock) finTableBlock = JSON.parse(savedFinTableBlock);
+                // Purge any finTable entries that are tombstoned
+                if (Object.keys(finTableBlock).length) {
+                    Object.keys(finTableBlock).forEach(fin => { delete finTable[fin]; });
+                    saveFinTable();
+                }
+            } catch(e) { console.warn("Could not load FIN table block:", e); }
             try {
                 const savedAssetIndex = storageGet(ASSET_INDEX_KEY);
                 if (savedAssetIndex) assetIndex = JSON.parse(savedAssetIndex);
@@ -7662,7 +7728,8 @@
                 aircraftRef: acRef, aircraftRefBlock,
                 assetRef: asRef, assetRefTs: asRefTs, assetRefBlock,
                 assetHistory: ahEntries, assetHistoryBlock, assetHistoryAssetBlock,
-                pPlusFlags, pPlusFlagTs
+                pPlusFlags, pPlusFlagTs,
+                finTableBlock
             };
         }
 
@@ -8061,6 +8128,24 @@
 
         function applyIncomingSyncMsg(msg, fromPeer) {
             let anyChanged = false;
+
+            // ── Apply finTableBlock tombstones BEFORE merging finTable ────────
+            if (msg.finTableBlock && typeof msg.finTableBlock === 'object') {
+                Object.entries(msg.finTableBlock).forEach(([fin, ts]) => {
+                    if (!finTableBlock[fin] || ts > finTableBlock[fin]) {
+                        finTableBlock[fin] = ts;
+                        if (finTable[fin]) { delete finTable[fin]; anyChanged = true; }
+                        Object.keys(assetIndex).forEach(assetId => {
+                            if (assetIndex[assetId].fin === fin) { delete assetIndex[assetId]; anyChanged = true; }
+                        });
+                        Object.keys(nroIndex).forEach(assetId => {
+                            if ((nroIndex[assetId].lastFin || '') === fin) { delete nroIndex[assetId]; anyChanged = true; }
+                        });
+                    }
+                });
+                saveFinTableBlock();
+                if (anyChanged) { saveFinTable(); saveAssetIndex(); saveNroIndex(); }
+            }
 
             // Merge finTable
             if (msg.finTable && typeof msg.finTable === 'object') {
@@ -8683,6 +8768,41 @@
             if (msg.type === 'SHARED_DB_BLOCK') {
                 const changed = applyIncomingSyncMsg(msg, fromPeer);
                 if (changed && activeRefTab === 'alldata') renderSharedTable();
+                return;
+            }
+
+            if (msg.type === 'FIN_TABLE_BLOCK') {
+                if (msg.finTableBlock && typeof msg.finTableBlock === 'object') {
+                    let changed = false;
+                    Object.entries(msg.finTableBlock).forEach(([fin, ts]) => {
+                        if (!finTableBlock[fin] || ts > finTableBlock[fin]) {
+                            finTableBlock[fin] = ts;
+                            // Evict from local finTable
+                            if (finTable[fin]) { delete finTable[fin]; changed = true; }
+                            // Evict assetIndex entries on this FIN
+                            Object.keys(assetIndex).forEach(assetId => {
+                                if (assetIndex[assetId].fin === fin) { delete assetIndex[assetId]; changed = true; }
+                            });
+                            // Evict nroIndex entries for this FIN
+                            Object.keys(nroIndex).forEach(assetId => {
+                                if ((nroIndex[assetId].lastFin || '') === fin) { delete nroIndex[assetId]; changed = true; }
+                            });
+                        }
+                    });
+                    if (changed) {
+                        saveFinTable();
+                        saveFinTableBlock();
+                        saveAssetIndex();
+                        saveNroIndex();
+                        renderRefList();
+                        renderPriorityList();
+                        // Relay to other peers
+                        Object.keys(p2pConnections).forEach(pid => {
+                            if (pid === fromPeer) return;
+                            conn_p2p_send(pid, msg);
+                        });
+                    }
+                }
                 return;
             }
 
