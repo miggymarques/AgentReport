@@ -102,14 +102,14 @@
         }
         .gantt-block-peer-claimed {
             animation: gantt-flash-peer 1.1s ease-in-out infinite;
-            border: 2px solid #3b82f6 !important;
+            border: 2px solid #3b82f6;
         }
         .gantt-block-peer-claimed .gantt-wash {
             animation: gantt-wash-peer 1.1s ease-in-out infinite;
         }
         .gantt-block-system-suggest {
             animation: gantt-flash-system 1.1s ease-in-out infinite;
-            border: 2px dashed #f59e0b !important;
+            border: 2px dashed #f59e0b;
         }
         .gantt-block-system-suggest .gantt-wash {
             animation: gantt-wash-system 1.1s ease-in-out infinite;
@@ -1880,11 +1880,12 @@
                 const el = document.getElementById('assethistory-count-label');
                 if (el) el.textContent = assetHistory.length + ' records';
             }
-            // Schedule + perf tabs: let ref-editor-list own horizontal scroll so the
-            // scrollbar is always visible at the bottom of the modal.
+            // Schedule + gantt use inner scroll wrappers, so ref-editor-list hides overflow-x.
+            // Perf owns its own horizontal scroll directly on ref-editor-list so the scrollbar
+            // always appears at the visible bottom of the panel (not at the end of the data).
             const _list = document.getElementById('ref-editor-list');
             if (tab === 'schedule' || tab === 'perf' || tab === 'gantt') {
-                _list.style.overflowX = 'hidden';
+                _list.style.overflowX = (tab === 'perf') ? 'auto' : 'hidden';
                 _list.style.overflowY = 'auto';
                 _list.style.padding   = '0';
                 _list.style.scrollbarWidth = 'thin';
@@ -5444,9 +5445,11 @@
                 container.appendChild(filterStrip);
             }
 
-            const wrap = document.createElement('div');
-            wrap.id = 'perf-body-scroll';
-            wrap.style.cssText = 'overflow-x:auto;overflow-y:auto;position:relative;background:#fff;';
+            // ref-editor-list already owns vertical scroll (flex-1 + overflow-y:auto).
+            // Adding overflow-x:auto here makes it the single scroll container — the
+            // horizontal scrollbar appears at the visible bottom of the panel, not at
+            // the end of the table data. The sticky thead then works within this one container.
+            container.style.overflowX = 'auto';
 
             const tbl = document.createElement('table');
             tbl.style.cssText = 'width:100%;border-collapse:collapse;min-width:max-content;font-size:10px;';
@@ -5496,21 +5499,7 @@
             });
 
             tbl.appendChild(tbody);
-            wrap.appendChild(tbl);
-            container.appendChild(wrap);
-
-            // Size wrap to fill remaining panel height so horizontal scrollbar
-            // always sits at the visible bottom, not at the end of the data.
-            requestAnimationFrame(() => {
-                const listEl = document.getElementById('ref-editor-list');
-                if (listEl) {
-                    // Account for sticky header and any filter strip above wrap
-                    const wrapTop = wrap.getBoundingClientRect().top;
-                    const listBottom = listEl.getBoundingClientRect().bottom;
-                    const available = listBottom - wrapTop;
-                    if (available > 80) wrap.style.height = available + 'px';
-                }
-            });
+            container.appendChild(tbl);
         }
 
         // Called by filter chips — sets filter and re-renders the perf tab
@@ -6420,12 +6409,20 @@
 
                             // Render each 15-min slot as its own <td>.
                             // title on ALL cells so hover works anywhere across the block.
+                            // IMPORTANT: when a claim/suggest class is active, inline border props
+                            // must be omitted — inline styles beat class-based animation keyframes,
+                            // which is why the flash was silently not working.
                             for (let si = 0; si < run; si++) {
                                 const isFirst = si === 0;
-                                const slotBorder = isFirst
-                                    ? 'border-left:1px solid rgba(255,255,255,0.15);'
-                                    : 'border-left:1px solid rgba(255,255,255,0.55);';
-                                const cellStyle = `position:relative;${bgStyle}height:${ROW_H}px;${slotBorder}border-top:1px solid rgba(255,255,255,0.5);border-bottom:1px solid rgba(255,255,255,0.5);overflow:visible;`;
+                                let cellStyle;
+                                if (blockCellClass) {
+                                    cellStyle = `position:relative;${bgStyle}height:${ROW_H}px;overflow:visible;box-sizing:border-box;`;
+                                } else {
+                                    const slotBorder = isFirst
+                                        ? 'border-left:1px solid rgba(255,255,255,0.15);'
+                                        : 'border-left:1px solid rgba(255,255,255,0.55);';
+                                    cellStyle = `position:relative;${bgStyle}height:${ROW_H}px;${slotBorder}border-top:1px solid rgba(255,255,255,0.5);border-bottom:1px solid rgba(255,255,255,0.5);overflow:visible;`;
+                                }
                                 rowHtml += `<td class="${blockCellClass}" style="${cellStyle}" title="${titleTxt}">${isFirst ? washHtml + labelHtml : ''}</td>`;
                             }
                             s += run;
