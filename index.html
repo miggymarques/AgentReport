@@ -5968,9 +5968,14 @@
                 'color:' + (!isCompact ? '#fff' : '#475569'),
                 'border:none','border-radius:99px','font-size:9px','font-weight:900',
                 'cursor:pointer','font-family:ui-monospace,monospace','flex-shrink:0',
+                'touch-action:manipulation', // prevent Android eating tap as scroll
+                '-webkit-tap-highlight-color:rgba(0,0,0,0.2)',
+                'min-width:44px','min-height:44px', // larger tap target on mobile
             ].join(';');
             rotBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 15.57a10 10 0 1 1-.57-8.38"/></svg>${isCompact ? 'ROT' : 'ROT'}`;
-            rotBtn.onclick = () => { _ganttForceLandscape = !_ganttForceLandscape; const c = document.getElementById('ref-editor-list'); if (c) { c.innerHTML = ''; renderGanttChart(c); } };
+            const _doRotToggle = (e) => { e.preventDefault(); e.stopPropagation(); _ganttForceLandscape = !_ganttForceLandscape; const c = document.getElementById('ref-editor-list'); if (c) { c.innerHTML = ''; renderGanttChart(c); } };
+            rotBtn.addEventListener('touchend', _doRotToggle, { passive: false });
+            rotBtn.onclick = _doRotToggle;
             topBar.appendChild(rotBtn);
 
             // NOW button — no time label, just NOW
