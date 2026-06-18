@@ -5740,18 +5740,16 @@
             // ── Orientation-aware layout constants ──────────────────────────────
             // _ganttForceLandscape (button) works on ANY device — it's the reliable path.
             // Auto-detection is best-effort; Android WebView often doesn't fire events.
-            const isMobile    = window.innerWidth <= 1024
-                             || navigator.maxTouchPoints > 0
-                             || ('ontouchstart' in window)
-                             || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            const isMobile    = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                             || (navigator.maxTouchPoints > 0 && window.innerWidth <= 768);
             const isLandscape = window.matchMedia('(orientation: landscape)').matches
                              || (window.screen && window.screen.width > window.screen.height);
-            // mobileLS: use rotated landscape layout when button forced OR auto-detected mobile landscape
+            // mobileLS: compact sizing when button forced OR auto-detected mobile landscape
             const mobileLS    = _ganttForceLandscape || (isMobile && isLandscape);
 
-            // When in landscape/wide mode on a mobile device, CSS-rotate the scroll wrapper
-            // 90 degrees so the wide table fills the portrait screen using the full height as width.
-            const useRotate   = mobileLS && isMobile;
+            // useRotate: ONLY when the button is explicitly pressed — never auto-trigger on desktop.
+            // This is what physically rotates the table 90deg on Android portrait screens.
+            const useRotate   = _ganttForceLandscape;
             // Rotated: viewport height becomes the effective width for table sizing
             const effectiveW  = useRotate ? window.innerHeight : window.innerWidth;
 
