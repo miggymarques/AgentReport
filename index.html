@@ -5787,8 +5787,10 @@
             const effectiveW  = useRotate ? window.innerHeight : window.innerWidth;
 
             const SLOTS     = 96;
-            const SLOT_W    = mobileLS ? Math.max(7, Math.floor((effectiveW - 56) / 96)) : 14;
             const FIN_COL_W = mobileLS ? 52 : 72;
+            // Always size slots to fill the full effective width so the chart spans edge-to-edge.
+            // On desktop enforce a minimum of 14px so the table isn't too cramped.
+            const SLOT_W    = Math.max(mobileLS ? 7 : 14, Math.floor((effectiveW - FIN_COL_W) / SLOTS));
             const ROW_H     = mobileLS ? 18 : 22;
             const LABEL_FS  = mobileLS ? 7  : 8.5; // block label font-size
             const HDR_FS_KEY= mobileLS ? 8  : 10;  // key-hour font size in header
