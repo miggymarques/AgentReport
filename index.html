@@ -4467,7 +4467,7 @@
 
             // Gantt container fills the rest of the overlay
             const ganttContainer = document.createElement('div');
-            ganttContainer.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:visible;min-height:0;';
+            ganttContainer.style.cssText = 'flex:1;display:flex;flex-direction:column;width:100%;min-height:0;overflow:hidden;';
             pgOverlay.appendChild(ganttContainer);
 
             // Mark activeRefTab so orientation listeners work correctly
@@ -5883,9 +5883,11 @@
 
             // ── Root wrapper — flex column, fills available height
             const wrap = document.createElement('div');
-            // Remove any padding on the container so the chart bleeds edge-to-edge
+            // Remove any padding/margin on the container so the chart bleeds edge-to-edge
             container.style.padding = '0';
-            container.style.overflow = 'visible';
+            container.style.margin = '0';
+            container.style.width = '100%';
+            container.style.boxSizing = 'border-box';
             wrap.style.cssText = 'display:flex;flex-direction:column;font-size:10px;font-family:ui-monospace,monospace;white-space:nowrap;min-height:100%;background:#ffffff;';
 
             // ── Top bar: station filter pills + P1/GRN pills + rotate + NOW
@@ -6068,6 +6070,7 @@
                     'overflow-y:auto',
                     'position:relative',
                     'background:#ffffff',
+                    'width:100%',
                     // Will be corrected by rAF below; this prevents layout flash
                     'height:calc(100vh - 180px)',
                 ].join(';');
