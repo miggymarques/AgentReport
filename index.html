@@ -5813,10 +5813,8 @@
                     // Only re-render if orientation actually changed (avoid resize noise)
                     if (nowOrient === _lastOrientation) return;
                     _lastOrientation = nowOrient;
-                    const c = document.getElementById('ref-editor-list');
-                    if (!c) return;
-                    c.innerHTML = '';
-                    renderGanttChart(c);
+                    container.innerHTML = '';
+                    renderGanttChart(container);
                 };
                 // All three strategies — whichever fires on the current device wins
                 try { _ganttOrientMQ.addEventListener('change', _ganttOrientCb); } catch(e) {
@@ -5885,6 +5883,9 @@
 
             // ── Root wrapper — flex column, fills available height
             const wrap = document.createElement('div');
+            // Remove any padding on the container so the chart bleeds edge-to-edge
+            container.style.padding = '0';
+            container.style.overflow = 'visible';
             wrap.style.cssText = 'display:flex;flex-direction:column;font-size:10px;font-family:ui-monospace,monospace;white-space:nowrap;min-height:100%;background:#ffffff;';
 
             // ── Top bar: station filter pills + P1/GRN pills + rotate + NOW
@@ -6010,8 +6011,10 @@
             const _doRotToggle = (e) => {
                 e.preventDefault();
                 _ganttForceLandscape = !_ganttForceLandscape;
-                const c = document.getElementById('ref-editor-list');
-                if (c) { c.innerHTML = ''; renderGanttChart(c); }
+                // Re-render into whichever container is currently showing the gantt:
+                // priority overlay ganttContainer, or the ref-editor-list in the modal.
+                container.innerHTML = '';
+                renderGanttChart(container);
             };
             rotBtn.addEventListener('touchend', _doRotToggle, { passive: false });
             rotBtn.onclick = (e) => { if (e.detail !== 0) _doRotToggle(e); }; // skip synthetic click after touchend
