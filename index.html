@@ -5741,15 +5741,15 @@
             // _ganttForceLandscape (button) works on ANY device — it's the reliable path.
             // Auto-detection is best-effort; Android WebView often doesn't fire events.
             const isMobile    = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-                             || (navigator.maxTouchPoints > 0 && window.innerWidth <= 768);
+                             || (('ontouchstart' in window) && window.innerWidth <= 768);
             const isLandscape = window.matchMedia('(orientation: landscape)').matches
                              || (window.screen && window.screen.width > window.screen.height);
             // mobileLS: compact sizing when button forced OR auto-detected mobile landscape
             const mobileLS    = _ganttForceLandscape || (isMobile && isLandscape);
 
-            // useRotate: ONLY when the button is explicitly pressed — never auto-trigger on desktop.
-            // This is what physically rotates the table 90deg on Android portrait screens.
-            const useRotate   = _ganttForceLandscape;
+            // useRotate: CSS-rotate the table when button is pressed (works on any device).
+            // mobileLS covers the button-press case so useRotate = mobileLS is correct.
+            const useRotate   = mobileLS;
             // Rotated: viewport height becomes the effective width for table sizing
             const effectiveW  = useRotate ? window.innerHeight : window.innerWidth;
 
@@ -5961,21 +5961,27 @@
             const rotBtn = document.createElement('button');
             const isCompact = !mobileLS;  // mobileLS=true means we're already in wide/compact mode
             rotBtn.title = isCompact ? 'Switch to compact (wide) layout' : 'Switch to standard layout';
+            // Active (lit) when rotation is ON (_ganttForceLandscape), not based on mobileLS
+            const rotActive = _ganttForceLandscape;
             rotBtn.style.cssText = [
                 'display:flex;align-items:center;justify-content:center;gap:4px',
                 'padding:2px 8px',
-                'background:' + (!isCompact ? '#0f172a' : '#e2e8f0'),
-                'color:' + (!isCompact ? '#fff' : '#475569'),
+                'background:' + (rotActive ? '#0f172a' : '#e2e8f0'),
+                'color:' + (rotActive ? '#fff' : '#475569'),
                 'border:none','border-radius:99px','font-size:9px','font-weight:900',
                 'cursor:pointer','font-family:ui-monospace,monospace','flex-shrink:0',
-                'touch-action:manipulation', // prevent Android eating tap as scroll
-                '-webkit-tap-highlight-color:rgba(0,0,0,0.2)',
-                'min-width:44px','min-height:44px', // larger tap target on mobile
+                'touch-action:manipulation',
+                '-webkit-tap-highlight-color:transparent',
             ].join(';');
-            rotBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 15.57a10 10 0 1 1-.57-8.38"/></svg>${isCompact ? 'ROT' : 'ROT'}`;
-            const _doRotToggle = (e) => { e.preventDefault(); e.stopPropagation(); _ganttForceLandscape = !_ganttForceLandscape; const c = document.getElementById('ref-editor-list'); if (c) { c.innerHTML = ''; renderGanttChart(c); } };
+            rotBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M21.34 15.57a10 10 0 1 1-.57-8.38"/></svg>ROT`;
+            const _doRotToggle = (e) => {
+                e.preventDefault();
+                _ganttForceLandscape = !_ganttForceLandscape;
+                const c = document.getElementById('ref-editor-list');
+                if (c) { c.innerHTML = ''; renderGanttChart(c); }
+            };
             rotBtn.addEventListener('touchend', _doRotToggle, { passive: false });
-            rotBtn.onclick = _doRotToggle;
+            rotBtn.onclick = (e) => { if (e.detail !== 0) _doRotToggle(e); }; // skip synthetic click after touchend
             topBar.appendChild(rotBtn);
 
             // NOW button — no time label, just NOW
