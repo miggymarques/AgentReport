@@ -4394,6 +4394,9 @@
         }
 
         function _showPriorityList() {
+            // Remove the full-screen overlay if present
+            const pgOverlay = document.getElementById('priority-gantt-overlay');
+            if (pgOverlay) { pgOverlay.remove(); }
             // Hide the gantt wrap and restore priority content
             const gw = document.getElementById('priority-gantt-wrap');
             if (gw) { gw.style.display = 'none'; gw.innerHTML = ''; }
@@ -4430,17 +4433,45 @@
                 _ganttStnFilter = agentStn;
             }
 
-            // Show and size the gantt wrap to fill available screen below the nav
-            const gw = document.getElementById('priority-gantt-wrap');
-            if (!gw) return;
-            gw.innerHTML = '';
-            gw.style.cssText = 'display:block;height:calc(100vh - 112px);overflow:hidden;';
+            // Render into a fixed full-screen overlay (same environment as the ref editor modal)
+            // so the gantt has true 100vw/100vh to work with — the main container is max-w-2xl
+            // which would clip the rotation transform.
+            let pgOverlay = document.getElementById('priority-gantt-overlay');
+            if (!pgOverlay) {
+                pgOverlay = document.createElement('div');
+                pgOverlay.id = 'priority-gantt-overlay';
+                document.body.appendChild(pgOverlay);
+            }
+            pgOverlay.innerHTML = '';
+            pgOverlay.style.cssText = [
+                'position:fixed',
+                'inset:0',
+                'z-index:90',          // below ref-editor modal (z-100) but above everything else
+                'background:#fff',
+                'display:flex',
+                'flex-direction:column',
+                'overflow:visible',
+            ].join(';');
 
-            // Container for the gantt chart
+            // Thin top bar showing we're in priority gantt mode with a close/back button
+            const pgTopNav = document.createElement('div');
+            pgTopNav.style.cssText = 'display:flex;align-items:center;padding:6px 12px;background:#0f172a;color:#fff;font-size:10px;font-weight:900;font-family:ui-monospace,monospace;flex-shrink:0;gap:8px;';
+            pgTopNav.innerHTML = '<span style="flex:1;letter-spacing:0.1em;">PRIORITY GNTT</span>';
+            const pgCloseBtn = document.createElement('button');
+            pgCloseBtn.textContent = '✕ CLOSE';
+            pgCloseBtn.style.cssText = 'background:#334155;color:#fff;border:none;border-radius:99px;font-size:9px;font-weight:900;padding:2px 10px;cursor:pointer;font-family:ui-monospace,monospace;touch-action:manipulation;';
+            pgCloseBtn.addEventListener('touchend', (e) => { e.preventDefault(); _showPriorityList(); }, { passive: false });
+            pgCloseBtn.onclick = (e) => { if (e.detail !== 0) _showPriorityList(); };
+            pgTopNav.appendChild(pgCloseBtn);
+            pgOverlay.appendChild(pgTopNav);
+
+            // Gantt container fills the rest of the overlay
             const ganttContainer = document.createElement('div');
-            ganttContainer.style.cssText = 'height:100%;display:flex;flex-direction:column;';
-            gw.appendChild(ganttContainer);
+            ganttContainer.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:visible;min-height:0;';
+            pgOverlay.appendChild(ganttContainer);
 
+            // Mark activeRefTab so orientation listeners work correctly
+            activeRefTab = 'gantt';
             // Render the GNTT chart into this container
             renderGanttChart(ganttContainer);
         }
@@ -4455,6 +4486,8 @@
             // Reset gantt mode when leaving priority tab
             if (tab !== 'priority') {
                 _priorityGanttMode = false;
+                const pgOverlay = document.getElementById('priority-gantt-overlay');
+                if (pgOverlay) pgOverlay.remove();
                 const gw = document.getElementById('priority-gantt-wrap');
                 if (gw) gw.style.display = 'none';
                 const icon = document.getElementById('priority-chart-icon');
