@@ -1390,6 +1390,30 @@
             showToast(`${fin} removed from Sync Table`);
         }
 
+        // ─── Restore a previously-deleted FIN ────────────────────────────────
+        // Clears the tombstone for `fin` so future saves/imports can populate
+        // its Sync Table row again, and broadcasts the un-block to all peers
+        // so it doesn't get silently re-tombstoned on next sync. Admin-gated.
+        function restoreFinTableEntry(fin) {
+            if (!requireAdmin('restore sync table entry')) return;
+            if (!finTableBlock[fin]) { showToast(`${fin} is not blocked`); return; }
+            if (!confirm(`Restore ${fin}? It will be allowed to re-populate the Sync Table again on all connected peers.`)) return;
+
+            // 1. Remove the tombstone
+            delete finTableBlock[fin];
+            saveFinTableBlock();
+
+            // 2. Broadcast the un-block to all peers immediately
+            const unblockTs = Date.now();
+            const msg = { type: 'FIN_TABLE_UNBLOCK', fin, ts: unblockTs };
+            Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
+
+            // 3. Refresh UI
+            renderRefList();
+            renderPriorityList();
+            showToast(`${fin} restored — it can be saved/imported again`);
+        }
+
         function saveAssetIndex() {
             storageSet(ASSET_INDEX_KEY, JSON.stringify(assetIndex));
         }
@@ -3265,6 +3289,34 @@
             footer.innerHTML = `${Object.keys(finTable).length} aircraft · ${db.filter(r => r.FIN !== 'INV').length} service entries · ${Object.keys(assetIndex).length} assets tracked` +
                 (nroTotal > 0 ? ` · <span class="text-amber-500">${nroTotal} NRO</span>` : '');
             container.appendChild(footer);
+
+            // ── Blocked FINs (admin only) ──────────────────────────────────
+            // Any FIN with a tombstone in finTableBlock is silently refused
+            // re-population by updateFinTable. Surface those here with a
+            // one-tap restore so an accidental delete doesn't need a console fix.
+            if (isCurrentUserAdmin()) {
+                const blockedFins = Object.keys(finTableBlock).sort();
+                if (blockedFins.length > 0) {
+                    const blockedWrap = document.createElement('div');
+                    blockedWrap.className = "mt-4 pt-3 border-t border-slate-200";
+                    const blockedHdr = document.createElement('div');
+                    blockedHdr.className = "text-[9px] text-red-400 font-black uppercase tracking-widest mb-1.5";
+                    blockedHdr.textContent = `Blocked FINs (${blockedFins.length}) — won't re-populate until restored`;
+                    blockedWrap.appendChild(blockedHdr);
+                    blockedFins.forEach(fin => {
+                        const row = document.createElement('div');
+                        row.className = "flex items-center justify-between gap-2 py-1 text-[10px]";
+                        const blockedDate = finTableBlock[fin] ? new Date(finTableBlock[fin]).toLocaleDateString() : '';
+                        row.innerHTML = `
+                            <span class="font-mono font-black text-red-500">${fin}<span class="text-slate-300 font-bold ml-1.5">blocked ${blockedDate}</span></span>
+                            <button onclick="restoreFinTableEntry('${fin}')" class="text-[9px] font-black uppercase tracking-widest text-blue-500 hover:text-blue-700 px-2 py-1 rounded bg-blue-50 hover:bg-blue-100 transition-colors shrink-0">
+                                Restore
+                            </button>`;
+                        blockedWrap.appendChild(row);
+                    });
+                    container.appendChild(blockedWrap);
+                }
+            }
         }
 
         function exportSyncTableCSV() {
@@ -8955,6 +9007,21 @@
                             conn_p2p_send(pid, msg);
                         });
                     }
+                }
+                return;
+            }
+
+            if (msg.type === 'FIN_TABLE_UNBLOCK') {
+                if (msg.fin && finTableBlock[msg.fin]) {
+                    delete finTableBlock[msg.fin];
+                    saveFinTableBlock();
+                    renderRefList();
+                    renderPriorityList();
+                    // Relay to other peers
+                    Object.keys(p2pConnections).forEach(pid => {
+                        if (pid === fromPeer) return;
+                        conn_p2p_send(pid, msg);
+                    });
                 }
                 return;
             }
