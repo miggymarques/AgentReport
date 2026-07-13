@@ -1158,7 +1158,24 @@
             const saved = storageGet(AGENT_REF_KEY);
             const savedList = saved ? JSON.parse(saved) : null;
             const alreadyHasAgents = savedList && savedList.length > 0;
-            if (alreadyHasAgents) return; // list exists and has entries — don't touch it
+
+            // The superuser account must always exist, no matter what — restore it
+            // even if it's missing from an otherwise-populated list or tombstoned.
+            const superDef = DEFAULT_AGENTS.find(a => a.displayName === SUPERUSER_NAME);
+            const ensureSuperuser = () => {
+                if (superDef && !agentRef.find(a => a.value === superDef.value)) {
+                    delete agentBlock[superDef.value];
+                    agentRef.push({ ...superDef, isAdmin: true, _ts: Date.now() });
+                    agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
+                    saveAgentBlock();
+                    saveAgentRef();
+                }
+            };
+
+            if (alreadyHasAgents) {
+                ensureSuperuser();
+                return; // list exists and has entries — don't touch anything else
+            }
 
             // Either fresh install or empty list — seed all defaults not tombstoned
             DEFAULT_AGENTS.forEach(def => {
@@ -1168,6 +1185,7 @@
             });
             agentRef.sort((a, b) => a.station.localeCompare(b.station) || a.displayName.localeCompare(b.displayName));
             saveAgentRef();
+            ensureSuperuser();
         }
 
         function saveAgentRef() {
@@ -1256,6 +1274,10 @@
 
         function removeAgent(idx) {
             if (!requireAdmin('remove agent')) return;
+            if (agentRef[idx] && agentRef[idx].displayName === SUPERUSER_NAME) {
+                showToast('The superuser account cannot be deleted');
+                return;
+            }
             const removed = agentRef.splice(idx, 1)[0];
             // If this is a default agent, add to blocklist so initAgentRef won't re-add it
             // Tombstone this agent with the current timestamp
@@ -8934,13 +8956,14 @@
                     let agentChanged = false;
                     msg.agentRef.forEach(incoming => {
                         const tombstoneTs = agentBlock[incoming.value] || 0;
-                        if (tombstoneTs > (incoming._ts || 0)) return; // tombstone must be strictly newer // tombstone wins
+                        if (incoming.displayName !== SUPERUSER_NAME && tombstoneTs > (incoming._ts || 0)) return; // tombstone must be strictly newer // tombstone wins
                         const existing = agentRef.find(a => a.value === incoming.value);
                         if (!existing) { agentRef.push(incoming); agentChanged = true; }
                         else if ((incoming._ts || 0) > (existing._ts || 0)) { Object.assign(existing, incoming); agentChanged = true; }
                     });
                     const before = agentRef.length;
                     agentRef = agentRef.filter(a => {
+                        if (a.displayName === SUPERUSER_NAME) return true; // superuser can never be filtered out
                         const tombTs = agentBlock[a.value] || 0;
                         return tombTs <= (a._ts || 0); // keep if tombstone is same age or older
                     });
