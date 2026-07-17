@@ -6682,10 +6682,16 @@
                 }
 
                 if (!useRotate) {
-                    // Measure available height: panel container minus topBar
-                    const listEl = document.getElementById('ref-editor-list');
-                    if (listEl && topBar) {
-                        const available = listEl.clientHeight - topBar.offsetHeight;
+                    // Measure available height: panel container minus topBar.
+                    // Uses the generic `container` passed into renderGanttChart rather than
+                    // a hardcoded '#ref-editor-list' lookup — that id only exists in the
+                    // back-end modal's DOM. In the priority tab, `container` is the
+                    // purpose-built `ganttContainer` inside the fixed overlay; looking it
+                    // up by a modal-only id silently returned null there, so this correction
+                    // never ran and the chart was left at its rough placeholder height
+                    // (calc(100vh - 180px)) — the source of the bottom gap on that tab.
+                    if (topBar) {
+                        const available = container.clientHeight - topBar.offsetHeight;
                         if (available > 80) scrollWrap.style.height = available + 'px';
                     }
                 } else {
