@@ -1872,6 +1872,14 @@
                 innerPanel.style.width    = '100vw';
                 innerPanel.style.maxHeight= '100vh';
                 innerPanel.style.height   = '100vh';
+                // Prefer the dynamic viewport unit where the browser supports it: it
+                // tracks the REAL visible screen height as mobile address/toolbar bars
+                // show or hide, whereas 100vh is fixed to the largest possible viewport
+                // and can overshoot the actually-visible area (causing bottom clipping).
+                // Assigning an unsupported value is a no-op in CSSOM, so the 100vh above
+                // remains in effect as the fallback on older browsers.
+                innerPanel.style.maxHeight= '100dvh';
+                innerPanel.style.height   = '100dvh';
                 innerPanel.style.borderRadius = '0';
             } else {
                 modal.style.padding       = '';
@@ -5844,6 +5852,20 @@
                 return;
             }
 
+            // ── True usable drawing area ─────────────────────────────────────────
+            // Measure the actual panel container rather than window.innerWidth/innerHeight.
+            // container.clientWidth/clientHeight are computed by the browser directly from
+            // the live layout, so they automatically: (a) exclude any scrollbar currently
+            // shown on this element — a scrollbar you'd otherwise have to subtract from
+            // window dimensions by hand, and which clientWidth/clientHeight keep correct
+            // even if it appears/disappears later; (b) reflect whatever sits above this
+            // container for THIS entry point — the PRIORITY GNTT top nav on the front-end
+            // priority tab vs. the modal's own tab strip on the back-end GNTT tab — without
+            // hard-coding either one. Fall back to window dimensions only if the container
+            // hasn't been laid out yet (defensive; shouldn't normally happen).
+            const areaW = Math.round(container.clientWidth  || container.getBoundingClientRect().width  || window.innerWidth);
+            const areaH = Math.round(container.clientHeight || container.getBoundingClientRect().height || window.innerHeight);
+
             // ── Orientation-aware layout constants ──────────────────────────────
             // _ganttForceLandscape (button) works on ANY device — it's the reliable path.
             // Auto-detection is best-effort; Android WebView often doesn't fire events.
@@ -5857,8 +5879,10 @@
             // useRotate: CSS-rotate the table when button is pressed (works on any device).
             // mobileLS covers the button-press case so useRotate = mobileLS is correct.
             const useRotate   = mobileLS;
-            // Rotated: viewport height becomes the effective width for table sizing
-            const effectiveW  = useRotate ? window.innerHeight : window.innerWidth;
+            // Rotated: the panel's real available height becomes the effective width for
+            // table sizing (was window.innerHeight — wrong whenever the panel isn't the
+            // full window, e.g. inside the modal below its tab strip).
+            const effectiveW  = useRotate ? areaH : areaW;
 
             const SLOTS     = 96;
             const FIN_COL_W = mobileLS ? 52 : 72;
@@ -5879,8 +5903,15 @@
                 _ganttOrientCb = () => {
                     if (activeRefTab !== 'gantt') return;
                     // If the user has manually toggled WIDE/CMPCT, don't let the
-                    // device-orientation auto-detect override their choice.
-                    if (_ganttForceLandscape) return;
+                    // device-orientation auto-detect flip modes on them — but the usable
+                    // area can still change size without an orientation flip (mobile browser
+                    // address bar hiding/showing, on-screen keyboard, window resize), so
+                    // still re-render to keep the rotated chart fitted to the real area.
+                    if (_ganttForceLandscape) {
+                        container.innerHTML = '';
+                        renderGanttChart(container);
+                        return;
+                    }
                     // Check actual orientation from screen dimensions (most reliable on Android)
                     const nowLandscape = window.screen
                         ? window.screen.width > window.screen.height
@@ -6123,8 +6154,13 @@
             // screen. The trick: rotate around the top-left corner, then translate so it
             // sits in the right place; width/height are swapped to match the rotated dimensions.
             if (useRotate) {
-                const vw = window.innerWidth;
-                const vh = window.innerHeight; // full screen height = full table width after rotation
+                const vw = areaW;
+                const vh = areaH; // full panel height = full table width after rotation
+                // NOTE: these are provisional — the panel's real height still needs the
+                // topBar (created below, not yet in the DOM) subtracted out, or the
+                // rotated content overshoots the bottom of the panel and gets clipped.
+                // The rAF correction pass further down re-measures and fixes this exactly
+                // once topBar has a real rendered height.
                 scrollWrap.style.cssText = [
                     'overflow-x:auto',
                     'overflow-y:auto',
@@ -6652,16 +6688,40 @@
                         const available = listEl.clientHeight - topBar.offsetHeight;
                         if (available > 80) scrollWrap.style.height = available + 'px';
                     }
+                } else {
+                    // Correction pass: topBar now has a real rendered height, and the
+                    // container itself is re-measured here in case its own scrollbar
+                    // appeared or disappeared once content was added (clientWidth/
+                    // clientHeight always reflect the current visible area net of any
+                    // scrollbar). Recompute the rotated box from these true values so
+                    // (topBar height) + (rotated visual height) exactly equals the
+                    // panel's real height — no clipped bottom edge, no leftover gap.
+                    const trueH  = Math.round(container.clientHeight || areaH);
+                    const trueW  = Math.round(container.clientWidth  || areaW);
+                    const barH   = topBar.offsetHeight || 0;
+                    const availH = Math.max(80, trueH - barH); // vertical room left after topBar
+                    scrollWrap.style.width      = availH + 'px';
+                    scrollWrap.style.height     = trueW + 'px';
+                    scrollWrap.style.transform  = 'rotate(90deg) translateY(-' + trueW + 'px)';
+                    wrap.style.height           = trueH + 'px';
+                    // Re-run the now-line sizing against the corrected table height too.
+                    const h2 = tbl.offsetHeight;
+                    if (h2 > 0) {
+                        nowLine.style.height = h2 + 'px';
+                        utcLine.style.height = h2 + 'px';
+                    }
                 }
             });
 
             wrap.appendChild(scrollWrap);
 
-            // When CSS-rotating the scrollWrap, the parent wrap must have a height
-            // that matches the rotated element's visual footprint so the page doesn't
-            // collapse. The rotated element visually takes up window.innerWidth px vertically.
+            // When CSS-rotating the scrollWrap, the parent wrap must have a height that
+            // matches the rotated element's visual footprint so the page doesn't collapse.
+            // This is a provisional value (full panel height, topBar not yet subtracted);
+            // the rAF correction pass above sets the final, exact value once topBar is
+            // actually in the DOM and measurable.
             if (useRotate) {
-                wrap.style.height = window.innerWidth + 'px';
+                wrap.style.height = areaH + 'px';
                 wrap.style.minHeight = '';
                 wrap.style.overflow = 'hidden';
             }
