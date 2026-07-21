@@ -943,6 +943,7 @@
         let sharedDbBlock = {};  // tombstone map — deleted record ids; peers must never re-insert
         let finTable = {};  // persistent FIN → { type, body, assets, lastSeen, lastFlight }
         let finTableBlock = {}; // tombstone map — { fin → deletedAt ts }; peers must never re-insert
+        let finTableUnblock = {}; // anti-tombstone map — { fin → restoredAt ts }; a block ts <= this is stale and ignored
         let aircraftRef = { ...DEFAULT_AIRCRAFT_REF };
         let aircraftRefBlock = {};
         let assetRef = { ...INITIAL_ASSETS };
@@ -1004,6 +1005,7 @@
         const ASSET_HISTORY_ASSET_BLOCK_KEY = 'yul_asset_history_asset_block_v1'; // per-assetId tombstone: { assetId → deletedAt ts }
         const SYNC_TABLE_KEY       = 'yul_fin_table_v1';
         const FIN_TABLE_BLOCK_KEY  = 'yul_fin_table_block_v1'; // tombstone map: { fin → deletedAt ts }
+        const FIN_TABLE_UNBLOCK_KEY = 'yul_fin_table_unblock_v1'; // anti-tombstone map: { fin → restoredAt ts }
         const ASSET_INDEX_KEY      = 'yul_asset_index_v1';
         const NRO_INDEX_KEY        = 'yul_nro_index_v1';
         const SCHEDULE_KEY         = 'yul_schedule_v1';
@@ -1366,6 +1368,21 @@
             storageSet(FIN_TABLE_BLOCK_KEY, JSON.stringify(finTableBlock));
         }
 
+        function saveFinTableUnblock() {
+            storageSet(FIN_TABLE_UNBLOCK_KEY, JSON.stringify(finTableUnblock));
+        }
+
+        // A FIN is only truly blocked if its tombstone ts is newer than any
+        // restore (unblock) ts we know about. This is what lets a restore
+        // survive a stale peer replaying its old tombstone from before the
+        // restore happened.
+        function isFinBlocked(fin) {
+            const blockTs = finTableBlock[fin];
+            if (!blockTs) return false;
+            const unblockTs = finTableUnblock[fin] || 0;
+            return blockTs > unblockTs;
+        }
+
         // ─── Delete a FIN from the Sync Table ────────────────────────────────
         // Removes the entry from finTable, clears all assetIndex / nroIndex
         // records pointing at this FIN, and broadcasts tombstones to peers so
@@ -1418,15 +1435,19 @@
         // so it doesn't get silently re-tombstoned on next sync. Admin-gated.
         function restoreFinTableEntry(fin) {
             if (!requireAdmin('restore sync table entry')) return;
-            if (!finTableBlock[fin]) { showToast(`${fin} is not blocked`); return; }
+            if (!isFinBlocked(fin)) { showToast(`${fin} is not blocked`); return; }
             if (!confirm(`Restore ${fin}? It will be allowed to re-populate the Sync Table again on all connected peers.`)) return;
 
-            // 1. Remove the tombstone
+            // 1. Record an anti-tombstone (persisted + synced) so a stale peer
+            //    replaying its old FIN_TABLE_BLOCK tombstone later can't silently
+            //    re-block this FIN — the merge logic checks this ts against it.
+            const unblockTs = Date.now();
+            finTableUnblock[fin] = unblockTs;
+            saveFinTableUnblock();
             delete finTableBlock[fin];
             saveFinTableBlock();
 
             // 2. Broadcast the un-block to all peers immediately
-            const unblockTs = Date.now();
             const msg = { type: 'FIN_TABLE_UNBLOCK', fin, ts: unblockTs };
             Object.keys(p2pConnections).forEach(pid => conn_p2p_send(pid, msg));
 
@@ -1569,7 +1590,7 @@
             if (!entry || entry.FIN === 'INV') return;
             const fin = entry.FIN;
             // Refuse to re-populate a deliberately deleted FIN row
-            if (finTableBlock[fin]) return;
+            if (isFinBlocked(fin)) return;
             const entryTs = entry.id || 0;
 
             // Ensure finTable row exists
@@ -3325,7 +3346,7 @@
             // re-population by updateFinTable. Surface those here with a
             // one-tap restore so an accidental delete doesn't need a console fix.
             if (isCurrentUserAdmin()) {
-                const blockedFins = Object.keys(finTableBlock).sort();
+                const blockedFins = Object.keys(finTableBlock).filter(isFinBlocked).sort();
                 if (blockedFins.length > 0) {
                     const blockedWrap = document.createElement('div');
                     blockedWrap.className = "mt-4 pt-3 border-t border-slate-200";
@@ -4319,12 +4340,17 @@
             try {
                 const savedFinTableBlock = storageGet(FIN_TABLE_BLOCK_KEY);
                 if (savedFinTableBlock) finTableBlock = JSON.parse(savedFinTableBlock);
-                // Purge any finTable entries that are tombstoned
-                if (Object.keys(finTableBlock).length) {
-                    Object.keys(finTableBlock).forEach(fin => { delete finTable[fin]; });
-                    saveFinTable();
-                }
             } catch(e) { console.warn("Could not load FIN table block:", e); }
+            try {
+                const savedFinTableUnblock = storageGet(FIN_TABLE_UNBLOCK_KEY);
+                if (savedFinTableUnblock) finTableUnblock = JSON.parse(savedFinTableUnblock);
+            } catch(e) { console.warn("Could not load FIN table unblock:", e); }
+            // Purge any finTable entries that are still actually tombstoned
+            // (i.e. not superseded by a later restore)
+            if (Object.keys(finTableBlock).some(isFinBlocked)) {
+                Object.keys(finTableBlock).forEach(fin => { if (isFinBlocked(fin)) delete finTable[fin]; });
+                saveFinTable();
+            }
             try {
                 const savedAssetIndex = storageGet(ASSET_INDEX_KEY);
                 if (savedAssetIndex) assetIndex = JSON.parse(savedAssetIndex);
@@ -8022,7 +8048,7 @@
                 assetRef: asRef, assetRefTs: asRefTs, assetRefBlock,
                 assetHistory: ahEntries, assetHistoryBlock, assetHistoryAssetBlock,
                 pPlusFlags, pPlusFlagTs,
-                finTableBlock
+                finTableBlock, finTableUnblock
             };
         }
 
@@ -8422,9 +8448,22 @@
         function applyIncomingSyncMsg(msg, fromPeer) {
             let anyChanged = false;
 
+            // ── Apply finTableUnblock anti-tombstones FIRST, so a stale peer's
+            // ── old FIN_TABLE_BLOCK entry (below) can't re-block a FIN that was
+            // ── already restored more recently elsewhere ────────────────────
+            if (msg.finTableUnblock && typeof msg.finTableUnblock === 'object') {
+                Object.entries(msg.finTableUnblock).forEach(([fin, ts]) => {
+                    if (!finTableUnblock[fin] || ts > finTableUnblock[fin]) {
+                        finTableUnblock[fin] = ts;
+                    }
+                });
+                saveFinTableUnblock();
+            }
+
             // ── Apply finTableBlock tombstones BEFORE merging finTable ────────
             if (msg.finTableBlock && typeof msg.finTableBlock === 'object') {
                 Object.entries(msg.finTableBlock).forEach(([fin, ts]) => {
+                    if (ts <= (finTableUnblock[fin] || 0)) return; // superseded by a later restore
                     if (!finTableBlock[fin] || ts > finTableBlock[fin]) {
                         finTableBlock[fin] = ts;
                         if (finTable[fin]) { delete finTable[fin]; anyChanged = true; }
@@ -9069,6 +9108,7 @@
                 if (msg.finTableBlock && typeof msg.finTableBlock === 'object') {
                     let changed = false;
                     Object.entries(msg.finTableBlock).forEach(([fin, ts]) => {
+                        if (ts <= (finTableUnblock[fin] || 0)) return; // superseded by a later restore
                         if (!finTableBlock[fin] || ts > finTableBlock[fin]) {
                             finTableBlock[fin] = ts;
                             // Evict from local finTable
@@ -9101,9 +9141,10 @@
             }
 
             if (msg.type === 'FIN_TABLE_UNBLOCK') {
-                if (msg.fin && finTableBlock[msg.fin]) {
-                    delete finTableBlock[msg.fin];
-                    saveFinTableBlock();
+                if (msg.fin && msg.ts && (!finTableUnblock[msg.fin] || msg.ts > finTableUnblock[msg.fin])) {
+                    finTableUnblock[msg.fin] = msg.ts;
+                    saveFinTableUnblock();
+                    if (finTableBlock[msg.fin]) { delete finTableBlock[msg.fin]; saveFinTableBlock(); }
                     renderRefList();
                     renderPriorityList();
                     // Relay to other peers
